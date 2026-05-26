@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: planning
+    environment:
+      POSTGRES_DB: plannings
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: supersecret
+    ports:
+      - "5432:5432"
+    volumes:
+      - planning-data:/var/lib/postgresql/data
+
+volumes:
+  planning-data:

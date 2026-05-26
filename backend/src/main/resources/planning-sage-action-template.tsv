@@ -1,0 +1,95 @@
+﻿stage	name	topicRisk	title	responsible	criticality	expectedEvidence	evidence	proofDocument
+FEASIBILITY_VALIDATION	ECR_inf_modele-1	Imput client	Donnée client : DT /Presentation/drawing	Chef de projet	3-faible	DT		
+FEASIBILITY_VALIDATION	ECR_inf_modele-2	Validation imput	Analyse Donnée client :	Chef de projet	1-critique	Check list de drawing/Mail/OIL		Check list validation Analyse Drawing.xlsx
+FEASIBILITY_VALIDATION	ECR_inf_modele-3	disponilité composant	Besoins/Offre de prix composant	Chef de projet	3-faible	document		
+FEASIBILITY_VALIDATION	ECR_inf_modele-4	disponilité composant	Besoin MP diffusé et suivi de commandes MP	Chef de projet	3-faible	document		
+FEASIBILITY_VALIDATION	ECR_inf_modele-5	analyse capacité	Rump up & mesure de capacité	Chef de projet	3-faible	dossier		Rump up J4U V112025 Wk38.xlsx
+FEASIBILITY_VALIDATION	ECR_inf_modele-6	Amélioration contunie	LLS projet	Qualité	3-faible	LLS projet		SAGE-FOR-QUA-135 LLS Projet.xlsx
+FEASIBILITY_VALIDATION	ECR_inf_modele-7	disponilité moyens	Besoins/Offre de prix outillages	Chef de projet	3-faible	document		
+FEASIBILITY_VALIDATION	ECR_inf_modele-8	disponilité moyens	Besoins/Offre de prix machine	Chef de projet	3-faible	document		CR03_detail temps.xlsx;Plan de charge Effectif et machines CR03_wk29.xlsx;SAGE-FOR-ENG-11 ECR-ECO SAGE COVERS.xlsx
+PROJECT_MANAGEMENT	ECR_inf2_modele-1	Traitement de la demande	ECR form/ Demande de modification	Chef de projet	3-faible	ECR		SAGE-FOR-ENG-11 ECR-ECO SAGE COVERS.xlsx
+PROJECT_MANAGEMENT	ECR_inf2_modele-2	communication	compte rendu de réunion	Chef de projet	3-faible	Compte de rendu		SAGE-FOR-LEA-01 PV de Réunion.xlsx
+PROJECT_MANAGEMENT	ECR_inf2_modele-3	planification	Planning de modification et de réalisation	Chef de projet	1-critique	Planning		SAGE-FOR-ENG-32 Dossier de modification.xlsx
+PROJECT_MANAGEMENT	ECR_inf2_modele-4	communication	Avis de modification ( était devient )/ Preuve de formation/Aide Visuelle	Chef de projet	3-faible	Avis de modif		SAGE-FOR-ENG-10 AIDE VISUELLE_KIMBERLITE.xlsx;SAGE-FOR-ENG-11 ECR-ECO SAGE COVERS.xlsx
+PROJECT_MANAGEMENT	ECR_inf2_modele-5	communication	Fiche de présence en formation de la modification : tous les concernés : production , coupe , couture , delibera	Chef de projet	3-faible	fiche de présence		SAGE-FOR-DRH-04 Fiche de Formation  Sensibilisation--Prise de connaissance.xls
+PROJECT_MANAGEMENT	ECR_inf2_modele-6	validation produit	Validation sur obsolète en cas de besoins	CAO/Chef de projet	3-faible	placement		SAGE-FOR-ENG-20 Rapport de réalisation VPs-EI-PRS.xlsx;SAGE-FOR-ENG-27 Check-list de réalisation d'échantillons-VP-EI-PRS-Protos-Essais industriels.xlsx;SAGE-FOR-ENG-28 RAPPORT DE VALIDATION DIGIT CONVERTI PAR RAPPORT AUX DIGITS CLIENT.xlsx;SAGE-FOR-ENG-29 Fiche de validation placement standard.xlsx
+PROJECT_MANAGEMENT	ECR_inf2_modele-7	Analyse de risque	Amdec process	Chef de projet	3-faible	Tableau d'indice		AMDEC Usine Wk29-2025_projet Skoda.pdf;FLOW CHART USINE (002).xlsx
+PROJECT_MANAGEMENT	ECR_inf2_modele-8	disponibilité composant	Besoin MP diffusé et suivi de commandes MP	Chef de projet	3-faible	document		suivi matière J4U_14012025.xlsx
+PROJECT_MANAGEMENT	ECR_inf2_modele-9	Mode dégradé	Demande de dérogation	Qualité	3-faible	N°dérogation/Base		SAGE-FOR-QUA-123 Richiesta Deroga .doc;SAGE-FOR-QUA-15 Derogation Request.xlsm;SAGE-FOR-QUA-15 Formulaire de dérogation.xlsm;SAGE-FOR-QUA-16 Base de suivi des dérogations.xls
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-1		compte rendu de réunion	Chef de projet	3-faible	Compte de rendu		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-2		Avis de modification ( était devient )/ Preuve de formation/Aide Visuelle	Chef de projet	3-faible	Avis de modif		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-3		Fiche de présence en formation de la modification : tous les concernés : production , coupe , couture , delibera	Chef de projet	3-faible	fiche de présence		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-4		Identification des premières cartons modifiés	Qualité projet	3-faible	Papier A4		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-5		Check list de validation digit par rapport plan client ( tv controller/plan papier )	CAO	3-faible	check list		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-6		Consommation de tissu par kit par coiffe par digit	CAO	3-faible	tableau par mail		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-7		Rapport de faisabilité PDFA	Chef de projet	3-faible	rapport		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-8		Validation de programme Airbag/Proces spécifiques ( campo)	Process	3-faible	fiche de validation		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-9		Paramètres process coupe	Process	3-faible	fiche de paramètres		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-10		Amdec process	Chef de projet	3-faible	Tableau d'indice		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-11		Plan de surveillance à jour	Qualité projet	3-faible	Tableau d'indice		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-12		Ok 1er piéce à jour remplie lors de modification ( coupe et couture )	Qualité projet	3-faible	document		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-13		Mise à jour de plan de coiffe	CAO	3-faible	document		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-14		creation LISTE DE VIGNETTE	Chef de projet	3-faible	Liste de ref		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-15		Fiche de validation Etiquettes de traçabilité	Qualite de projet	3-faible	fiche de validation		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-16		Mise à jour Gallia : Indice/DR	Chef de projet	3-faible	imprimer gallia		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-17		Rapport de contrôle coupe et PDCA pour les cas NOK	Qualité	3-faible	rapport		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-18		Rapport de contrôle couture et PDCA pour les cas NOK	Qualité	3-faible	rapport		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-19		Rapport de contrôle réception composants et PDCA pour les cas NOK	Qualité	3-faible	rapport		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-20		Check list de validation prototype	Qualité projet	3-faible	rapport		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-21		Capabilité & R&R	Process	3-faible	document		
+PRODUCT_DEVELOPMENT	ECR_inf3_modele-22		Demande de dérogation	Qualité	3-faible	N°dérogation/Base		
+PROCESS_DEVELOPMENT	ECR_inf4_modele-1	communication	compte rendu de réunion	Chef de projet	3-faible	Compte de rendu		
+PROCESS_DEVELOPMENT	ECR_inf4_modele-2	ommunication	Fiche de présence en formation de la modification : tous les concernés : production , coupe , couture , delibera	Chef de projet	3-faible	fiche de présence		
+PROCESS_DEVELOPMENT	ECR_inf4_modele-3		Check list de validation digit par rapport plan client ( tv controller/plan papier )	CAO	3-faible	check list		
+PROCESS_DEVELOPMENT	ECR_inf4_modele-4		Validation de programme Airbag/Proces spécifiques ( campo)	Process	3-faible	fiche de validation		
+PROCESS_DEVELOPMENT	ECR_inf4_modele-5		Amdec process	Chef de projet	3-faible	Tableau d'indice	#file:///Z:\00%20AMDEC%20USINE#	
+PROCESS_DEVELOPMENT	ECR_inf4_modele-6		Plan de surveillance à jour	Qualité projet	3-faible	Tableau d'indice		
+PROCESS_DEVELOPMENT	ECR_inf4_modele-7		PPAP PSW Validé	Qualité	3-faible	psw		
+PROCESS_DEVELOPMENT	ECR_inf4_modele-8		Demande de dérogation	Qualité	3-faible	N°dérogation/Base		
+CUSTOMER_VALIDATION	ECR_inf5_modele-1		Rapport de contrôle couture et PDCA pour les cas NOK	Qualité	3-faible	rapport		
+CUSTOMER_VALIDATION	ECR_inf5_modele-2		Rapport de contrôle réception composants et PDCA pour les cas NOK	Qualité	3-faible	rapport		
+CUSTOMER_VALIDATION	ECR_inf5_modele-3		Check list de validation prototype	Qualité projet	3-faible	rapport		
+CUSTOMER_VALIDATION	ECR_inf5_modele-4		Capabilité & R&R	Process	3-faible	document		
+CUSTOMER_VALIDATION	ECR_inf5_modele-5		PPAP PSW Validé	Qualité	3-faible	psw		
+CUSTOMER_VALIDATION	ECR_inf5_modele-6		Demande de dérogation	Qualité	3-faible	N°dérogation/Base		
+CUSTOMER_VALIDATION	ECR_inf5_modele-7		Document de retrait /Diffusion document	Chef de projet	3-faible	document		
+CUSTOMER_VALIDATION	ECR_inf5_modele-8		compte rendu de réunion	Chef de projet	3-faible	Compte de rendu		
+CUSTOMER_VALIDATION	ECR_inf5_modele-9		Fiche de présence en formation de la modification : tous les concernés : production , coupe , couture , delibera	Chef de projet	3-faible	fiche de présence		
+CUSTOMER_VALIDATION	ECR_inf5_modele-10		Identification des premières cartons modifiés	Qualité projet	3-faible	Papier A4		
+CUSTOMER_VALIDATION	ECR_inf5_modele-11		Check list de validation digit par rapport plan client ( tv controller/plan papier )	CAO	3-faible	check list		
+CUSTOMER_VALIDATION	ECR_inf5_modele-12		plan de réalisation VP/Proto/PRS	Chef de projet	3-faible	rapport		
+CUSTOMER_VALIDATION	ECR_inf5_modele-13		Validation de programme Airbag/Proces spécifiques ( campo)	Process	3-faible	fiche de validation		
+CUSTOMER_VALIDATION	ECR_inf5_modele-14		Paramètres process coupe	Process	3-faible	fiche de paramètres		
+CUSTOMER_VALIDATION	ECR_inf5_modele-15		Paramètres process Couture à jour	Process	3-faible	fiche de paramètres		
+CUSTOMER_VALIDATION	ECR_inf5_modele-16		Amdec process	Chef de projet	3-faible	Tableau d'indice		
+CUSTOMER_VALIDATION	ECR_inf5_modele-17		Plan de surveillance à jour	Qualité projet	3-faible	Tableau d'indice		
+CUSTOMER_VALIDATION	ECR_inf5_modele-18		Ok 1er piéce à jour remplie lors de modification ( coupe et couture )	Qualité projet	3-faible	document		
+CUSTOMER_VALIDATION	ECR_inf5_modele-19		Mise à jour de plan de coiffe	CAO	3-faible	document		
+CUSTOMER_VALIDATION	ECR_inf5_modele-20		Mise à jour de fiche rebut	CAO	3-faible	document		
+CUSTOMER_VALIDATION	ECR_inf5_modele-21		Instruction de travail à jour	Amelioration contunie	3-faible	document		
+CUSTOMER_VALIDATION	ECR_inf5_modele-22		Chemin de contrôle à jour	Qualité projet	3-faible	document		
+CUSTOMER_VALIDATION	ECR_inf5_modele-23		Instructions d'emballage à jour	Logistique	3-faible	document		
+CUSTOMER_VALIDATION	ECR_inf5_modele-24		creation LISTE DE VIGNETTE	Chef de projet	3-faible	Liste de ref		
+CUSTOMER_VALIDATION	ECR_inf5_modele-25		Liste des références à jour	Chef de projet	3-faible	Liste de ref		
+CUSTOMER_VALIDATION	ECR_inf5_modele-26		Fiche de validation Etiquettes de traçabilité	Qualite de projet	3-faible	fiche de validation		
+CUSTOMER_VALIDATION	ECR_inf5_modele-27		Mise à jour Gallia : Indice/DR	Chef de projet	3-faible	imprimer gallia		
+CUSTOMER_VALIDATION	ECR_inf5_modele-28		Mise à jour de BOM : composant/Kit	Chef de projet	3-faible	Gamma/Mail/Fiche de revision sur gamma		
+CUSTOMER_VALIDATION	ECR_inf5_modele-29		Fiche de vérification /inventaire avant modif/Obsolete	Chef de projet	3-faible	rapport		
+CUSTOMER_VALIDATION	ECR_inf5_modele-30		Isolation des restes des découpes non modifiés	COUPE	3-faible	Papier A4		
+CUSTOMER_VALIDATION	ECR_inf5_modele-31		Identification decoupe production modifiés	production	3-faible	Papier A4		
+CUSTOMER_VALIDATION	ECR_inf5_modele-32		Mise a jours identification shop stock selon nouveau composant	Logistique	3-faible	Papier A4		
+CUSTOMER_VALIDATION	ECR_inf5_modele-33		Rapport de contrôle coupe et PDCA pour les cas NOK	Qualité	3-faible	rapport		
+PPAP_SOP_PREPARATION	ECR_inf6_modele-1		compte rendu de réunion	Chef de projet	3-faible	Compte de rendu		
+PPAP_SOP_PREPARATION	ECR_inf6_modele-2		Fiche de présence en formation de la modification : tous les concernés : production , coupe , couture , delibera	Chef de projet	3-faible	fiche de présence		
+PPAP_SOP_PREPARATION	ECR_inf6_modele-3		Identification des premières cartons modifiés	Qualité projet	3-faible	Papier A4		
+PPAP_SOP_PREPARATION	ECR_inf6_modele-4		Check list de validation digit par rapport plan client ( tv controller/plan papier )	CAO	3-faible	check list		
+PPAP_SOP_PREPARATION	ECR_inf6_modele-5		Validation de programme Airbag/Proces spécifiques ( campo)	Process	3-faible	fiche de validation		
+PPAP_SOP_PREPARATION	ECR_inf6_modele-6		Paramètres process Couture à jour	Process	3-faible	fiche de paramètres		
+PPAP_SOP_PREPARATION	ECR_inf6_modele-7		Amdec process	Chef de projet	3-faible	Tableau d'indice		
+PPAP_SOP_PREPARATION	ECR_inf6_modele-8		Plan de surveillance à jour	Qualité projet	3-faible	Tableau d'indice		
+PPAP_SOP_PREPARATION	ECR_inf6_modele-9		Ok 1er piéce à jour remplie lors de modification ( coupe et couture )	Qualité projet	3-faible	document		
+PPAP_SOP_PREPARATION	ECR_inf6_modele-10		Fiche de vérification /inventaire avant modif/Obsolete	Chef de projet	3-faible	rapport		
+CANCELLED	ECR_inf7_modele-1		compte rendu de réunion	Chef de projet	3-faible	Compte de rendu		
+CANCELLED	ECR_inf7_modele-2		Fiche de présence en formation de la modification : tous les concernés : production , coupe , couture , delibera	Chef de projet	3-faible	fiche de présence		
+CANCELLED	ECR_inf7_modele-3		Identification des premières cartons modifiés	Qualité projet	3-faible	Papier A4		
+CANCELLED	ECR_inf7_modele-4		Fiche de vérification /inventaire avant modif/Obsolete	Chef de projet	3-faible	rapport		

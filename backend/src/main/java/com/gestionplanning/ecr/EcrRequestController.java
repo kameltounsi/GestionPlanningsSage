@@ -39,8 +39,9 @@ public class EcrRequestController {
             request.setCurrentStage(EcrStage.firstAllowed(request.isNewVersion()));
         }
         templateService.applyTo(request);
+        List<com.gestionplanning.action.EcrAction> initialActions = request.getInitialActions();
         EcrRequest saved = requestRepository.save(request);
-        templateService.createActionsFor(saved);
+        templateService.createActionsFor(saved, initialActions);
         return ResponseEntity.created(URI.create("/api/ecr-requests/" + saved.getId())).body(saved);
     }
 

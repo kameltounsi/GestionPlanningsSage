@@ -1,6 +1,7 @@
 package com.gestionplanning.ecr;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.gestionplanning.action.EcrAction;
 
 import javax.persistence.*;
 import javax.validation.constraints.NotBlank;
@@ -71,6 +72,9 @@ public class EcrRequest {
     @OneToMany(mappedBy = "request", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnore
     private List<ChecklistItem> checklistItems = new ArrayList<>();
+
+    @Transient
+    private List<EcrAction> initialActions = new ArrayList<>();
 
     public Long getId() {
         return id;
@@ -406,6 +410,14 @@ public class EcrRequest {
 
     public List<ChecklistItem> getChecklistItems() {
         return checklistItems;
+    }
+
+    public List<EcrAction> getInitialActions() {
+        return initialActions;
+    }
+
+    public void setInitialActions(List<EcrAction> initialActions) {
+        this.initialActions = initialActions == null ? new ArrayList<>() : initialActions;
     }
 
     public void addChecklistItem(ChecklistItem item) {

@@ -4,6 +4,7 @@ import javax.persistence.*;
 import javax.validation.constraints.Email;
 import javax.validation.constraints.NotBlank;
 import java.time.LocalDateTime;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 @Entity
 @Table(name = "app_user")
@@ -16,6 +17,11 @@ public class AppUser {
     @Column(nullable = false)
     private String fullName;
 
+    @Column(unique = true)
+    private String username;
+
+    private String jobTitle;
+
     @Email
     @NotBlank
     @Column(nullable = false, unique = true)
@@ -23,17 +29,31 @@ public class AppUser {
 
     @NotBlank
     @Column(nullable = false)
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
+
+    private String phone;
+
+    private String profilePhotoFileName;
+    private String profilePhotoContentType;
+    private Long profilePhotoFileSize;
+    @Column(length = 2000)
+    private String profilePhotoUrl;
+    private String profilePhotoPublicId;
+    private String profilePhotoResourceType;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private UserRole role = UserRole.PILOTE_ENGINEERING;
+    private UserRole role = UserRole.CHEF_DE_PROJET;
 
     @Column(nullable = false)
     private boolean enabled = true;
 
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
+
+    @Column(nullable = false)
+    private LocalDateTime updatedAt = LocalDateTime.now();
 
     public Long getId() {
         return id;
@@ -45,6 +65,22 @@ public class AppUser {
 
     public void setFullName(String fullName) {
         this.fullName = fullName;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+
+    public String getJobTitle() {
+        return jobTitle;
+    }
+
+    public void setJobTitle(String jobTitle) {
+        this.jobTitle = jobTitle;
     }
 
     public String getEmail() {
@@ -61,6 +97,62 @@ public class AppUser {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public String getPhone() {
+        return phone;
+    }
+
+    public void setPhone(String phone) {
+        this.phone = phone;
+    }
+
+    public String getProfilePhotoFileName() {
+        return profilePhotoFileName;
+    }
+
+    public void setProfilePhotoFileName(String profilePhotoFileName) {
+        this.profilePhotoFileName = profilePhotoFileName;
+    }
+
+    public String getProfilePhotoContentType() {
+        return profilePhotoContentType;
+    }
+
+    public void setProfilePhotoContentType(String profilePhotoContentType) {
+        this.profilePhotoContentType = profilePhotoContentType;
+    }
+
+    public Long getProfilePhotoFileSize() {
+        return profilePhotoFileSize;
+    }
+
+    public void setProfilePhotoFileSize(Long profilePhotoFileSize) {
+        this.profilePhotoFileSize = profilePhotoFileSize;
+    }
+
+    public String getProfilePhotoUrl() {
+        return profilePhotoUrl;
+    }
+
+    public void setProfilePhotoUrl(String profilePhotoUrl) {
+        this.profilePhotoUrl = profilePhotoUrl;
+    }
+
+    public String getProfilePhotoPublicId() {
+        return profilePhotoPublicId;
+    }
+
+    public void setProfilePhotoPublicId(String profilePhotoPublicId) {
+        this.profilePhotoPublicId = profilePhotoPublicId;
+    }
+
+    public String getProfilePhotoResourceType() {
+        return profilePhotoResourceType;
+    }
+
+    public void setProfilePhotoResourceType(String profilePhotoResourceType) {
+        this.profilePhotoResourceType = profilePhotoResourceType;
     }
 
     public UserRole getRole() {
@@ -81,5 +173,21 @@ public class AppUser {
 
     public LocalDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
+    @PrePersist
+    public void beforeCreate() {
+        LocalDateTime now = LocalDateTime.now();
+        createdAt = now;
+        updatedAt = now;
+    }
+
+    @PreUpdate
+    public void beforeUpdate() {
+        updatedAt = LocalDateTime.now();
     }
 }

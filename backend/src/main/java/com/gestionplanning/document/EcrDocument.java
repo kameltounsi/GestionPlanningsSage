@@ -27,7 +27,10 @@ public class EcrDocument {
     @Column(nullable = false, length = 2000)
     private String fileUrl;
 
+    private String publicId;
+    private String resourceType;
     private String fileType;
+    private Long fileSize;
     private String uploadedBy;
 
     @Column(nullable = false, updatable = false)
@@ -65,12 +68,36 @@ public class EcrDocument {
         this.fileUrl = fileUrl;
     }
 
+    public String getPublicId() {
+        return publicId;
+    }
+
+    public void setPublicId(String publicId) {
+        this.publicId = publicId;
+    }
+
+    public String getResourceType() {
+        return resourceType;
+    }
+
+    public void setResourceType(String resourceType) {
+        this.resourceType = resourceType;
+    }
+
     public String getFileType() {
         return fileType;
     }
 
     public void setFileType(String fileType) {
         this.fileType = fileType;
+    }
+
+    public Long getFileSize() {
+        return fileSize;
+    }
+
+    public void setFileSize(Long fileSize) {
+        this.fileSize = fileSize;
     }
 
     public String getUploadedBy() {

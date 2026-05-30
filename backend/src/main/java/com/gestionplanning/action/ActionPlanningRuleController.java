@@ -39,7 +39,14 @@ public class ActionPlanningRuleController {
         return ruleRepository.findById(id)
                 .map(rule -> {
                     rule.setStage(updatedRule.getStage());
+                    rule.setAppliesToModification(updatedRule.isAppliesToModification());
+                    rule.setAppliesToNewProject(updatedRule.isAppliesToNewProject());
                     rule.setActionTitle(updatedRule.getActionTitle());
+                    rule.setTopicRisk(updatedRule.getTopicRisk());
+                    rule.setResponsible(updatedRule.getResponsible());
+                    rule.setCriticality(updatedRule.getCriticality());
+                    rule.setExpectedEvidence(updatedRule.getExpectedEvidence());
+                    rule.setEvidenceRequired(updatedRule.isEvidenceRequired());
                     rule.setDependencyActionTitle(updatedRule.getDependencyActionTitle());
                     rule.setDependencyAnchor(updatedRule.getDependencyAnchor());
                     rule.setDurationDays(updatedRule.getDurationDays());
@@ -66,6 +73,12 @@ public class ActionPlanningRuleController {
         }
         if (rule.getDurationDays() == null) {
             rule.setDurationDays(1);
+        }
+        if (rule.getCriticality() == null || rule.getCriticality().trim().isEmpty()) {
+            rule.setCriticality("3-faible");
+        }
+        if (!rule.isAppliesToModification() && !rule.isAppliesToNewProject()) {
+            rule.setAppliesToModification(true);
         }
         return rule;
     }

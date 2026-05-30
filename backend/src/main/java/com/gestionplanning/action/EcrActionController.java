@@ -2,6 +2,9 @@ package com.gestionplanning.action;
 
 import com.gestionplanning.ecr.EcrRequestRepository;
 import com.gestionplanning.ecr.EcrStage;
+import com.gestionplanning.storage.CloudinaryStorageService;
+import com.gestionplanning.storage.DownloadedAsset;
+import com.gestionplanning.storage.StoredAsset;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -21,13 +24,16 @@ public class EcrActionController {
     private final EcrActionEvidenceRepository evidenceRepository;
     private final EcrRequestRepository requestRepository;
     private final ActionPlanningService planningService;
+    private final CloudinaryStorageService storageService;
 
     public EcrActionController(EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
-                               EcrRequestRepository requestRepository, ActionPlanningService planningService) {
+                               EcrRequestRepository requestRepository, ActionPlanningService planningService,
+                               CloudinaryStorageService storageService) {
         this.actionRepository = actionRepository;
         this.evidenceRepository = evidenceRepository;
         this.requestRepository = requestRepository;
         this.planningService = planningService;
+        this.storageService = storageService;
     }
 
     @GetMapping("/actions")
@@ -74,8 +80,12 @@ public class EcrActionController {
                     action.setResponsible(updatedAction.getResponsible());
                     action.setCriticality(updatedAction.getCriticality());
                     action.setExpectedEvidence(updatedAction.getExpectedEvidence());
+                    action.setEvidenceRequired(updatedAction.isEvidenceRequired());
                     action.setEvidence(updatedAction.getEvidence());
                     action.setProofDocument(updatedAction.getProofDocument());
+                    if (updatedAction.isChecked() && action.isEvidenceRequired() && !hasEvidence(action)) {
+                        return ResponseEntity.badRequest().<EcrAction>build();
+                    }
                     action.setChecked(updatedAction.isChecked());
                     action.setDeadline(updatedAction.getDeadline());
                     action.setDate1(updatedAction.getDate1());
@@ -87,6 +97,9 @@ public class EcrActionController {
                     action.setDependsOnActionId(updatedAction.getDependsOnActionId());
                     action.setDependencyAnchor(updatedAction.getDependencyAnchor());
                     action.setStage(updatedAction.getStage());
+                    if (updatedAction.getStatus() == ActionStatus.DONE && action.isEvidenceRequired() && !hasEvidence(action)) {
+                        return ResponseEntity.badRequest().<EcrAction>build();
+                    }
                     action.setStatus(updatedAction.getStatus());
                     action.setClosedDate(updatedAction.getClosedDate());
                     action.setComment(updatedAction.getComment());
@@ -104,30 +117,38 @@ public class EcrActionController {
         }
         return actionRepository.findById(id)
                 .map(action -> {
-                    try {
-                        action.setEvidenceFileName(file.getOriginalFilename());
-                        action.setEvidenceContentType(file.getContentType());
-                        action.setEvidenceFileSize(file.getSize());
-                        action.setEvidence(file.getOriginalFilename());
-                        EcrAction savedAction = actionRepository.save(action);
-                        evidenceRepository.save(new EcrActionEvidence(savedAction.getId(), file.getBytes()));
-                        return ResponseEntity.ok(savedAction);
-                    } catch (Exception exception) {
-                        throw new IllegalStateException("Impossible d'enregistrer le fichier evidence", exception);
-                    }
+                    storageService.deleteQuietly(action.getEvidencePublicId(), action.getEvidenceResourceType());
+                    StoredAsset asset = storageService.upload(file, "gestion-planning/actions/" + id);
+                    action.setEvidenceFileName(asset.getFileName());
+                    action.setEvidenceContentType(asset.getContentType());
+                    action.setEvidenceFileSize(asset.getSize());
+                    action.setEvidenceFileUrl(asset.getUrl());
+                    action.setEvidencePublicId(asset.getPublicId());
+                    action.setEvidenceResourceType(asset.getResourceType());
+                    action.setEvidence(asset.getFileName());
+                    deleteLocalEvidenceIfPresent(id);
+                    return ResponseEntity.ok(actionRepository.save(action));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/actions/{id}/evidence")
-    public ResponseEntity<byte[]> downloadEvidence(@PathVariable Long id) {
-        return actionRepository.findById(id)
-                .flatMap(action -> evidenceRepository.findById(id)
-                        .map(evidence -> ResponseEntity.ok()
-                                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFileName(action.getEvidenceFileName()) + "\"")
-                                .contentType(MediaType.parseMediaType(action.getEvidenceContentType() == null ? MediaType.APPLICATION_OCTET_STREAM_VALUE : action.getEvidenceContentType()))
-                                .body(evidence.getData())))
-                .orElse(ResponseEntity.notFound().build());
+    public ResponseEntity<?> downloadEvidence(@PathVariable Long id) {
+        return actionRepository.findById(id).map(action -> {
+            if (action.getEvidenceFileUrl() != null && !action.getEvidenceFileUrl().trim().isEmpty()) {
+                DownloadedAsset asset = storageService.download(action.getEvidenceFileUrl(), action.getEvidenceContentType());
+                return ResponseEntity.ok()
+                        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFileName(action.getEvidenceFileName()) + "\"")
+                        .contentType(MediaType.parseMediaType(asset.getContentType()))
+                        .body(asset.getData());
+            }
+            return evidenceRepository.findById(id)
+                    .map(evidence -> ResponseEntity.ok()
+                            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFileName(action.getEvidenceFileName()) + "\"")
+                            .contentType(MediaType.parseMediaType(action.getEvidenceContentType() == null ? MediaType.APPLICATION_OCTET_STREAM_VALUE : action.getEvidenceContentType()))
+                            .body(evidence.getData()))
+                    .orElse(ResponseEntity.notFound().build());
+        }).orElse(ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/actions/{id}")
@@ -135,9 +156,22 @@ public class EcrActionController {
         if (!actionRepository.existsById(id)) {
             return ResponseEntity.notFound().build();
         }
-        evidenceRepository.deleteById(id);
-        actionRepository.deleteById(id);
+        actionRepository.findById(id).ifPresent(action -> {
+            storageService.deleteQuietly(action.getEvidencePublicId(), action.getEvidenceResourceType());
+            deleteLocalEvidenceIfPresent(id);
+            actionRepository.deleteById(id);
+        });
         return ResponseEntity.noContent().build();
+    }
+
+    private void deleteLocalEvidenceIfPresent(Long actionId) {
+        if (evidenceRepository.existsById(actionId)) {
+            evidenceRepository.deleteById(actionId);
+        }
+    }
+
+    private boolean hasEvidence(EcrAction action) {
+        return action.getEvidenceFileName() != null && !action.getEvidenceFileName().trim().isEmpty();
     }
 
     private String safeFileName(String fileName) {

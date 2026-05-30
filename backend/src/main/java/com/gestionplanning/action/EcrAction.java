@@ -44,6 +44,11 @@ public class EcrAction {
     private String evidenceFileName;
     private String evidenceContentType;
     private Long evidenceFileSize;
+    @Column(length = 2000)
+    private String evidenceFileUrl;
+    private String evidencePublicId;
+    private String evidenceResourceType;
+    private boolean evidenceRequired;
 
     @Column(length = 3000)
     private String proofDocument;
@@ -164,6 +169,38 @@ public class EcrAction {
 
     public void setEvidenceFileSize(Long evidenceFileSize) {
         this.evidenceFileSize = evidenceFileSize;
+    }
+
+    public String getEvidenceFileUrl() {
+        return evidenceFileUrl;
+    }
+
+    public void setEvidenceFileUrl(String evidenceFileUrl) {
+        this.evidenceFileUrl = evidenceFileUrl;
+    }
+
+    public String getEvidencePublicId() {
+        return evidencePublicId;
+    }
+
+    public void setEvidencePublicId(String evidencePublicId) {
+        this.evidencePublicId = evidencePublicId;
+    }
+
+    public String getEvidenceResourceType() {
+        return evidenceResourceType;
+    }
+
+    public void setEvidenceResourceType(String evidenceResourceType) {
+        this.evidenceResourceType = evidenceResourceType;
+    }
+
+    public boolean isEvidenceRequired() {
+        return evidenceRequired;
+    }
+
+    public void setEvidenceRequired(boolean evidenceRequired) {
+        this.evidenceRequired = evidenceRequired;
     }
 
     public String getProofDocument() {

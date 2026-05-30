@@ -17,9 +17,26 @@ public class ActionPlanningRule {
     @Column(nullable = false)
     private EcrStage stage = EcrStage.FEASIBILITY_VALIDATION;
 
+    private boolean appliesToModification = true;
+
+    private boolean appliesToNewProject = true;
+
     @NotBlank
     @Column(nullable = false, length = 1000)
     private String actionTitle;
+
+    @Column(length = 1000)
+    private String topicRisk;
+
+    @Column(length = 1000)
+    private String responsible;
+
+    private String criticality = "3-faible";
+
+    @Column(length = 3000)
+    private String expectedEvidence;
+
+    private boolean evidenceRequired;
 
     @Column(length = 1000)
     private String dependencyActionTitle;
@@ -43,12 +60,68 @@ public class ActionPlanningRule {
         this.stage = stage;
     }
 
+    public boolean isAppliesToModification() {
+        return appliesToModification;
+    }
+
+    public void setAppliesToModification(boolean appliesToModification) {
+        this.appliesToModification = appliesToModification;
+    }
+
+    public boolean isAppliesToNewProject() {
+        return appliesToNewProject;
+    }
+
+    public void setAppliesToNewProject(boolean appliesToNewProject) {
+        this.appliesToNewProject = appliesToNewProject;
+    }
+
     public String getActionTitle() {
         return actionTitle;
     }
 
     public void setActionTitle(String actionTitle) {
         this.actionTitle = actionTitle;
+    }
+
+    public String getTopicRisk() {
+        return topicRisk;
+    }
+
+    public void setTopicRisk(String topicRisk) {
+        this.topicRisk = topicRisk;
+    }
+
+    public String getResponsible() {
+        return responsible;
+    }
+
+    public void setResponsible(String responsible) {
+        this.responsible = responsible;
+    }
+
+    public String getCriticality() {
+        return criticality;
+    }
+
+    public void setCriticality(String criticality) {
+        this.criticality = criticality;
+    }
+
+    public String getExpectedEvidence() {
+        return expectedEvidence;
+    }
+
+    public void setExpectedEvidence(String expectedEvidence) {
+        this.expectedEvidence = expectedEvidence;
+    }
+
+    public boolean isEvidenceRequired() {
+        return evidenceRequired;
+    }
+
+    public void setEvidenceRequired(boolean evidenceRequired) {
+        this.evidenceRequired = evidenceRequired;
     }
 
     public String getDependencyActionTitle() {

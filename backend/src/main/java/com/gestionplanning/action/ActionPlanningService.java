@@ -32,6 +32,7 @@ public class ActionPlanningService {
         }
 
         Map<String, ActionPlanningRule> rules = ruleRepository.findAll().stream()
+                .filter(rule -> request.isNewVersion() ? rule.isAppliesToNewProject() : rule.isAppliesToModification())
                 .collect(Collectors.toMap(this::ruleKey, Function.identity(), (first, second) -> second));
         Map<String, EcrAction> actionsByKey = actions.stream()
                 .collect(Collectors.toMap(this::actionKey, Function.identity(), (first, second) -> first));

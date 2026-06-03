@@ -2,7 +2,7 @@ package com.gestionplanning.document;
 
 import com.gestionplanning.ecr.EcrRequestRepository;
 import com.gestionplanning.storage.CloudinaryStorageService;
-import com.gestionplanning.storage.DownloadedAsset;
+import com.gestionplanning.storage.CloudinaryStorageService.DownloadedAsset;
 import com.gestionplanning.storage.StoredAsset;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -75,14 +75,14 @@ public class EcrDocumentController {
     @GetMapping("/documents/{id}/download")
     public ResponseEntity<?> download(@PathVariable Long id) {
         return documentRepository.findById(id)
-                .map(document -> {
+                .<ResponseEntity<?>>map(document -> {
                     DownloadedAsset asset = storageService.download(document.getFileUrl(), document.getFileType());
                     return ResponseEntity.ok()
                             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFileName(document.getFileName()) + "\"")
                             .contentType(MediaType.parseMediaType(asset.getContentType()))
                             .body(asset.getData());
                 })
-                .orElse(ResponseEntity.notFound().build());
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/documents/{id}")

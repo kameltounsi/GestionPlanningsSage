@@ -8,7 +8,7 @@ export function ProfilePage({ currentUser, passwordForm, profileForm, saving, on
   if (!currentUser) {
     return (
       <section className="page-content">
-        <PageHeader eyebrow="Compte" title="Profil" subtitle="Les informations du compte seront disponibles apres chargement." />
+        <PageHeader eyebrow="Compte" title="Profil" subtitle="Les informations du compte seront disponibles après chargement." />
         <EmptyState title="Profil indisponible" text="Le compte fchelbi n'a pas encore ete charge." />
       </section>
     );
@@ -23,7 +23,7 @@ export function ProfilePage({ currentUser, passwordForm, profileForm, saving, on
             {currentUser.profilePhotoUrl ? <img alt="" src={currentUser.profilePhotoUrl} /> : <UserCircle size={72} />}
           </div>
           <h2>{currentUser.fullName}</h2>
-          <span>{currentUser.jobTitle || "Poste non renseigne"}</span>
+          <span>{currentUser.jobTitle || "Poste non renseigné"}</span>
           <strong className="stage-pill teal">{userRoleLabel(currentUser.role)}</strong>
           <label className="secondary-action compact-action photo-upload">
             <Camera size={15} />
@@ -35,7 +35,7 @@ export function ProfilePage({ currentUser, passwordForm, profileForm, saving, on
           <div className="form-intro">
             <div>
               <h2>Informations profil</h2>
-              <p>Mettez a jour vos coordonnees et votre identification utilisateur.</p>
+              <p>Mettez à jour vos coordonnées et votre identification utilisateur.</p>
             </div>
           </div>
           <div className="field-grid">

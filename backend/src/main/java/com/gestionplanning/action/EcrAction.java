@@ -7,6 +7,8 @@ import com.gestionplanning.ecr.EcrStage;
 import javax.persistence.*;
 import javax.validation.constraints.NotBlank;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "ecr_action")
@@ -49,6 +51,10 @@ public class EcrAction {
     private String evidencePublicId;
     private String evidenceResourceType;
     private boolean evidenceRequired;
+
+    @OneToMany(mappedBy = "action", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("uploadedAt DESC, id DESC")
+    private List<EcrActionAsset> assets = new ArrayList<>();
 
     @Column(length = 3000)
     private String proofDocument;
@@ -201,6 +207,14 @@ public class EcrAction {
 
     public void setEvidenceRequired(boolean evidenceRequired) {
         this.evidenceRequired = evidenceRequired;
+    }
+
+    public List<EcrActionAsset> getAssets() {
+        return assets;
+    }
+
+    public void setAssets(List<EcrActionAsset> assets) {
+        this.assets = assets == null ? new ArrayList<>() : assets;
     }
 
     public String getProofDocument() {

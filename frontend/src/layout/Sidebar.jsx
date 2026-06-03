@@ -19,10 +19,10 @@ export function Sidebar({ collapsed, page, onCollapseToggle, onLogout, onNavigat
           <span>Application ECR</span>
         </div>
         <button
-          aria-label={collapsed ? "Agrandir le menu" : "Reduire le menu"}
+          aria-label={collapsed ? "Agrandir le menu" : "Réduire le menu"}
           className="nav-toggle"
           onClick={onCollapseToggle}
-          title={collapsed ? "Agrandir le menu" : "Reduire le menu"}
+          title={collapsed ? "Agrandir le menu" : "Réduire le menu"}
           type="button"
         >
           {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}

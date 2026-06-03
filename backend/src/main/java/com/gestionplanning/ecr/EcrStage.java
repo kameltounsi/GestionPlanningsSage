@@ -11,7 +11,7 @@ public enum EcrStage {
     CUSTOMER_VALIDATION("Customer validation", "Customer validation"),
     PPAP_SOP_PREPARATION("PPAP validation Preparation SOP", "Production Set-up & Pre-Series"),
     LAUNCH("Launch", "Launch"),
-    CLOSED("Cloture Status", "Cloture Status"),
+    CLOSED("Clôture Status", "Clôture Status"),
     CANCELLED("Cancelled", "Project Cancelled");
 
     private static final List<EcrStage> MODIFICATION_STAGES = Arrays.asList(

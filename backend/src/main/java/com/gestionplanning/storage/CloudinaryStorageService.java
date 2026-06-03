@@ -77,6 +77,24 @@ public class CloudinaryStorageService {
         }
     }
 
+    public static class DownloadedAsset {
+        private final byte[] data;
+        private final String contentType;
+
+        public DownloadedAsset(byte[] data, String contentType) {
+            this.data = data;
+            this.contentType = contentType;
+        }
+
+        public byte[] getData() {
+            return data;
+        }
+
+        public String getContentType() {
+            return contentType;
+        }
+    }
+
     public void deleteQuietly(String publicId, String resourceType) {
         if (publicId == null || publicId.trim().isEmpty()) {
             return;
@@ -86,7 +104,7 @@ public class CloudinaryStorageService {
                     "resource_type", resourceType == null || resourceType.trim().isEmpty() ? "image" : resourceType
             ));
         } catch (Exception ignored) {
-            // La suppression applicative ne doit pas echouer si l'asset Cloudinary est deja absent.
+            // La suppression applicative ne doit pas échouer si l'asset Cloudinary est déjà absent.
         }
     }
 

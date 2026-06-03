@@ -47,10 +47,43 @@ public class EcrTemplateService {
                     .map(rule -> fromRule(request, rule))
                     .collect(Collectors.toList());
         }
+        if (actions.isEmpty()) {
+            actions = defaultActionsFor(request);
+        }
         if (!actions.isEmpty()) {
             actionRepository.saveAll(actions);
             planningService.recalculateRequest(request);
         }
+    }
+
+    public void ensureActionsFor(EcrRequest request) {
+        if (request == null || request.getId() == null) {
+            return;
+        }
+        if (actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId()).isEmpty()) {
+            createActionsFor(request, new ArrayList<>());
+        }
+    }
+
+    private List<EcrAction> defaultActionsFor(EcrRequest request) {
+        List<EcrAction> actions = new ArrayList<>();
+        for (EcrStage stage : EcrStage.allowedStages(request.isNewVersion())) {
+            EcrAction action = new EcrAction();
+            action.setRequest(request);
+            action.setStage(stage);
+            action.setTitle("Revue et validation - " + stage.getLabel(request.isNewVersion()));
+            action.setTopicRisk("Suivi ECR");
+            action.setResponsible(request.getPilot());
+            action.setCriticality("3-faible");
+            action.setExpectedEvidence("Compte rendu, preuve ou document de validation");
+            action.setEvidenceRequired(false);
+            action.setWorkDurationDays(1);
+            action.setDependencyAnchor("OUTPUT");
+            action.setStatus(ActionStatus.TODO);
+            action.setChecked(false);
+            actions.add(action);
+        }
+        return actions;
     }
 
     private EcrAction fromRule(EcrRequest request, ActionPlanningRule rule) {

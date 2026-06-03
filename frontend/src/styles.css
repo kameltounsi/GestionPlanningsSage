@@ -269,6 +269,8 @@ textarea {
 
 .page-shell {
   min-width: 0;
+  min-height: 100vh;
+  overflow: visible;
   padding: 30px;
 }
 
@@ -371,11 +373,11 @@ textarea {
 
 .modifications-content {
   gap: 14px;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  height: calc(100vh - 60px);
+  grid-template-rows: auto auto auto;
+  height: auto;
   max-width: none;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .modifications-content .page-header {
@@ -529,6 +531,25 @@ textarea {
 
 .form-page {
   max-width: 1060px;
+}
+
+.form-image-preview {
+  align-items: center;
+  color: var(--accent);
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  margin-top: 6px;
+  text-decoration: none;
+}
+
+.form-image-preview img {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  height: 42px;
+  object-fit: cover;
+  width: 64px;
 }
 
 .creation-panel {
@@ -999,6 +1020,12 @@ textarea {
   white-space: nowrap;
 }
 
+body:has(.dialog-backdrop) .modifications-toolbar {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
 .list-panel,
 .detail-panel {
   padding: 12px;
@@ -1038,10 +1065,11 @@ textarea {
 
 .detail-panel {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-  height: 100%;
+  gap: 10px;
+  grid-template-rows: auto auto;
+  min-height: 0;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   position: relative;
   z-index: 1;
 }
@@ -1098,6 +1126,135 @@ textarea {
 
 .project-filter select:focus {
   box-shadow: none;
+}
+
+.project-team-field {
+  border: 0;
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.project-team-field legend {
+  color: #344054;
+  font-size: 13px;
+  font-weight: 740;
+  margin-bottom: 7px;
+  padding: 0;
+}
+
+.project-team-search {
+  min-height: 40px;
+}
+
+.project-team-list {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  max-height: 250px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.form-page .project-team-option {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 9px 10px;
+}
+
+.form-page .project-team-option:hover {
+  background: #f8fbfa;
+  border-color: #abcdbf;
+}
+
+.project-team-option input {
+  accent-color: var(--accent);
+  height: 17px;
+  min-height: 0;
+  padding: 0;
+  width: 17px;
+}
+
+.project-team-option span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.project-team-option strong,
+.project-team-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-team-option small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.project-team-warning {
+  color: #b42318;
+  font-weight: 740;
+}
+
+.modification-type-field {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+}
+
+.modification-type-field legend {
+  color: #344054;
+  font-size: 13px;
+  font-weight: 740;
+  padding: 0 4px;
+}
+
+.request-image-grid {
+  display: grid;
+  gap: 8px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 170px));
+  justify-content: start;
+}
+
+.request-image-grid a {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  display: grid;
+  gap: 6px;
+  padding: 7px;
+  text-decoration: none;
+}
+
+.request-image-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.request-image-grid img {
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  max-height: 82px;
+  object-fit: cover;
+  width: 100%;
 }
 
 .request-list,
@@ -1450,11 +1607,14 @@ textarea {
 }
 
 .details-header {
-  align-items: stretch;
+  align-items: start;
   display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) auto minmax(260px, 380px);
-  margin-bottom: 8px;
+  gap: 10px;
+  grid-template-columns: minmax(300px, 1.2fr) auto minmax(360px, 1fr);
+  max-height: 250px;
+  min-height: 0;
+  overflow-y: visible;
+  padding-right: 4px;
 }
 
 .details-header > div:first-child {
@@ -1500,6 +1660,26 @@ textarea {
   color: #8f1d14;
 }
 
+.detail-header-actions {
+  align-self: start;
+  display: grid;
+  gap: 8px;
+}
+
+.detail-edit-action {
+  background: #f4f8ff;
+  border: 1px solid #bfd2f3;
+  color: #244a86;
+  height: 40px;
+  width: 40px;
+}
+
+.detail-edit-action:hover {
+  background: #eaf2ff;
+  border-color: #94b5e8;
+  color: #183a70;
+}
+
 .meta-grid {
   display: grid;
   gap: 6px;
@@ -1535,15 +1715,26 @@ textarea {
   white-space: nowrap;
 }
 
+.meta-grid div:last-child strong {
+  white-space: normal;
+}
+
+.request-workspace {
+  display: grid;
+  gap: 8px;
+  grid-template-rows: auto auto auto auto;
+  min-height: 0;
+  overflow: visible;
+}
+
 .stage-tabs {
   background: #ffffff;
   border: 1px solid #d9e1eb;
   border-radius: 8px;
   display: grid;
-  gap: 6px;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
-  margin-bottom: 8px;
-  padding: 6px;
+  gap: 5px;
+  grid-template-columns: repeat(auto-fit, minmax(124px, 1fr));
+  padding: 5px;
 }
 
 .tab {
@@ -1560,9 +1751,9 @@ textarea {
   font-size: 12px;
   font-weight: 760;
   line-height: 1.22;
-  min-height: 42px;
+  min-height: 36px;
   min-width: 0;
-  padding: 8px 9px;
+  padding: 7px 8px;
   position: relative;
   text-align: left;
   white-space: normal;
@@ -1605,8 +1796,7 @@ textarea {
   display: grid;
   gap: 10px;
   grid-template-columns: 170px minmax(0, 1fr);
-  margin-bottom: 8px;
-  padding: 8px 10px;
+  padding: 6px 10px;
 }
 
 .progress-row div:first-child {
@@ -1634,10 +1824,11 @@ textarea {
 .data-section {
   display: grid;
   gap: 10px;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  margin-bottom: 10px;
+  grid-template-rows: auto auto;
+  margin-bottom: 0;
+  min-height: 0;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   padding: 12px;
 }
 
@@ -1656,12 +1847,14 @@ textarea {
 }
 
 .action-list {
+  align-content: start;
   display: grid;
   gap: 8px;
+  max-height: none;
   max-width: 100%;
+  min-height: 0;
   min-width: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: visible;
   padding-right: 2px;
 }
 
@@ -1673,16 +1866,16 @@ textarea {
 }
 
 .action-row {
-  align-items: start;
+  align-items: center;
   background: #ffffff;
   border: 1px solid var(--line);
   border-left: 4px solid #abcdbf;
   border-radius: 8px;
   display: grid;
   gap: 10px;
-  grid-template-columns: 24px minmax(0, 1fr) 38px;
+  grid-template-columns: 26px minmax(220px, 0.9fr) minmax(0, 1.8fr) auto;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 10px 12px;
 }
 
 .action-row.late {
@@ -1699,9 +1892,8 @@ textarea {
 .action-check {
   align-items: center;
   display: inline-flex;
-  grid-row: 1 / span 2;
   justify-content: center;
-  padding-top: 4px;
+  padding-top: 0;
 }
 
 .action-check input {
@@ -1735,42 +1927,40 @@ textarea {
 }
 
 .action-main {
-  grid-column: 2;
+  grid-column: auto;
 }
 
 .action-main p {
   display: -webkit-box;
   font-size: 12px;
-  -webkit-line-clamp: 1;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   line-height: 1.35;
   overflow: hidden;
 }
 
 .action-meta {
-  align-content: start;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  grid-column: 2;
+  display: grid;
+  gap: 6px;
+  grid-column: auto;
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
   min-width: 0;
 }
 
 .action-meta span {
-  align-items: center;
+  align-items: start;
   background: #f8fafc;
   border: 1px solid #edf1f5;
   border-radius: 7px;
-  display: inline-flex;
-  flex: 1 1 52px;
+  display: grid;
   gap: 2px;
-  min-height: 25px;
+  min-height: 42px;
   padding: 5px 7px;
 }
 
 .action-meta em {
   color: var(--muted);
-  display: none;
+  display: block;
   font-size: 9px;
   font-style: normal;
   font-weight: 760;
@@ -1782,12 +1972,12 @@ textarea {
   align-self: center;
   color: var(--ink);
   font-size: 11px;
-  line-height: 1;
+  line-height: 1.15;
   white-space: nowrap;
 }
 
 .action-meta .evidence-meta {
-  flex-basis: 84px;
+  grid-column: span 2;
 }
 
 .action-meta .evidence-meta strong {
@@ -1820,13 +2010,22 @@ textarea {
   text-decoration: underline;
 }
 
+.asset-link-list {
+  display: grid;
+  gap: 2px;
+}
+
+.asset-link-list .file-link {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .row-upload {
   background: var(--blue-soft);
   border: 1px solid #c8dced;
   border-radius: 8px;
   color: var(--blue);
-  grid-column: 3;
-  grid-row: 1 / span 2;
   height: 34px;
   justify-content: center;
   width: 38px;
@@ -1840,8 +2039,8 @@ textarea {
   align-items: center;
   display: grid;
   gap: 6px;
-  grid-column: 3;
-  grid-row: 1 / span 2;
+  grid-column: auto;
+  grid-row: auto;
   justify-items: center;
 }
 
@@ -1916,12 +2115,15 @@ textarea {
 }
 
 .actions-dialog .action-row {
-  grid-template-columns: 30px minmax(260px, 1.35fr) minmax(520px, 2fr) 44px;
-  padding: 12px;
+  align-items: center;
+  grid-template-columns: 28px minmax(220px, 0.9fr) minmax(0, 1.8fr) auto;
+  min-height: 86px;
+  padding: 10px 12px;
 }
 
 .actions-dialog .action-check {
   grid-row: auto;
+  padding-top: 0;
 }
 
 .actions-dialog .action-main {
@@ -1933,7 +2135,10 @@ textarea {
 }
 
 .actions-dialog .action-meta {
+  display: grid;
+  gap: 7px;
   grid-column: auto;
+  grid-template-columns: repeat(4, minmax(92px, 1fr));
 }
 
 .actions-dialog .action-meta em {
@@ -1943,19 +2148,21 @@ textarea {
 .actions-dialog .action-meta span {
   align-items: flex-start;
   flex-direction: column;
-  flex-basis: 92px;
-  min-height: 44px;
+  justify-content: center;
+  min-height: 46px;
+  padding: 6px 8px;
 }
 
 .actions-dialog .action-meta .evidence-meta {
-  flex-basis: 150px;
+  grid-column: span 2;
 }
 
-.actions-dialog .row-upload {
+.actions-dialog .row-upload,
+.actions-dialog .action-row-tools .ghost-icon {
   grid-column: auto;
   grid-row: auto;
-  height: 40px;
-  width: 44px;
+  height: 38px;
+  width: 40px;
 }
 
 .check-row {
@@ -2067,7 +2274,7 @@ textarea {
   justify-content: center;
   padding: 24px;
   position: fixed;
-  z-index: 50;
+  z-index: 1000;
 }
 
 .dialog-card {
@@ -2380,12 +2587,16 @@ textarea {
   }
 
   .actions-dialog .action-row {
-    grid-template-columns: 24px minmax(0, 1fr) 38px;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
   }
 
-  .actions-dialog .action-main,
+  .actions-dialog .action-main {
+    grid-column: 2;
+  }
+
   .actions-dialog .action-meta {
     grid-column: 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .actions-dialog .action-check,

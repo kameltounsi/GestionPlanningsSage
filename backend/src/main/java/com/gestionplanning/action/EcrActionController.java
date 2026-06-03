@@ -2,8 +2,9 @@ package com.gestionplanning.action;
 
 import com.gestionplanning.ecr.EcrRequestRepository;
 import com.gestionplanning.ecr.EcrStage;
+import com.gestionplanning.ecr.EcrTemplateService;
 import com.gestionplanning.storage.CloudinaryStorageService;
-import com.gestionplanning.storage.DownloadedAsset;
+import com.gestionplanning.storage.CloudinaryStorageService.DownloadedAsset;
 import com.gestionplanning.storage.StoredAsset;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -22,17 +23,22 @@ import java.util.stream.Collectors;
 public class EcrActionController {
     private final EcrActionRepository actionRepository;
     private final EcrActionEvidenceRepository evidenceRepository;
+    private final EcrActionAssetRepository assetRepository;
     private final EcrRequestRepository requestRepository;
     private final ActionPlanningService planningService;
+    private final EcrTemplateService templateService;
     private final CloudinaryStorageService storageService;
 
     public EcrActionController(EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
+                               EcrActionAssetRepository assetRepository,
                                EcrRequestRepository requestRepository, ActionPlanningService planningService,
-                               CloudinaryStorageService storageService) {
+                               EcrTemplateService templateService, CloudinaryStorageService storageService) {
         this.actionRepository = actionRepository;
         this.evidenceRepository = evidenceRepository;
+        this.assetRepository = assetRepository;
         this.requestRepository = requestRepository;
         this.planningService = planningService;
+        this.templateService = templateService;
         this.storageService = storageService;
     }
 
@@ -46,23 +52,23 @@ public class EcrActionController {
 
     @GetMapping("/ecr-requests/{requestId}/actions")
     public ResponseEntity<List<EcrAction>> listByRequest(@PathVariable Long requestId, @RequestParam(required = false) EcrStage stage) {
-        if (!requestRepository.existsById(requestId)) {
-            return ResponseEntity.notFound().build();
-        }
-        if (stage != null) {
-            List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(requestId).stream()
-                    .filter(action -> action.getStage() == stage)
-                    .collect(Collectors.toList());
+        return requestRepository.findById(requestId).map(request -> {
+            templateService.ensureActionsFor(request);
+            List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(requestId);
+            if (stage != null) {
+                actions = actions.stream()
+                        .filter(action -> action.getStage() == stage)
+                        .collect(Collectors.toList());
+            }
             return ResponseEntity.ok(actions);
-        }
-        return ResponseEntity.ok(actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(requestId));
+        }).orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping("/ecr-requests/{requestId}/actions")
     public ResponseEntity<EcrAction> create(@PathVariable Long requestId, @Valid @RequestBody EcrAction action) {
         return requestRepository.findById(requestId)
                 .map(request -> {
-                    if (isDone(action) && action.isEvidenceRequired()) {
+                    if (isDone(action) && requiresEvidence(action)) {
                         return ResponseEntity.badRequest().<EcrAction>build();
                     }
                     action.setRequest(request);
@@ -86,7 +92,7 @@ public class EcrActionController {
                     action.setEvidenceRequired(updatedAction.isEvidenceRequired());
                     action.setEvidence(updatedAction.getEvidence());
                     action.setProofDocument(updatedAction.getProofDocument());
-                    if (isDone(updatedAction) && updatedAction.isEvidenceRequired() && !hasEvidence(action)) {
+                    if (isDone(updatedAction) && requiresEvidence(updatedAction) && !hasEvidence(action)) {
                         return ResponseEntity.badRequest().<EcrAction>build();
                     }
                     if (isDone(updatedAction) && !isDependencyCompleted(action)) {
@@ -123,8 +129,16 @@ public class EcrActionController {
         }
         return actionRepository.findById(id)
                 .map(action -> {
-                    storageService.deleteQuietly(action.getEvidencePublicId(), action.getEvidenceResourceType());
                     StoredAsset asset = storageService.upload(file, "gestion-planning/actions/" + id);
+                    EcrActionAsset actionAsset = new EcrActionAsset();
+                    actionAsset.setAction(action);
+                    actionAsset.setFileName(asset.getFileName());
+                    actionAsset.setContentType(asset.getContentType());
+                    actionAsset.setFileSize(asset.getSize());
+                    actionAsset.setFileUrl(asset.getUrl());
+                    actionAsset.setPublicId(asset.getPublicId());
+                    actionAsset.setResourceType(asset.getResourceType());
+                    assetRepository.save(actionAsset);
                     action.setEvidenceFileName(asset.getFileName());
                     action.setEvidenceContentType(asset.getContentType());
                     action.setEvidenceFileSize(asset.getSize());
@@ -132,7 +146,6 @@ public class EcrActionController {
                     action.setEvidencePublicId(asset.getPublicId());
                     action.setEvidenceResourceType(asset.getResourceType());
                     action.setEvidence(asset.getFileName());
-                    deleteLocalEvidenceIfPresent(id);
                     return ResponseEntity.ok(actionRepository.save(action));
                 })
                 .orElse(ResponseEntity.notFound().build());
@@ -140,21 +153,21 @@ public class EcrActionController {
 
     @GetMapping("/actions/{id}/evidence")
     public ResponseEntity<?> downloadEvidence(@PathVariable Long id) {
-        return actionRepository.findById(id).map(action -> {
+        return actionRepository.findById(id).<ResponseEntity<?>>map(action -> {
             if (action.getEvidenceFileUrl() != null && !action.getEvidenceFileUrl().trim().isEmpty()) {
                 DownloadedAsset asset = storageService.download(action.getEvidenceFileUrl(), action.getEvidenceContentType());
                 return ResponseEntity.ok()
                         .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFileName(action.getEvidenceFileName()) + "\"")
                         .contentType(MediaType.parseMediaType(asset.getContentType()))
-                        .body(asset.getData());
+                            .body(asset.getData());
             }
             return evidenceRepository.findById(id)
-                    .map(evidence -> ResponseEntity.ok()
+                    .<ResponseEntity<?>>map(evidence -> ResponseEntity.ok()
                             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFileName(action.getEvidenceFileName()) + "\"")
                             .contentType(MediaType.parseMediaType(action.getEvidenceContentType() == null ? MediaType.APPLICATION_OCTET_STREAM_VALUE : action.getEvidenceContentType()))
                             .body(evidence.getData()))
-                    .orElse(ResponseEntity.notFound().build());
-        }).orElse(ResponseEntity.notFound().build());
+                    .orElseGet(() -> ResponseEntity.notFound().build());
+        }).orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/actions/{id}")
@@ -163,7 +176,10 @@ public class EcrActionController {
             return ResponseEntity.notFound().build();
         }
         actionRepository.findById(id).ifPresent(action -> {
+            assetRepository.findByAction_IdOrderByUploadedAtDescIdDesc(id)
+                    .forEach(asset -> storageService.deleteQuietly(asset.getPublicId(), asset.getResourceType()));
             storageService.deleteQuietly(action.getEvidencePublicId(), action.getEvidenceResourceType());
+            assetRepository.deleteByAction_Id(id);
             deleteLocalEvidenceIfPresent(id);
             actionRepository.deleteById(id);
         });
@@ -177,7 +193,12 @@ public class EcrActionController {
     }
 
     private boolean hasEvidence(EcrAction action) {
-        return action.getEvidenceFileName() != null && !action.getEvidenceFileName().trim().isEmpty();
+        return action.getEvidenceFileName() != null && !action.getEvidenceFileName().trim().isEmpty()
+                || action.getId() != null && !assetRepository.findByAction_IdOrderByUploadedAtDescIdDesc(action.getId()).isEmpty();
+    }
+
+    private boolean requiresEvidence(EcrAction action) {
+        return action != null && (action.isEvidenceRequired() || String.valueOf(action.getCriticality()).startsWith("1"));
     }
 
     private boolean isDone(EcrAction action) {

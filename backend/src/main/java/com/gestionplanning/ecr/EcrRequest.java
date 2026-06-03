@@ -32,6 +32,25 @@ public class EcrRequest {
     private String pilot;
     @Column(length = 3000)
     private String modificationReason;
+    @Column(length = 5000)
+    private String modificationDetail;
+    private String beforePhoto;
+    private String beforePhotoContentType;
+    private Long beforePhotoFileSize;
+    @Column(length = 2000)
+    private String beforePhotoUrl;
+    private String beforePhotoPublicId;
+    private String beforePhotoResourceType;
+    private String afterPhoto;
+    private String afterPhotoContentType;
+    private Long afterPhotoFileSize;
+    @Column(length = 2000)
+    private String afterPhotoUrl;
+    private String afterPhotoPublicId;
+    private String afterPhotoResourceType;
+    private String mixability;
+    @Column(length = 5000)
+    private String dossierReview;
     private String technicalFile;
     private String clientPlanning;
     private String internalPlanning;
@@ -150,6 +169,126 @@ public class EcrRequest {
 
     public void setModificationReason(String modificationReason) {
         this.modificationReason = modificationReason;
+    }
+
+    public String getModificationDetail() {
+        return modificationDetail;
+    }
+
+    public void setModificationDetail(String modificationDetail) {
+        this.modificationDetail = modificationDetail;
+    }
+
+    public String getBeforePhoto() {
+        return beforePhoto;
+    }
+
+    public void setBeforePhoto(String beforePhoto) {
+        this.beforePhoto = beforePhoto;
+    }
+
+    public String getBeforePhotoContentType() {
+        return beforePhotoContentType;
+    }
+
+    public void setBeforePhotoContentType(String beforePhotoContentType) {
+        this.beforePhotoContentType = beforePhotoContentType;
+    }
+
+    public Long getBeforePhotoFileSize() {
+        return beforePhotoFileSize;
+    }
+
+    public void setBeforePhotoFileSize(Long beforePhotoFileSize) {
+        this.beforePhotoFileSize = beforePhotoFileSize;
+    }
+
+    public String getBeforePhotoUrl() {
+        return beforePhotoUrl;
+    }
+
+    public void setBeforePhotoUrl(String beforePhotoUrl) {
+        this.beforePhotoUrl = beforePhotoUrl;
+    }
+
+    public String getBeforePhotoPublicId() {
+        return beforePhotoPublicId;
+    }
+
+    public void setBeforePhotoPublicId(String beforePhotoPublicId) {
+        this.beforePhotoPublicId = beforePhotoPublicId;
+    }
+
+    public String getBeforePhotoResourceType() {
+        return beforePhotoResourceType;
+    }
+
+    public void setBeforePhotoResourceType(String beforePhotoResourceType) {
+        this.beforePhotoResourceType = beforePhotoResourceType;
+    }
+
+    public String getAfterPhoto() {
+        return afterPhoto;
+    }
+
+    public void setAfterPhoto(String afterPhoto) {
+        this.afterPhoto = afterPhoto;
+    }
+
+    public String getAfterPhotoContentType() {
+        return afterPhotoContentType;
+    }
+
+    public void setAfterPhotoContentType(String afterPhotoContentType) {
+        this.afterPhotoContentType = afterPhotoContentType;
+    }
+
+    public Long getAfterPhotoFileSize() {
+        return afterPhotoFileSize;
+    }
+
+    public void setAfterPhotoFileSize(Long afterPhotoFileSize) {
+        this.afterPhotoFileSize = afterPhotoFileSize;
+    }
+
+    public String getAfterPhotoUrl() {
+        return afterPhotoUrl;
+    }
+
+    public void setAfterPhotoUrl(String afterPhotoUrl) {
+        this.afterPhotoUrl = afterPhotoUrl;
+    }
+
+    public String getAfterPhotoPublicId() {
+        return afterPhotoPublicId;
+    }
+
+    public void setAfterPhotoPublicId(String afterPhotoPublicId) {
+        this.afterPhotoPublicId = afterPhotoPublicId;
+    }
+
+    public String getAfterPhotoResourceType() {
+        return afterPhotoResourceType;
+    }
+
+    public void setAfterPhotoResourceType(String afterPhotoResourceType) {
+        this.afterPhotoResourceType = afterPhotoResourceType;
+    }
+
+    public String getMixability() {
+        return mixability;
+    }
+
+    public void setMixability(String mixability) {
+        this.mixability = mixability;
+    }
+
+    public String getDossierReview() {
+        return dossierReview;
+    }
+
+    public void setDossierReview(String dossierReview) {
+        this.dossierReview = dossierReview;
     }
 
     public String getTechnicalFile() {

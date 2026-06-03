@@ -32,8 +32,8 @@ export function UsersPage({ currentUser, editingUser, saving, userForm, users, o
 
   return (
     <section className="page-content users-content">
-      <PageHeader eyebrow="Administration" title="Utilisateurs" subtitle="Creation et maintenance des comptes applicatifs par l'administrateur fchelbi." />
-      {!canAdmin && <EmptyState title="Acces admin requis" text="Connectez-vous avec fchelbi pour administrer les utilisateurs." />}
+      <PageHeader eyebrow="Administration" title="Utilisateurs" subtitle="Création et maintenance des comptes applicatifs par l'administrateur fchelbi." />
+      {!canAdmin && <EmptyState title="Accès admin requis" text="Connectez-vous avec fchelbi pour administrer les utilisateurs." />}
       <div className="users-layout">
         <section className="panel">
           <div className="section-title">
@@ -48,7 +48,7 @@ export function UsersPage({ currentUser, editingUser, saving, userForm, users, o
           </div>
           <div className="user-table">
             {users.length === 0 ? (
-              <EmptyState title="Aucun utilisateur" text="Ajoutez un premier compte pour demarrer l'administration." />
+              <EmptyState title="Aucun utilisateur" text="Ajoutez un premier compte pour démarrer l'administration." />
             ) : (
               users.map((user) => (
                 <article className="user-row" key={user.id}>
@@ -101,7 +101,7 @@ function UserDialog({ canAdmin, editingUser, form, saving, onClose, onSubmit, se
         <div className="form-intro">
           <div>
             <h2 id="user-dialog-title">{editingUser ? "Modifier l'utilisateur" : "Ajouter un utilisateur"}</h2>
-            <p>Le username et l'email doivent rester uniques. Le mot de passe est requis seulement a la creation.</p>
+            <p>Le username et l'email doivent rester uniques. Le mot de passe est requis seulement à la création.</p>
           </div>
           <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
             <X size={18} />

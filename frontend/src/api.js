@@ -85,6 +85,19 @@ export function createEcrRequest(payload) {
   });
 }
 
+export function updateEcrRequest(requestId, payload) {
+  return request(`/ecr-requests/${requestId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function uploadEcrRequestImage(requestId, type, file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return multipartRequest(`/ecr-requests/${requestId}/images/${type}`, formData);
+}
+
 export function deleteEcrRequest(requestId) {
   return request(`/ecr-requests/${requestId}`, {
     method: "DELETE"

@@ -41,7 +41,7 @@ export function PlanningRulesAdmin({ form, rules, saving, onCancelEdit, onDelete
       <div className="section-title">
         <div>
           <h2>Actions standard par phase</h2>
-          <span>L'admin definit les actions, criticites, preuves et liaisons qui seront generees dans chaque nouvelle ECR.</span>
+          <span>L'admin définit les actions, criticités, preuves et liaisons qui seront générées dans chaque nouvelle ECR.</span>
         </div>
         <span>{rules.length} actions</span>
       </div>
@@ -66,18 +66,18 @@ export function PlanningRulesAdmin({ form, rules, saving, onCancelEdit, onDelete
       />
       <div className="planning-rule-list">
         {rules.length === 0 ? (
-          <EmptyState title="Aucune action standard" text="Cliquez sur une phase coloree pour creer la premiere action standard." />
+          <EmptyState title="Aucune action standard" text="Cliquez sur une phase colorée pour créer la première action standard." />
         ) : (
           rules.map((rule) => (
             <article className="planning-rule-row" key={rule.id}>
               <span className={`stage-pill ${stageColorClass(rule.stage)}`}>{stageLabel(rule.stage)}</span>
               <div>
                 <strong>{rule.actionTitle}</strong>
-                <span>{rule.topicRisk || "Topic non renseigne"}</span>
+                <span>{rule.topicRisk || "Topic non renseigné"}</span>
               </div>
               <strong className={`criticality ${criticalityClass(rule.criticality)}`}>{rule.criticality || "3-faible"}</strong>
               <span>{[rule.appliesToModification ? "Modification" : "", rule.appliesToNewProject ? "Nouveau projet" : ""].filter(Boolean).join(" + ")}</span>
-              <span>{rule.dependencyActionTitle ? `Apres ${rule.dependencyAnchor === "INPUT" ? "entree" : "sortie"}: ${rule.dependencyActionTitle}` : "Depart reception ECR"}</span>
+              <span>{rule.dependencyActionTitle ? `Après ${rule.dependencyAnchor === "INPUT" ? "entrée" : "sortie"}: ${rule.dependencyActionTitle}` : "Départ réception ECR"}</span>
               <strong className="duration-pill">{rule.durationDays} j</strong>
               <div className="row-actions">
                 <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => openEditDialog(rule)} aria-label="Modifier la regle" title="Modifier">
@@ -200,7 +200,7 @@ function ActionRuleDialog({ form, rules, saving, onClose, onSubmit, setForm }) {
         </div>
         <section className="phase-existing-actions">
           <div className="phase-preview-title">
-            <h3>Actions deja creees dans cette phase</h3>
+            <h3>Actions déjà créées dans cette phase</h3>
             <span>{phaseActions.length} action{phaseActions.length > 1 ? "s" : ""}</span>
           </div>
           {phaseActions.length === 0 ? (
@@ -210,9 +210,9 @@ function ActionRuleDialog({ form, rules, saving, onClose, onSubmit, setForm }) {
               {phaseActions.map((rule) => (
                 <article className="phase-action-table-row" key={rule.id || rule.actionTitle}>
                   <strong>{rule.actionTitle}</strong>
-                  <span>{rule.topicRisk || "Topic non renseigne"}</span>
+                  <span>{rule.topicRisk || "Topic non renseigné"}</span>
                   <small className={`criticality ${criticalityClass(rule.criticality)}`}>{rule.criticality || "3-faible"}</small>
-                  <em>{rule.dependencyActionTitle ? `Bloquee par: ${rule.dependencyActionTitle}` : "Sans blocage"}</em>
+                  <em>{rule.dependencyActionTitle ? `Bloquée par: ${rule.dependencyActionTitle}` : "Sans blocage"}</em>
                 </article>
               ))}
             </div>
@@ -249,7 +249,7 @@ function ActionRuleDialog({ form, rules, saving, onClose, onSubmit, setForm }) {
             </select>
           </label>
           <label>
-            Bloquee par
+            Bloquée par
             <select value={form.dependencyActionTitle} onChange={(event) => setForm((current) => ({ ...current, dependencyActionTitle: event.target.value }))}>
               <option value="">Aucune action</option>
               {dependencyOptions.map((rule) => (

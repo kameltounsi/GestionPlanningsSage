@@ -85,6 +85,12 @@ export function createEcrRequest(payload) {
   });
 }
 
+export function deleteEcrRequest(requestId) {
+  return request(`/ecr-requests/${requestId}`, {
+    method: "DELETE"
+  });
+}
+
 export function updateEcrStage(requestId, stage) {
   return request(`/ecr-requests/${requestId}/stage?stage=${encodeURIComponent(stage)}`, {
     method: "PATCH"
@@ -164,6 +170,12 @@ export function updateAction(actionId, payload) {
   return request(`/actions/${actionId}`, {
     method: "PUT",
     body: JSON.stringify(payload)
+  });
+}
+
+export function deleteAction(actionId) {
+  return request(`/actions/${actionId}`, {
+    method: "DELETE"
   });
 }
 

@@ -6,4 +6,6 @@ import java.util.List;
 
 public interface EcrDocumentRepository extends JpaRepository<EcrDocument, Long> {
     List<EcrDocument> findByRequest_IdOrderByUploadedAtDescIdDesc(Long requestId);
+
+    void deleteByRequest_Id(Long requestId);
 }

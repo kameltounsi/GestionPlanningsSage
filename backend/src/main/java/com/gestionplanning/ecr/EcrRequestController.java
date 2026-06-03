@@ -1,6 +1,14 @@
 package com.gestionplanning.ecr;
 
+import com.gestionplanning.action.EcrAction;
+import com.gestionplanning.action.EcrActionEvidenceRepository;
+import com.gestionplanning.action.EcrActionRepository;
+import com.gestionplanning.document.EcrDocument;
+import com.gestionplanning.document.EcrDocumentRepository;
+import com.gestionplanning.penalty.PenaltyRepository;
+import com.gestionplanning.storage.CloudinaryStorageService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
@@ -12,12 +20,24 @@ import java.util.List;
 public class EcrRequestController {
     private final EcrRequestRepository requestRepository;
     private final ChecklistItemRepository checklistItemRepository;
+    private final EcrActionRepository actionRepository;
+    private final EcrActionEvidenceRepository evidenceRepository;
+    private final EcrDocumentRepository documentRepository;
+    private final PenaltyRepository penaltyRepository;
+    private final CloudinaryStorageService storageService;
     private final EcrTemplateService templateService;
 
     public EcrRequestController(EcrRequestRepository requestRepository, ChecklistItemRepository checklistItemRepository,
-                                EcrTemplateService templateService) {
+                                EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
+                                EcrDocumentRepository documentRepository, PenaltyRepository penaltyRepository,
+                                CloudinaryStorageService storageService, EcrTemplateService templateService) {
         this.requestRepository = requestRepository;
         this.checklistItemRepository = checklistItemRepository;
+        this.actionRepository = actionRepository;
+        this.evidenceRepository = evidenceRepository;
+        this.documentRepository = documentRepository;
+        this.penaltyRepository = penaltyRepository;
+        this.storageService = storageService;
         this.templateService = templateService;
     }
 
@@ -76,10 +96,25 @@ public class EcrRequestController {
     }
 
     @DeleteMapping("/{id}")
+    @Transactional
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         if (!requestRepository.existsById(id)) {
             return ResponseEntity.notFound().build();
         }
+        List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(id);
+        actions.forEach(action -> storageService.deleteQuietly(action.getEvidencePublicId(), action.getEvidenceResourceType()));
+        actions.forEach(action -> {
+            if (evidenceRepository.existsById(action.getId())) {
+                evidenceRepository.deleteById(action.getId());
+            }
+        });
+
+        List<EcrDocument> documents = documentRepository.findByRequest_IdOrderByUploadedAtDescIdDesc(id);
+        documents.forEach(document -> storageService.deleteQuietly(document.getPublicId(), document.getResourceType()));
+
+        penaltyRepository.deleteByRequest_Id(id);
+        documentRepository.deleteByRequest_Id(id);
+        actionRepository.deleteByRequest_Id(id);
         requestRepository.deleteById(id);
         return ResponseEntity.noContent().build();
     }

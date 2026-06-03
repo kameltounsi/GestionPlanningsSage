@@ -1,20 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
+import Swal from "sweetalert2";
+import "sweetalert2/dist/sweetalert2.min.css";
 import {
-  AlertTriangle,
   CalendarDays,
-  Camera,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   CircleAlert,
   ClipboardList,
   FolderKanban,
   Gauge,
-  LayoutDashboard,
-  ListChecks,
-  Lock,
-  LogOut,
-  Mail,
   Maximize2,
   Paperclip,
   Pencil,
@@ -23,8 +16,6 @@ import {
   Search,
   Trash2,
   Upload,
-  UserCircle,
-  Users,
   X
 } from "lucide-react";
 import {
@@ -35,6 +26,8 @@ import {
   createUser,
   clearSession,
   deleteActionPlanningRule,
+  deleteAction,
+  deleteEcrRequest,
   deleteProject,
   deleteUser,
   getActionPlanningRules,
@@ -60,188 +53,22 @@ import {
   changeUserPassword,
   uploadUserPhoto
 } from "./api";
+import { EmptyState } from "./components/common/EmptyState";
+import { PageHeader } from "./components/common/PageHeader";
+import { StatCard } from "./components/common/StatCard";
+import { emptyActionForm, emptyEcrForm, emptyPlanningRuleForm, emptyUserForm } from "./constants/forms";
+import { userRoleOptions } from "./constants/roles";
+import { stageColors } from "./constants/stages";
+import { PlanningRulesAdmin } from "./features/actionRules/PlanningRulesAdmin";
+import { LoginPage } from "./features/auth/LoginPage";
+import { ProfilePage } from "./features/profile/ProfilePage";
+import { UsersPage } from "./features/users/UsersPage";
+import { Sidebar } from "./layout/Sidebar";
+import { comparePlanningRules } from "./utils/planningRules";
+import { criticalityClass, readableStatus, statusClass } from "./utils/status";
+import { getStages, safeStage, stageColorClass, stageLabel } from "./utils/stages";
+import { userToForm } from "./utils/users";
 import "./styles.css";
-
-const stageDefinitions = [
-  { key: "FEASIBILITY_VALIDATION", modificationLabel: "Feasability Validation", newProjectLabel: "Projet Time line", modification: true, newProject: true },
-  { key: "PROJECT_MANAGEMENT", modificationLabel: "Validation interne status", newProjectLabel: "Project Management", modification: true, newProject: true },
-  { key: "PRODUCT_DEVELOPMENT", modificationLabel: "VP interne valid", newProjectLabel: "Product Development", modification: true, newProject: true },
-  { key: "PROCESS_DEVELOPMENT", modificationLabel: "Process Development", newProjectLabel: "Process Development", modification: false, newProject: true },
-  { key: "CUSTOMER_VALIDATION", modificationLabel: "Customer validation", newProjectLabel: "Customer validation", modification: true, newProject: false },
-  { key: "PPAP_SOP_PREPARATION", modificationLabel: "PPAP validation Preparation SOP", newProjectLabel: "Production Set-up & Pre-Series", modification: true, newProject: true },
-  { key: "LAUNCH", modificationLabel: "Launch", newProjectLabel: "Launch", modification: false, newProject: true },
-  { key: "CLOSED", modificationLabel: "Cloture Status", newProjectLabel: "Cloture Status", modification: true, newProject: false },
-  { key: "CANCELLED", modificationLabel: "Cancelled", newProjectLabel: "Project Cancelled", modification: true, newProject: true }
-];
-
-const stageColors = [
-  "teal",
-  "blue",
-  "indigo",
-  "violet",
-  "amber",
-  "orange",
-  "green",
-  "slate",
-  "red"
-];
-
-const navItems = [
-  ["dashboard", "Tableau", LayoutDashboard],
-  ["modifications", "Modifications", ListChecks],
-  ["projects", "Projets", FolderKanban],
-  ["users", "Utilisateurs", Users],
-  ["profile", "Profil", UserCircle]
-];
-
-const emptyEcrForm = {
-  accessInternalNumber: "",
-  modificationNumber: "",
-  client: "",
-  product: "",
-  modificationProject: "",
-  modificationReason: "",
-  receptionDate: "",
-  sopDate: "",
-  pilot: "",
-  newVersion: false,
-  currentStage: "FEASIBILITY_VALIDATION",
-  initialActions: []
-};
-
-const emptyActionForm = {
-  topicRisk: "",
-  title: "",
-  responsible: "",
-  criticality: "3-faible",
-  expectedEvidence: "",
-  evidence: "",
-  evidenceFile: null,
-  deadline: "",
-  date1: "",
-  date2: "",
-  date3: "",
-  startDate: "",
-  endDate: "",
-  workDurationDays: 1,
-  status: "TODO",
-  evidenceRequired: false,
-  comment: ""
-};
-
-const emptyPlanningRuleForm = {
-  stage: "FEASIBILITY_VALIDATION",
-  appliesToModification: true,
-  appliesToNewProject: true,
-  actionTitle: "",
-  topicRisk: "",
-  responsible: "",
-  criticality: "3-faible",
-  expectedEvidence: "",
-  evidenceRequired: false,
-  dependencyActionTitle: "",
-  dependencyAnchor: "OUTPUT",
-  durationDays: 1
-};
-
-const emptyUserForm = {
-  fullName: "",
-  username: "",
-  jobTitle: "",
-  email: "",
-  password: "",
-  phone: "",
-  role: "CHEF_DE_PROJET",
-  enabled: true
-};
-
-const userRoleOptions = [
-  ["ADMIN", "Admin"],
-  ["CHEF_DE_PROJET", "Chef de projet"],
-  ["VALIDATEUR", "Validateur"],
-  ["MANAGER", "Manager"]
-];
-
-function userRoleLabel(role) {
-  return userRoleOptions.find(([value]) => value === role)?.[1] || role || "-";
-}
-
-const statusLabels = {
-  TODO: "A faire",
-  IN_PROGRESS: "En cours",
-  DONE: "Termine",
-  LATE: "En retard",
-  CANCELLED: "Annule",
-  OK: "OK",
-  NOK: "NOK"
-};
-
-function readableStatus(status) {
-  return statusLabels[status] || status || "-";
-}
-
-function statusClass(status) {
-  return String(status || "").toLowerCase();
-}
-
-function criticalityClass(value) {
-  if (String(value).startsWith("1")) return "critical";
-  if (String(value).startsWith("2")) return "medium";
-  return "low";
-}
-
-function userToForm(user) {
-  return {
-    fullName: user?.fullName || "",
-    username: user?.username || "",
-    jobTitle: user?.jobTitle || "",
-    email: user?.email || "",
-    password: "",
-    phone: user?.phone || "",
-    role: user?.role || "CHEF_DE_PROJET",
-    enabled: user?.enabled ?? true
-  };
-}
-
-function formatDateTime(value) {
-  if (!value) return "-";
-  return new Date(value).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-function comparePlanningRules(a, b) {
-  const stageCompare = String(a.stage).localeCompare(String(b.stage));
-  if (stageCompare !== 0) return stageCompare;
-  return String(a.actionTitle || "").localeCompare(String(b.actionTitle || ""));
-}
-
-function getStages(newProject) {
-  return stageDefinitions
-    .filter((stage) => (newProject ? stage.newProject : stage.modification))
-    .map((stage) => [stage.key, newProject ? stage.newProjectLabel : stage.modificationLabel]);
-}
-
-function firstStage(newProject) {
-  return getStages(newProject)[0][0];
-}
-
-function isStageAllowed(stage, newProject) {
-  return getStages(newProject).some(([key]) => key === stage);
-}
-
-function safeStage(stage, newProject) {
-  return isStageAllowed(stage, newProject) ? stage : firstStage(newProject);
-}
-
-function stageLabel(stage, newProject = false) {
-  const definition = stageDefinitions.find(({ key }) => key === stage);
-  if (!definition) return stage;
-  return newProject ? definition.newProjectLabel : definition.modificationLabel;
-}
-
-function stageColorClass(stage) {
-  const index = stageDefinitions.findIndex((definition) => definition.key === stage);
-  return stageColors[index >= 0 ? index % stageColors.length : 0];
-}
 
 function App() {
   const [authSession, setAuthSession] = useState(getStoredSession());
@@ -379,7 +206,6 @@ function App() {
       const nextForm = { ...form, [field]: value };
       if (field === "newVersion") {
         nextForm.currentStage = safeStage(form.currentStage, value);
-        nextForm.initialActions = form.initialActions.filter((action) => isStageAllowed(action.stage, value));
       }
       return nextForm;
     });
@@ -430,29 +256,90 @@ function App() {
       .catch(() => setError("Impossible de sauvegarder l'etape ECR."));
   }
 
+  function openRequest(request) {
+    setSelectedId(request.id);
+    setSelectedStage(safeStage(request.currentStage, Boolean(request.newVersion)));
+    setShowCreateForm(false);
+    setPage("modifications");
+  }
+
+  function handleDeleteEcr(request) {
+    const label = request.modificationNumber || request.client || `#${request.id}`;
+    Swal.fire({
+      title: "Supprimer la modification ?",
+      text: `La modification ${label} sera supprimée définitivement.`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Supprimer",
+      cancelButtonText: "Annuler",
+      confirmButtonColor: "#b42318"
+    }).then((result) => {
+      if (!result.isConfirmed) return;
+      setSaving(true);
+      setError("");
+      deleteEcrRequest(request.id)
+        .then(() => getEcrRequests())
+        .then((requestData) => {
+          setRequests(requestData);
+          if (selectedId === request.id) {
+            const nextRequest = requestData[0] || null;
+            setSelectedId(nextRequest?.id ?? null);
+            setSelectedStage(nextRequest ? safeStage(nextRequest.currentStage, Boolean(nextRequest.newVersion)) : "FEASIBILITY_VALIDATION");
+          }
+          Swal.fire({ title: "Suppression effectuee", icon: "success", timer: 1500, showConfirmButton: false });
+        })
+        .catch(() => {
+          setError("Suppression de la modification impossible. Verifiez les droits ou les donnees liees.");
+          Swal.fire("Erreur", "Suppression de la modification impossible.", "error");
+        })
+        .finally(() => setSaving(false));
+    });
+  }
+
+  function actionFormPayload(form, stage) {
+    return {
+      ...form,
+      evidenceFile: undefined,
+      checked: form.status === "DONE",
+      closedDate: form.status === "DONE" ? new Date().toISOString().slice(0, 10) : null,
+      deadline: form.deadline || null,
+      date1: form.date1 || null,
+      date2: form.date2 || null,
+      date3: form.date3 || null,
+      startDate: form.startDate || null,
+      endDate: form.endDate || null,
+      workDurationDays: Number(form.workDurationDays) || 1,
+      stage
+    };
+  }
+
+  function dependencyFor(action) {
+    return action?.dependsOnActionId ? actions.find((item) => item.id === action.dependsOnActionId) : null;
+  }
+
+  function dependencyBlocksCompletion(action) {
+    const dependency = dependencyFor(action);
+    return dependency && !(dependency.checked || dependency.status === "DONE");
+  }
+
   function handleCreateAction(event) {
     event.preventDefault();
-    if (!selectedRequest) return;
+    if (!selectedRequest) return Promise.resolve();
     if (actionForm.evidenceRequired && actionForm.status === "DONE" && !actionForm.evidenceFile) {
       setError("Ajoutez un asset avant de creer cette action comme terminee.");
-      return;
+      Swal.fire("Asset requis", "Ajoutez un asset avant de creer cette action comme terminee.", "warning");
+      return Promise.reject(new Error("Evidence required"));
     }
     setSaving(true);
-    createAction(selectedRequest.id, {
-      ...actionForm,
-      evidenceFile: undefined,
-      deadline: actionForm.deadline || null,
-      date1: actionForm.date1 || null,
-      date2: actionForm.date2 || null,
-      date3: actionForm.date3 || null,
-      startDate: actionForm.startDate || null,
-      endDate: actionForm.endDate || null,
-      workDurationDays: Number(actionForm.workDurationDays) || 1,
-      stage: selectedStage
-    })
+    const payload = actionFormPayload(actionForm, selectedStage);
+    const createPayload = actionForm.evidenceFile && payload.status === "DONE"
+      ? { ...payload, checked: false, status: "TODO", closedDate: null }
+      : payload;
+    return createAction(selectedRequest.id, createPayload)
       .then((savedAction) => {
         if (actionForm.evidenceFile) {
-          return uploadActionEvidence(savedAction.id, actionForm.evidenceFile);
+          return uploadActionEvidence(savedAction.id, actionForm.evidenceFile)
+            .then((actionWithEvidence) => (payload.status === "DONE" ? updateAction(actionWithEvidence.id, payload) : actionWithEvidence));
         }
         return savedAction;
       })
@@ -465,9 +352,77 @@ function App() {
       .finally(() => setSaving(false));
   }
 
+  function handleUpdateAction(action, form) {
+    if (!selectedRequest) return Promise.resolve();
+    if (form.status === "DONE" && dependencyBlocksCompletion(action)) {
+      const dependency = dependencyFor(action);
+      setError("Terminez d'abord l'action precedente avant de valider cette action.");
+      Swal.fire("Action bloquee", `Terminez d'abord: ${dependency.title || "action precedente"}.`, "warning");
+      return Promise.reject(new Error("Dependency incomplete"));
+    }
+    if (form.evidenceRequired && form.status === "DONE" && !action.evidenceFileName && !form.evidenceFile) {
+      setError("Ajoutez un asset avant de terminer cette action.");
+      Swal.fire("Asset requis", "Ajoutez un asset avant de terminer cette action.", "warning");
+      return Promise.reject(new Error("Evidence required"));
+    }
+    setSaving(true);
+    setError("");
+    const payload = actionFormPayload(form, selectedStage);
+    const saveRequest = form.evidenceFile
+      ? uploadActionEvidence(action.id, form.evidenceFile).then(() => updateAction(action.id, payload))
+      : updateAction(action.id, payload);
+    return saveRequest
+      .then(() => getActions(selectedRequest.id, selectedStage))
+      .then((actionData) => {
+        setActions(actionData);
+        Swal.fire({ title: "Action modifiee", icon: "success", timer: 1300, showConfirmButton: false });
+      })
+      .catch((error) => {
+        setError("Modification action impossible.");
+        Swal.fire("Erreur", "Modification action impossible.", "error");
+        throw error;
+      })
+      .finally(() => setSaving(false));
+  }
+
+  function handleDeleteAction(action) {
+    if (!selectedRequest) return;
+    Swal.fire({
+      title: "Supprimer l'action ?",
+      text: action.title || "Cette action sera supprimée définitivement.",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Supprimer",
+      cancelButtonText: "Annuler",
+      confirmButtonColor: "#b42318"
+    }).then((result) => {
+      if (!result.isConfirmed) return;
+      setSaving(true);
+      setError("");
+      deleteAction(action.id)
+        .then(() => getActions(selectedRequest.id, selectedStage))
+        .then((actionData) => {
+          setActions(actionData);
+          Swal.fire({ title: "Action supprimée", icon: "success", timer: 1300, showConfirmButton: false });
+        })
+        .catch(() => {
+          setError("Suppression action impossible.");
+          Swal.fire("Erreur", "Suppression action impossible.", "error");
+        })
+        .finally(() => setSaving(false));
+    });
+  }
+
   function handleToggleAction(action, completed) {
+    if (completed && dependencyBlocksCompletion(action)) {
+      const dependency = dependencyFor(action);
+      setError("Terminez d'abord l'action precedente avant de valider cette action.");
+      Swal.fire("Action bloquee", `Terminez d'abord: ${dependency.title || "action precedente"}.`, "warning");
+      return;
+    }
     if (completed && action.evidenceRequired && !action.evidenceFileName) {
       setError("Cette action necessite un asset avant d'etre terminee.");
+      Swal.fire("Asset requis", "Ajoutez un asset avant de terminer cette action.", "warning");
       return;
     }
     const updatedAction = {
@@ -541,8 +496,9 @@ function App() {
       actionTitle: planningRuleForm.actionTitle.trim(),
       topicRisk: planningRuleForm.topicRisk.trim() || null,
       responsible: planningRuleForm.responsible.trim() || null,
-      expectedEvidence: planningRuleForm.expectedEvidence.trim() || null,
+      expectedEvidence: null,
       dependencyActionTitle: planningRuleForm.dependencyActionTitle.trim() || null,
+      dependencyAnchor: "OUTPUT",
       durationDays: Number(planningRuleForm.durationDays) || 0
     };
     const request = editingPlanningRule ? updateActionPlanningRule(editingPlanningRule, payload) : createActionPlanningRule(payload);
@@ -729,43 +685,16 @@ function App() {
 
   return (
     <main className={menuCollapsed ? "app-frame nav-collapsed" : "app-frame"}>
-      <aside className="app-nav">
-        <div className="brand">
-          <ClipboardList className="brand-mark" size={24} />
-          <div className="brand-copy">
-            <h1>Gestion Planning</h1>
-            <span>Application ECR</span>
-          </div>
-          <button
-            aria-label={menuCollapsed ? "Agrandir le menu" : "Reduire le menu"}
-            className="nav-toggle"
-            onClick={() => setMenuCollapsed((collapsed) => !collapsed)}
-            title={menuCollapsed ? "Agrandir le menu" : "Reduire le menu"}
-            type="button"
-          >
-            {menuCollapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
-          </button>
-        </div>
-        <nav className="main-menu">
-          {navItems.map(([key, label, Icon]) => (
-            <button
-              key={key}
-              className={page === key ? "menu-item active" : "menu-item"}
-              onClick={() => {
-                setPage(key);
-                setShowCreateForm(false);
-              }}
-            >
-              <Icon size={18} />
-              <span>{label}</span>
-            </button>
-          ))}
-          <button className="menu-item logout-item" onClick={handleLogout} type="button">
-            <LogOut size={18} />
-            <span>Deconnexion</span>
-          </button>
-        </nav>
-      </aside>
+      <Sidebar
+        collapsed={menuCollapsed}
+        page={page}
+        onCollapseToggle={() => setMenuCollapsed((collapsed) => !collapsed)}
+        onLogout={handleLogout}
+        onNavigate={(nextPage) => {
+          setPage(nextPage);
+          setShowCreateForm(false);
+        }}
+      />
 
       <section className="page-shell">
         {error && (
@@ -776,7 +705,14 @@ function App() {
         )}
 
         {page === "dashboard" && (
-          <DashboardPage stats={dashboardStats} requests={requests} onCreateRequest={openCreateFlow} />
+          <DashboardPage
+            requests={requests}
+            saving={saving}
+            stats={dashboardStats}
+            onCreateRequest={openCreateFlow}
+            onDeleteRequest={handleDeleteEcr}
+            onOpenRequest={openRequest}
+          />
         )}
 
         {page === "projects" && (
@@ -829,8 +765,11 @@ function App() {
             setSelectedStage={setSelectedStage}
             setShowCreateForm={setShowCreateForm}
             handleCreateAction={handleCreateAction}
+            handleDeleteAction={handleDeleteAction}
+            handleDeleteRequest={handleDeleteEcr}
             handleStageChange={handleStageChange}
             handleToggleAction={handleToggleAction}
+            handleUpdateAction={handleUpdateAction}
             handleUploadEvidence={handleUploadEvidence}
             updateActionForm={updateActionForm}
           />
@@ -884,64 +823,7 @@ function App() {
   );
 }
 
-function LoginPage({ error, form, saving, onSubmit, setForm }) {
-  return (
-    <main className="login-screen">
-      <section className="login-panel">
-        <div className="login-brand">
-          <ClipboardList className="brand-mark" size={28} />
-          <div>
-            <p className="eyebrow">Gestion Planning</p>
-            <h1>Connexion</h1>
-            <span>Acces securise a l'application ECR</span>
-          </div>
-        </div>
-        {error && (
-          <div className="banner login-banner">
-            <CircleAlert size={18} />
-            {error}
-          </div>
-        )}
-        <form className="login-form" onSubmit={onSubmit}>
-          <label>
-            Email
-            <span className="input-with-icon">
-              <Mail size={16} />
-              <input
-                autoComplete="email"
-                required
-                type="email"
-                value={form.email}
-                onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
-                placeholder="f.chalbi@sagetunisia.com"
-              />
-            </span>
-          </label>
-          <label>
-            Mot de passe
-            <span className="input-with-icon">
-              <Lock size={16} />
-              <input
-                autoComplete="current-password"
-                required
-                type="password"
-                value={form.password}
-                onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-                placeholder="Votre mot de passe"
-              />
-            </span>
-          </label>
-          <button className="primary-action wide-action" disabled={saving} type="submit">
-            <Lock size={16} />
-            Se connecter
-          </button>
-        </form>
-      </section>
-    </main>
-  );
-}
-
-function DashboardPage({ stats, requests, onCreateRequest }) {
+function DashboardPage({ requests, saving, stats, onCreateRequest, onDeleteRequest, onOpenRequest }) {
   const visibleRequests = requests
     .filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED")
     .slice(0, 5);
@@ -966,15 +848,27 @@ function DashboardPage({ stats, requests, onCreateRequest }) {
         </div>
         <div className="compact-list">
           {requests.length === 0 ? (
-            <EmptyState title="Aucune modification creee" text="Commencez par creer une demande ECR depuis le bouton Creer ECR." />
+            <EmptyState title="Aucune modification creee" text="Commencez par créer une demande ECR depuis le bouton Créer ECR." />
           ) : (
             recentRequests.map((request) => (
               <article className="compact-row" key={request.id}>
-                <div>
+                <button className="compact-row-main" type="button" onClick={() => onOpenRequest(request)}>
                   <strong>{request.modificationNumber || request.client}</strong>
                   <span>{request.modificationProject || "Projet non renseigne"}</span>
+                </button>
+                <div className="compact-row-actions">
+                  <small className={`stage-pill ${stageColorClass(request.currentStage)}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</small>
+                  <button
+                    className="ghost-icon"
+                    disabled={saving}
+                    type="button"
+                    onClick={() => onDeleteRequest(request)}
+                    title="Supprimer la modification"
+                    aria-label="Supprimer la modification"
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </div>
-                <small className={`stage-pill ${stageColorClass(request.currentStage)}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</small>
               </article>
             ))
           )}
@@ -1010,34 +904,6 @@ function CreateModificationDialog({ ecrForm, pilots, projects, saving, onClose, 
 
 function NewModificationPage({ ecrForm, pilots, projects, saving, onCancel, onSubmit, updateEcrForm }) {
   const availableStages = getStages(ecrForm.newVersion);
-  const actionCount = ecrForm.initialActions.length;
-
-  function addInitialAction(stage) {
-    updateEcrForm("initialActions", [
-      ...ecrForm.initialActions,
-      {
-        clientId: `${stage}-${Date.now()}`,
-        stage,
-        title: "",
-        responsible: ecrForm.pilot || "",
-        criticality: "3-faible",
-        expectedEvidence: "",
-        evidenceRequired: false,
-        status: "TODO",
-        workDurationDays: 1
-      }
-    ]);
-  }
-
-  function updateInitialAction(clientId, field, value) {
-    updateEcrForm("initialActions", ecrForm.initialActions.map((action) => (
-      action.clientId === clientId ? { ...action, [field]: value } : action
-    )));
-  }
-
-  function removeInitialAction(clientId) {
-    updateEcrForm("initialActions", ecrForm.initialActions.filter((action) => action.clientId !== clientId));
-  }
 
   return (
     <section className="creation-panel">
@@ -1046,9 +912,9 @@ function NewModificationPage({ ecrForm, pilots, projects, saving, onCancel, onSu
           <div>
             <p className="eyebrow">Creation ECR</p>
             <h2 id="create-modification-title">Nouvelle modification</h2>
-            <p>Renseignez les informations de base, creez la demande, puis continuez directement le suivi des phases et actions sur cette meme page.</p>
+            <p>Renseignez les informations de base, créez la demande, puis continuez directement le suivi des phases et actions sur cette meme page.</p>
           </div>
-          <span className="stage-pill teal">Creation assistee</span>
+          <span className="stage-pill teal">Creation assistée</span>
         </div>
         <label className="project-type-toggle">
           <input
@@ -1105,53 +971,6 @@ function NewModificationPage({ ecrForm, pilots, projects, saving, onCancel, onSu
           Description de la modification
           <textarea value={ecrForm.modificationReason} onChange={(event) => updateEcrForm("modificationReason", event.target.value)} />
         </label>
-        <section className="initial-actions-builder">
-          <div className="section-title">
-            <div>
-              <h2>Actions complementaires</h2>
-              <span>{actionCount} actions ajoutees en plus du referentiel admin</span>
-            </div>
-          </div>
-          <div className="initial-stage-list">
-            {availableStages.map(([stageKey, label]) => {
-              const stageActions = ecrForm.initialActions.filter((action) => action.stage === stageKey);
-              return (
-                <article className="initial-stage" key={stageKey}>
-                  <div className="initial-stage-head">
-                    <span className={`stage-pill ${stageColorClass(stageKey)}`}>{label}</span>
-                    <button className="secondary-action compact-action" type="button" onClick={() => addInitialAction(stageKey)}>
-                      <Plus size={14} />
-                      Action
-                    </button>
-                  </div>
-                  <div className="initial-action-list">
-                    {stageActions.length === 0 ? (
-                      <p className="form-hint">Aucune action definie pour cette phase.</p>
-                    ) : stageActions.map((action) => (
-                      <div className="initial-action-row" key={action.clientId}>
-                        <input required value={action.title} onChange={(event) => updateInitialAction(action.clientId, "title", event.target.value)} placeholder="Titre de l'action" />
-                        <input value={action.responsible} onChange={(event) => updateInitialAction(action.clientId, "responsible", event.target.value)} placeholder="Pilote" />
-                        <select value={action.criticality} onChange={(event) => updateInitialAction(action.clientId, "criticality", event.target.value)}>
-                          <option value="1-critique">1-critique</option>
-                          <option value="2-moyenne">2-moyenne</option>
-                          <option value="3-faible">3-faible</option>
-                        </select>
-                        <input value={action.expectedEvidence} onChange={(event) => updateInitialAction(action.clientId, "expectedEvidence", event.target.value)} placeholder="Asset / preuve attendue" />
-                        <label className="asset-required-field">
-                          <input checked={action.evidenceRequired} type="checkbox" onChange={(event) => updateInitialAction(action.clientId, "evidenceRequired", event.target.checked)} />
-                          Asset obligatoire
-                        </label>
-                        <button className="ghost-icon" type="button" onClick={() => removeInitialAction(action.clientId)} title="Supprimer l'action">
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
         <div className="button-row">
           <button className="primary-action" disabled={saving || projects.length === 0} type="submit">
             <Plus size={16} />
@@ -1237,7 +1056,7 @@ function ProjectsPage({
           </div>
           <div className="table-list">
             {projects.length === 0 ? (
-              <EmptyState title="Aucun projet cree" text="Ajoutez un premier projet pour debloquer la creation des modifications." />
+              <EmptyState title="Aucun projet cree" text="Ajoutez un premier projet pour débloquer la création des modifications." />
             ) : (
               projects.map((project) => (
                 <article className="project-table-row" key={project.name}>
@@ -1273,528 +1092,8 @@ function ProjectsPage({
   );
 }
 
-function PlanningRulesAdmin({ form, rules, saving, onCancelEdit, onDelete, onEdit, onSubmit, setForm }) {
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [showNewProjectStages, setShowNewProjectStages] = useState(false);
-
-  function openCreateDialog(stage, type) {
-    setForm({
-      ...emptyPlanningRuleForm,
-      stage,
-      appliesToModification: type !== "newProject",
-      appliesToNewProject: type !== "modification"
-    });
-    setDialogOpen(true);
-  }
-
-  function openEditDialog(rule) {
-    onEdit(rule);
-    setDialogOpen(true);
-  }
-
-  function closeDialog() {
-    setDialogOpen(false);
-    onCancelEdit();
-  }
-
-  function submitDialog(event) {
-    onSubmit(event);
-    setDialogOpen(false);
-  }
-
-  return (
-    <section className="panel planning-admin">
-      <div className="section-title">
-        <div>
-          <h2>Actions standard par phase</h2>
-          <span>L'admin definit les actions, criticites, preuves et liaisons qui seront generees dans chaque nouvelle ECR.</span>
-        </div>
-        <span>{rules.length} actions</span>
-      </div>
-      <label className="project-type-toggle admin-project-toggle">
-        <input
-          aria-label="Afficher les phases nouveau projet"
-          checked={showNewProjectStages}
-          type="checkbox"
-          onChange={(event) => setShowNewProjectStages(event.target.checked)}
-        />
-        <span className="toggle-visual" aria-hidden="true" />
-        <span>
-          <strong>Nouveau Projet</strong>
-        </span>
-      </label>
-      <PhaseActionGrid
-        label={showNewProjectStages ? "Phases nouveau projet" : "Phases modification"}
-        newProject={showNewProjectStages}
-        rules={rules}
-        type={showNewProjectStages ? "newProject" : "modification"}
-        onCreate={openCreateDialog}
-      />
-      <div className="planning-rule-list">
-        {rules.length === 0 ? (
-          <EmptyState title="Aucune action standard" text="Cliquez sur une phase coloree pour creer la premiere action standard." />
-        ) : (
-          rules.map((rule) => (
-            <article className="planning-rule-row" key={rule.id}>
-              <span className={`stage-pill ${stageColorClass(rule.stage)}`}>{stageLabel(rule.stage)}</span>
-              <div>
-                <strong>{rule.actionTitle}</strong>
-                <span>{rule.topicRisk || "Topic non renseigne"} / {rule.expectedEvidence || "Preuve non renseignee"}</span>
-              </div>
-              <strong className={`criticality ${criticalityClass(rule.criticality)}`}>{rule.criticality || "3-faible"}</strong>
-              <span>{[rule.appliesToModification ? "Modification" : "", rule.appliesToNewProject ? "Nouveau projet" : ""].filter(Boolean).join(" + ")}</span>
-              <span>{rule.dependencyActionTitle ? `Apres ${rule.dependencyAnchor === "INPUT" ? "entree" : "sortie"}: ${rule.dependencyActionTitle}` : "Depart reception ECR"}</span>
-              <strong className="duration-pill">{rule.durationDays} j</strong>
-              <div className="row-actions">
-                <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => openEditDialog(rule)} aria-label="Modifier la regle" title="Modifier">
-                  <Pencil size={15} />
-                </button>
-                <button className="ghost-icon" type="button" onClick={() => onDelete(rule.id)} title="Supprimer">
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            </article>
-          ))
-        )}
-      </div>
-      {dialogOpen && (
-        <ActionRuleDialog
-          form={form}
-          saving={saving}
-          onClose={closeDialog}
-          onSubmit={submitDialog}
-          setForm={setForm}
-        />
-      )}
-    </section>
-  );
-}
-
-function PhaseActionGrid({ label, newProject = false, rules, type, onCreate }) {
-  const stages = stageDefinitions.filter((stage) => (newProject ? stage.newProject : stage.modification));
-
-  return (
-    <section className="admin-phase-section">
-      <div className="phase-preview-title">
-        <h3>{label}</h3>
-        <span>{stages.length} phases</span>
-      </div>
-      <div className="admin-phase-grid">
-        {stages.map((stage, index) => {
-          const count = rules.filter((rule) => (
-            rule.stage === stage.key && (newProject ? rule.appliesToNewProject : rule.appliesToModification)
-          )).length;
-          return (
-            <button className={`admin-phase-card ${stageColors[index % stageColors.length]}`} key={`${type}-${stage.key}`} type="button" onClick={() => onCreate(stage.key, type)}>
-              <strong>{newProject ? stage.newProjectLabel : stage.modificationLabel}</strong>
-              <span>{count} action{count > 1 ? "s" : ""}</span>
-              <Plus size={18} />
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function getActionRulePhaseOptions(form) {
-  if (form.appliesToNewProject && !form.appliesToModification) {
-    return getStages(true);
-  }
-  if (form.appliesToModification && !form.appliesToNewProject) {
-    return getStages(false);
-  }
-  return stageDefinitions
-    .filter((stage) => stage.modification || stage.newProject)
-    .map((stage) => [
-      stage.key,
-      stage.modificationLabel === stage.newProjectLabel
-        ? stage.modificationLabel
-        : `${stage.modificationLabel} / ${stage.newProjectLabel}`
-    ]);
-}
-
-function ActionRuleDialog({ form, saving, onClose, onSubmit, setForm }) {
-  const phaseOptions = getActionRulePhaseOptions(form);
-
-  function updateScope(field, value) {
-    setForm((current) => {
-      const next = {
-        ...current,
-        [field]: value
-      };
-      if (!next.appliesToModification && !next.appliesToNewProject) {
-        next[field === "appliesToModification" ? "appliesToNewProject" : "appliesToModification"] = true;
-      }
-      const nextOptions = getActionRulePhaseOptions(next);
-      if (!nextOptions.some(([stage]) => stage === next.stage)) {
-        next.stage = nextOptions[0]?.[0] || "FEASIBILITY_VALIDATION";
-      }
-      return next;
-    });
-  }
-
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <form
-        aria-labelledby="action-rule-dialog-title"
-        aria-modal="true"
-        className="dialog-card action-rule-dialog panel form-page"
-        onMouseDown={(event) => event.stopPropagation()}
-        onSubmit={onSubmit}
-        role="dialog"
-      >
-        <div className="form-intro">
-          <div>
-            <p className="eyebrow">Action standard</p>
-            <h2 id="action-rule-dialog-title">{stageLabel(form.stage)}</h2>
-            <p>Definissez l'action, sa criticite et ses dependances pour cette phase.</p>
-          </div>
-          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
-            <X size={18} />
-          </button>
-        </div>
-        <label className="project-type-toggle action-dialog-project-toggle">
-          <input
-            aria-label="Action pour nouveau projet"
-            checked={form.appliesToNewProject && !form.appliesToModification}
-            type="checkbox"
-            onChange={(event) => {
-              const checked = event.target.checked;
-              setForm((current) => {
-                const next = {
-                  ...current,
-                  appliesToModification: !checked,
-                  appliesToNewProject: checked
-                };
-                const nextOptions = getActionRulePhaseOptions(next);
-                if (!nextOptions.some(([stage]) => stage === next.stage)) {
-                  next.stage = nextOptions[0]?.[0] || "FEASIBILITY_VALIDATION";
-                }
-                return next;
-              });
-            }}
-          />
-          <span className="toggle-visual" aria-hidden="true" />
-          <span>
-            <strong>Nouveau Projet</strong>
-          </span>
-        </label>
-        <div className="planning-rule-form dialog-rule-form">
-          <label className="asset-required-field user-enabled-field">
-            <input checked={form.appliesToModification} type="checkbox" onChange={(event) => updateScope("appliesToModification", event.target.checked)} />
-            Modification
-          </label>
-          <label className="asset-required-field user-enabled-field">
-            <input checked={form.appliesToNewProject} type="checkbox" onChange={(event) => updateScope("appliesToNewProject", event.target.checked)} />
-            Nouveau projet
-          </label>
-          <label>
-            Phase
-            <select value={form.stage} onChange={(event) => setForm((current) => ({ ...current, stage: event.target.value }))}>
-              {phaseOptions.map(([stage, label]) => (
-                <option key={stage} value={stage}>{label}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Action
-            <input required value={form.actionTitle} onChange={(event) => setForm((current) => ({ ...current, actionTitle: event.target.value }))} placeholder="Ex: Validation input" />
-          </label>
-          <label>
-            Topic / risque
-            <input value={form.topicRisk} onChange={(event) => setForm((current) => ({ ...current, topicRisk: event.target.value }))} placeholder="Risque ou sujet" />
-          </label>
-          <label>
-            Responsable
-            <input value={form.responsible} onChange={(event) => setForm((current) => ({ ...current, responsible: event.target.value }))} placeholder="Vide = pilote ECR" />
-          </label>
-          <label>
-            Criticite
-            <select value={form.criticality} onChange={(event) => setForm((current) => ({ ...current, criticality: event.target.value }))}>
-              <option value="1-critique">1-critique</option>
-              <option value="2-moyenne">2-moyenne</option>
-              <option value="3-faible">3-faible</option>
-            </select>
-          </label>
-          <label>
-            Preuve attendue
-            <input value={form.expectedEvidence} onChange={(event) => setForm((current) => ({ ...current, expectedEvidence: event.target.value }))} placeholder="Asset / document attendu" />
-          </label>
-          <label>
-            Bloquee par
-            <input value={form.dependencyActionTitle} onChange={(event) => setForm((current) => ({ ...current, dependencyActionTitle: event.target.value }))} placeholder="Ex: action 1 ou titre exact" />
-          </label>
-          <label>
-            Liaison
-            <select value={form.dependencyAnchor} onChange={(event) => setForm((current) => ({ ...current, dependencyAnchor: event.target.value }))}>
-              <option value="INPUT">Entree action liee</option>
-              <option value="OUTPUT">Sortie action liee</option>
-            </select>
-          </label>
-          <label>
-            Jours de travail
-            <input min="0" type="number" value={form.durationDays} onChange={(event) => setForm((current) => ({ ...current, durationDays: event.target.value }))} />
-          </label>
-          <label className="asset-required-field user-enabled-field">
-            <input checked={form.evidenceRequired} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, evidenceRequired: event.target.checked }))} />
-            Asset obligatoire
-          </label>
-        </div>
-        <div className="button-row">
-          <button className="primary-action" disabled={saving} type="submit">
-            <Save size={16} />
-            Enregistrer action
-          </button>
-          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function UsersPage({ currentUser, editingUser, saving, userForm, users, onCancelEdit, onDelete, onEdit, onSubmit, setUserForm }) {
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const canAdmin = currentUser?.username === "fchelbi" || currentUser?.role === "ADMIN";
-
-  function openCreateDialog() {
-    setUserForm(emptyUserForm);
-    setDialogOpen(true);
-  }
-
-  function openEditDialog(user) {
-    onEdit(user);
-    setDialogOpen(true);
-  }
-
-  function closeDialog() {
-    setDialogOpen(false);
-    onCancelEdit();
-  }
-
-  function submitDialog(event) {
-    onSubmit(event);
-    setDialogOpen(false);
-  }
-
-  return (
-    <section className="page-content users-content">
-      <PageHeader eyebrow="Administration" title="Utilisateurs" subtitle="Creation et maintenance des comptes applicatifs par l'administrateur fchelbi." />
-      {!canAdmin && <EmptyState title="Acces admin requis" text="Connectez-vous avec fchelbi pour administrer les utilisateurs." />}
-      <div className="users-layout">
-        <section className="panel">
-          <div className="section-title">
-            <h2>Liste des utilisateurs</h2>
-            <div className="row-actions">
-              <span>{users.length} comptes</span>
-              <button className="primary-action compact-action" disabled={!canAdmin} type="button" onClick={openCreateDialog}>
-                <Plus size={16} />
-                Ajouter un utilisateur
-              </button>
-            </div>
-          </div>
-          <div className="user-table">
-            {users.length === 0 ? (
-              <EmptyState title="Aucun utilisateur" text="Ajoutez un premier compte pour demarrer l'administration." />
-            ) : (
-              users.map((user) => (
-                <article className="user-row" key={user.id}>
-                  <div className="avatar-cell">
-                    {user.profilePhotoUrl ? <img alt="" src={user.profilePhotoUrl} /> : <UserCircle size={24} />}
-                  </div>
-                  <div><strong>{user.fullName}</strong><span>{user.jobTitle || "-"}</span></div>
-                  <div><strong>{user.username || "-"}</strong><span>{user.email}</span></div>
-                  <small className="status in_progress">{userRoleLabel(user.role)}</small>
-                  <div className="row-actions">
-                    <button className="secondary-action compact-action icon-only-action" disabled={!canAdmin} type="button" onClick={() => openEditDialog(user)} aria-label="Modifier l'utilisateur" title="Modifier">
-                      <Pencil size={15} />
-                    </button>
-                    <button className="ghost-icon" disabled={!canAdmin || user.id === currentUser?.id} type="button" onClick={() => onDelete(user.id)} title="Supprimer">
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </article>
-              ))
-            )}
-          </div>
-        </section>
-      </div>
-      {dialogOpen && (
-        <UserDialog
-          canAdmin={canAdmin}
-          editingUser={editingUser}
-          form={userForm}
-          saving={saving}
-          onClose={closeDialog}
-          onSubmit={submitDialog}
-          setForm={setUserForm}
-        />
-      )}
-    </section>
-  );
-}
-
-function UserDialog({ canAdmin, editingUser, form, saving, onClose, onSubmit, setForm }) {
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <form
-        aria-labelledby="user-dialog-title"
-        aria-modal="true"
-        className="dialog-card user-dialog panel form-page"
-        onMouseDown={(event) => event.stopPropagation()}
-        onSubmit={onSubmit}
-        role="dialog"
-      >
-        <div className="form-intro">
-          <div>
-            <h2 id="user-dialog-title">{editingUser ? "Modifier l'utilisateur" : "Ajouter un utilisateur"}</h2>
-            <p>Le username et l'email doivent rester uniques. Le mot de passe est requis seulement a la creation.</p>
-          </div>
-          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
-            <X size={18} />
-          </button>
-        </div>
-        <div className="field-grid">
-          <label>
-            Nom complet
-            <input required disabled={!canAdmin} value={form.fullName} onChange={(event) => setForm((current) => ({ ...current, fullName: event.target.value }))} />
-          </label>
-          <label>
-            Username
-            <input required disabled={!canAdmin} value={form.username} onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))} />
-          </label>
-          <label>
-            Poste
-            <input disabled={!canAdmin} value={form.jobTitle} onChange={(event) => setForm((current) => ({ ...current, jobTitle: event.target.value }))} />
-          </label>
-          <label>
-            Email
-            <input required disabled={!canAdmin} type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
-          </label>
-          <label>
-            Mot de passe
-            <input required={!editingUser} disabled={!canAdmin} type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} />
-          </label>
-          <label>
-            Telephone
-            <input disabled={!canAdmin} value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
-          </label>
-          <label>
-            Role
-            <select disabled={!canAdmin} value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}>
-              {userRoleOptions.map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="asset-required-field user-enabled-field">
-            <input disabled={!canAdmin} checked={form.enabled} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))} />
-            Compte actif
-          </label>
-        </div>
-        <div className="button-row">
-          <button className="primary-action" disabled={saving || !canAdmin} type="submit">
-            <Save size={16} />
-            Enregistrer
-          </button>
-          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function ProfilePage({ currentUser, passwordForm, profileForm, saving, onChangePassword, onSubmit, onUploadPhoto, setPasswordForm, setProfileForm }) {
-  if (!currentUser) {
-    return (
-      <section className="page-content">
-        <PageHeader eyebrow="Compte" title="Profil" subtitle="Les informations du compte seront disponibles apres chargement." />
-        <EmptyState title="Profil indisponible" text="Le compte fchelbi n'a pas encore ete charge." />
-      </section>
-    );
-  }
-
-  return (
-    <section className="page-content profile-content">
-      <PageHeader eyebrow="Compte" title="Mon profil" subtitle="Photo, informations personnelles et changement de mot de passe." />
-      <div className="profile-layout">
-        <section className="panel profile-card">
-          <div className="profile-photo">
-            {currentUser.profilePhotoUrl ? <img alt="" src={currentUser.profilePhotoUrl} /> : <UserCircle size={72} />}
-          </div>
-          <h2>{currentUser.fullName}</h2>
-          <span>{currentUser.jobTitle || "Poste non renseigne"}</span>
-          <strong className="stage-pill teal">{userRoleLabel(currentUser.role)}</strong>
-          <label className="secondary-action compact-action photo-upload">
-            <Camera size={15} />
-            Photo
-            <input accept="image/*" type="file" onChange={(event) => onUploadPhoto(event.target.files?.[0])} />
-          </label>
-        </section>
-        <form className="panel form-page" onSubmit={onSubmit}>
-          <div className="form-intro">
-            <div>
-              <h2>Informations profil</h2>
-              <p>Mettez a jour vos coordonnees et votre identification utilisateur.</p>
-            </div>
-          </div>
-          <div className="field-grid">
-            <label>
-              Nom complet
-              <input required value={profileForm.fullName} onChange={(event) => setProfileForm((form) => ({ ...form, fullName: event.target.value }))} />
-            </label>
-            <label>
-              Username
-              <input required value={profileForm.username} onChange={(event) => setProfileForm((form) => ({ ...form, username: event.target.value }))} />
-            </label>
-            <label>
-              Poste
-              <input value={profileForm.jobTitle} onChange={(event) => setProfileForm((form) => ({ ...form, jobTitle: event.target.value }))} />
-            </label>
-            <label>
-              Email
-              <input required type="email" value={profileForm.email} onChange={(event) => setProfileForm((form) => ({ ...form, email: event.target.value }))} />
-            </label>
-            <label>
-              Telephone
-              <input value={profileForm.phone} onChange={(event) => setProfileForm((form) => ({ ...form, phone: event.target.value }))} />
-            </label>
-          </div>
-          <div className="button-row">
-            <button className="primary-action" disabled={saving} type="submit">
-              <Save size={16} />
-              Enregistrer profil
-            </button>
-          </div>
-        </form>
-        <form className="panel form-page password-panel" onSubmit={onChangePassword}>
-          <div className="form-intro">
-            <div>
-              <h2>Mot de passe</h2>
-              <p>Choisissez un nouveau mot de passe pour votre prochain acces.</p>
-            </div>
-          </div>
-          <label>
-            Nouveau mot de passe
-            <input required type="password" value={passwordForm.password} onChange={(event) => setPasswordForm((form) => ({ ...form, password: event.target.value }))} />
-          </label>
-          <label>
-            Confirmation
-            <input required type="password" value={passwordForm.confirmation} onChange={(event) => setPasswordForm((form) => ({ ...form, confirmation: event.target.value }))} />
-          </label>
-          <div className="button-row">
-            <button className="secondary-action" disabled={saving} type="submit">
-              <Save size={16} />
-              Changer mot de passe
-            </button>
-          </div>
-        </form>
-      </div>
-    </section>
-  );
-}
-
 function ModificationsPage(props) {
+  const [listOpen, setListOpen] = useState(false);
   const {
     actionForm,
     actions,
@@ -1803,8 +1102,11 @@ function ModificationsPage(props) {
     doneCount,
     filteredRequests,
     handleCreateAction,
+    handleDeleteAction,
+    handleDeleteRequest,
     handleStageChange,
     handleToggleAction,
+    handleUpdateAction,
     handleUploadEvidence,
     lateActions,
     projectFilter,
@@ -1823,9 +1125,39 @@ function ModificationsPage(props) {
     updateActionForm
   } = props;
 
+  function selectRequest(request) {
+    setShowCreateForm(false);
+    setSelectedId(request.id);
+    setSelectedStage(safeStage(request.currentStage, Boolean(request.newVersion)));
+    setListOpen(false);
+  }
+
   return (
     <section className="page-content modifications-content">
-      <PageHeader eyebrow="Suivi ECR" title="Modifications" subtitle="Creez une demande, selectionnez-la, puis pilotez ses phases et actions sans quitter cette page." />
+      <PageHeader eyebrow="Suivi ECR" title="Modifications" subtitle="Créez une demande, sélectionnez-la, puis pilotez ses phases et actions sans quitter cette page." />
+      <div className="modifications-toolbar">
+        <label className="search">
+          <Search size={16} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher une modification" />
+        </label>
+        <label className="project-filter">
+          <FolderKanban size={16} />
+          <select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}>
+            <option value="">Tous les projets</option>
+            {projectOptions.map((projectName) => (
+              <option key={projectName} value={projectName}>{projectName}</option>
+            ))}
+          </select>
+        </label>
+        <button className="secondary-action" type="button" onClick={() => setListOpen(true)}>
+          <ClipboardList size={16} />
+          Liste modifications
+        </button>
+        <button className="primary-action" type="button" onClick={() => setShowCreateForm(true)}>
+          <Plus size={16} />
+          Nouvelle modification
+        </button>
+      </div>
       <div className="work-layout">
         <section className="detail-panel">
           {selectedRequest ? (
@@ -1836,6 +1168,16 @@ function ModificationsPage(props) {
                   <h2>{selectedRequest.modificationNumber || selectedRequest.client}</h2>
                   <p>{selectedRequest.modificationReason || "Aucune description renseignee pour le moment."}</p>
                 </div>
+                <button
+                  className="ghost-icon detail-delete-action"
+                  disabled={saving}
+                  type="button"
+                  onClick={() => handleDeleteRequest(selectedRequest)}
+                  title="Supprimer la modification"
+                  aria-label="Supprimer la modification"
+                >
+                  <Trash2 size={16} />
+                </button>
                 <div className="meta-grid">
                   <div><ClipboardList size={16} /><span>Projet</span><strong>{selectedRequest.modificationProject || "A definir"}</strong></div>
                   <div><Gauge size={16} /><span>Pilote</span><strong>{selectedRequest.pilot || "A definir"}</strong></div>
@@ -1858,7 +1200,9 @@ function ModificationsPage(props) {
                 actions={actions}
                 doneCount={doneCount}
                 handleCreateAction={handleCreateAction}
+                handleDeleteAction={handleDeleteAction}
                 handleToggleAction={handleToggleAction}
+                handleUpdateAction={handleUpdateAction}
                 handleUploadEvidence={handleUploadEvidence}
                 lateActions={lateActions}
                 saving={saving}
@@ -1869,55 +1213,59 @@ function ModificationsPage(props) {
               <ChecklistPanel checklist={checklist} />
             </>
           ) : (
-            <EmptyState title="Aucune demande selectionnee" text="Selectionnez une demande dans la liste ou creez une nouvelle modification." />
+            <EmptyState title="Aucune demande selectionnee" text="Sélectionnez une demande dans la liste ou créez une nouvelle modification." />
           )}
         </section>
-        <aside className="list-panel">
-          <label className="search">
-            <Search size={16} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher une modification" />
-          </label>
-          <label className="project-filter">
-            <FolderKanban size={16} />
-            <select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}>
-              <option value="">Tous les projets</option>
-              {projectOptions.map((projectName) => (
-                <option key={projectName} value={projectName}>{projectName}</option>
-              ))}
-            </select>
-          </label>
-          <button className="primary-action wide-action" onClick={() => setShowCreateForm(true)}>
-            <Plus size={16} />
-            Nouvelle modification
-          </button>
-          <div className="request-list">
-            {filteredRequests.length === 0 ? (
-              <EmptyState title="Aucun resultat" text="Essayez un client, un projet, un produit ou un pilote." compact />
-            ) : filteredRequests.map((request) => (
-              <button
-                className={request.id === selectedId ? "request-card active" : "request-card"}
-                key={request.id}
-                onClick={() => {
-                  setShowCreateForm(false);
-                  setSelectedId(request.id);
-                  setSelectedStage(safeStage(request.currentStage, Boolean(request.newVersion)));
-                }}
-              >
-                <span className="request-title">{request.modificationNumber || request.client}</span>
-                <span>{request.modificationProject || request.product || "Projet non renseigne"}</span>
-                <strong className={`stage-pill ${stageColorClass(request.currentStage)}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</strong>
-              </button>
-            ))}
-          </div>
-        </aside>
       </div>
+      {listOpen && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={() => setListOpen(false)}>
+          <section
+            aria-labelledby="request-dialog-title"
+            aria-modal="true"
+            className="request-dialog"
+            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <header className="actions-dialog-header">
+              <div>
+                <p className="eyebrow">Selection</p>
+                <h2 id="request-dialog-title">Liste des modifications</h2>
+                <span>{filteredRequests.length} resultat{filteredRequests.length > 1 ? "s" : ""}</span>
+              </div>
+              <button className="ghost-icon" type="button" onClick={() => setListOpen(false)} title="Fermer">
+                <X size={18} />
+              </button>
+            </header>
+            <div className="request-list">
+              {filteredRequests.length === 0 ? (
+                <EmptyState title="Aucun resultat" text="Essayez un client, un projet, un produit ou un pilote." compact />
+              ) : filteredRequests.map((request) => (
+                <button
+                  className={request.id === selectedId ? "request-card active" : "request-card"}
+                  key={request.id}
+                  onClick={() => selectRequest(request)}
+                >
+                  <span className="request-title">{request.modificationNumber || request.client}</span>
+                  <span>{request.modificationProject || request.product || "Projet non renseigne"}</span>
+                  <strong className={`stage-pill ${stageColorClass(request.currentStage)}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</strong>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
     </section>
   );
 }
 
-function ActionsPanel({ actionForm, actions, doneCount, handleCreateAction, handleToggleAction, handleUploadEvidence, lateActions, saving, selectedStage, stageNewProject, updateActionForm }) {
+function ActionsPanel({ actionForm, actions, doneCount, handleCreateAction, handleDeleteAction, handleToggleAction, handleUpdateAction, handleUploadEvidence, lateActions, saving, selectedStage, stageNewProject, updateActionForm }) {
   const [expanded, setExpanded] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const stageTitle = stageLabel(selectedStage, stageNewProject);
+
+  function submitCreateAction(event) {
+    handleCreateAction(event).then(() => setCreateOpen(false)).catch(() => {});
+  }
 
   return (
     <section className="data-section">
@@ -1926,43 +1274,25 @@ function ActionsPanel({ actionForm, actions, doneCount, handleCreateAction, hand
           <h2>Actions - {stageTitle}</h2>
           <span>{doneCount}/{actions.length} terminees / {lateActions} retards</span>
         </div>
-        <button className="secondary-action compact-action" type="button" onClick={() => setExpanded(true)} title="Agrandir les actions">
-          <Maximize2 size={15} />
-          Agrandir
-        </button>
+        <div className="row-actions">
+          <button className="primary-action compact-action" type="button" onClick={() => setCreateOpen(true)} title="Ajouter une action">
+            <Plus size={15} />
+            Ajouter action
+          </button>
+          <button className="secondary-action compact-action" type="button" onClick={() => setExpanded(true)} title="Agrandir les actions">
+            <Maximize2 size={15} />
+            Agrandir
+          </button>
+        </div>
       </div>
-      <form className="action-form" onSubmit={handleCreateAction}>
-        <input value={actionForm.topicRisk} onChange={(event) => updateActionForm("topicRisk", event.target.value)} placeholder="Topic_Risk" />
-        <input required value={actionForm.title} onChange={(event) => updateActionForm("title", event.target.value)} placeholder="Point_verif" />
-        <input value={actionForm.responsible} onChange={(event) => updateActionForm("responsible", event.target.value)} placeholder="Pilote" />
-        <select value={actionForm.criticality} onChange={(event) => updateActionForm("criticality", event.target.value)}>
-          <option value="1-critique">1-critique</option>
-          <option value="2-moyenne">2-moyenne</option>
-          <option value="3-faible">3-faible</option>
-        </select>
-        <input value={actionForm.expectedEvidence} onChange={(event) => updateActionForm("expectedEvidence", event.target.value)} placeholder="element_preuve" />
-        <input type="date" value={actionForm.startDate} onChange={(event) => updateActionForm("startDate", event.target.value)} title="Date debut" />
-        <input type="date" value={actionForm.endDate} onChange={(event) => updateActionForm("endDate", event.target.value)} title="Date fin" />
-        <input min="0" type="number" value={actionForm.workDurationDays} onChange={(event) => updateActionForm("workDurationDays", event.target.value)} title="Jours de travail" />
-        <label className="file-picker">
-          <Paperclip size={15} />
-          <span>{actionForm.evidenceFile ? actionForm.evidenceFile.name : "Evidence"}</span>
-          <input type="file" onChange={(event) => updateActionForm("evidenceFile", event.target.files?.[0] || null)} />
-        </label>
-        <label className="action-asset-toggle">
-          <input checked={actionForm.evidenceRequired} type="checkbox" onChange={(event) => updateActionForm("evidenceRequired", event.target.checked)} />
-          Asset requis
-        </label>
-        <select value={actionForm.status} onChange={(event) => updateActionForm("status", event.target.value)}>
-          <option value="TODO">TODO</option>
-          <option value="IN_PROGRESS">IN_PROGRESS</option>
-          <option value="DONE">DONE</option>
-          <option value="LATE">LATE</option>
-          <option value="CANCELLED">CANCELLED</option>
-        </select>
-        <button className="icon-action" disabled={saving} title="Enregistrer l'action" type="submit"><Save size={16} /></button>
-      </form>
-      <ActionList actions={actions} handleToggleAction={handleToggleAction} handleUploadEvidence={handleUploadEvidence} />
+      <ActionList
+        actions={actions}
+        handleDeleteAction={handleDeleteAction}
+        handleToggleAction={handleToggleAction}
+        handleUpdateAction={handleUpdateAction}
+        handleUploadEvidence={handleUploadEvidence}
+        saving={saving}
+      />
       {expanded && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={() => setExpanded(false)}>
           <section
@@ -1982,53 +1312,259 @@ function ActionsPanel({ actionForm, actions, doneCount, handleCreateAction, hand
                 <X size={18} />
               </button>
             </header>
-            <ActionList actions={actions} expanded handleToggleAction={handleToggleAction} handleUploadEvidence={handleUploadEvidence} />
+            <ActionList
+              actions={actions}
+              expanded
+              handleDeleteAction={handleDeleteAction}
+              handleToggleAction={handleToggleAction}
+              handleUpdateAction={handleUpdateAction}
+              handleUploadEvidence={handleUploadEvidence}
+              saving={saving}
+            />
           </section>
         </div>
+      )}
+      {createOpen && (
+        <ActionCreateDialog
+          actionForm={actionForm}
+          saving={saving}
+          onClose={() => setCreateOpen(false)}
+          onSubmit={submitCreateAction}
+          updateActionForm={updateActionForm}
+        />
       )}
     </section>
   );
 }
 
-function ActionList({ actions, expanded = false, handleToggleAction, handleUploadEvidence }) {
+function ActionList({ actions, expanded = false, handleDeleteAction, handleToggleAction, handleUpdateAction, handleUploadEvidence, saving }) {
+  const [editingAction, setEditingAction] = useState(null);
+
   return (
-    <div className={expanded ? "action-list expanded" : "action-list"}>
-      {actions.length === 0 ? (
-        <EmptyState title="Aucune action pour cette phase" text="Ajoutez une action ou utilisez les actions generees lors de la creation ECR." />
-      ) : (
-        actions.map((action) => (
-          <article className={action.late ? "action-row late" : "action-row"} key={action.id}>
-            <label className="action-check" title={action.status === "DONE" ? "Marquer non terminee" : "Marquer terminee"}>
-              <input checked={action.checked || action.status === "DONE"} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
-            </label>
-            <div className="action-main">
-              <h3>{action.title}</h3>
-              <p>{action.topicRisk || "-"} / {action.expectedEvidence || "element_preuve non renseigne"}</p>
-            </div>
-            <div className="action-meta">
-              <span><em>Pilote</em><strong>{action.responsible || "A definir"}</strong></span>
-              <span><em>Criticite</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>
-              <span><em>Debut</em><strong>{action.startDate || "-"}</strong></span>
-              <span><em>Fin</em><strong>{action.endDate || "-"}</strong></span>
-              <span><em>Jours</em><strong>{action.workDurationDays ?? "-"}</strong></span>
-              <span><em>Asset</em><strong>{action.evidenceRequired ? "Obligatoire" : "Optionnel"}</strong></span>
-              <span className="evidence-meta">
-                <em>Preuve</em>
-                <strong>
-                  {action.evidenceFileName ? (
-                    <a className="file-link" href={actionEvidenceUrl(action.id)} target="_blank" rel="noreferrer">{action.evidenceFileName}</a>
-                  ) : "-"}
-                </strong>
-              </span>
-              <span><em>Status</em><small className={`status ${statusClass(action.status)}`}>{readableStatus(action.status)}</small></span>
-            </div>
-            <label className="row-upload" title="Ajouter evidence">
-              <Upload size={15} />
-              <input type="file" onChange={(event) => handleUploadEvidence(action, event.target.files?.[0])} />
-            </label>
-          </article>
-        ))
+    <>
+      <div className={expanded ? "action-list expanded" : "action-list"}>
+        {actions.length === 0 ? (
+          <EmptyState title="Aucune action pour cette phase" text="Ajoutez une action ou utilisez les actions generées lors de la création ECR." />
+        ) : (
+          actions.map((action) => (
+            <article className={action.late ? "action-row late" : "action-row"} key={action.id}>
+              <label className="action-check" title={action.status === "DONE" ? "Marquer non terminee" : "Marquer terminee"}>
+                <input checked={action.checked || action.status === "DONE"} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
+              </label>
+              <div className="action-main">
+                <h3>{action.title}</h3>
+                <p>{action.topicRisk || "-"} / {action.expectedEvidence || "element_preuve non renseigne"}</p>
+              </div>
+              <div className="action-meta">
+                <span><em>Pilote</em><strong>{action.responsible || "A definir"}</strong></span>
+                <span><em>Criticite</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>
+                <span><em>Debut</em><strong>{action.startDate || "-"}</strong></span>
+                <span><em>Fin</em><strong>{action.endDate || "-"}</strong></span>
+                <span><em>Jours</em><strong>{action.workDurationDays ?? "-"}</strong></span>
+                <span><em>Asset</em><strong>{action.evidenceRequired ? "Obligatoire" : "Optionnel"}</strong></span>
+                <span className="evidence-meta">
+                  <em>Preuve</em>
+                  <strong>
+                    {action.evidenceFileName ? (
+                      <a className="file-link" href={actionEvidenceUrl(action.id)} target="_blank" rel="noreferrer">{action.evidenceFileName}</a>
+                    ) : "-"}
+                  </strong>
+                </span>
+                <span><em>Status</em><small className={`status ${statusClass(action.status)}`}>{readableStatus(action.status)}</small></span>
+              </div>
+              <div className="action-row-tools">
+                <label className="row-upload" title="Ajouter evidence">
+                  <Upload size={15} />
+                  <input type="file" onChange={(event) => handleUploadEvidence(action, event.target.files?.[0])} />
+                </label>
+                <button className="ghost-icon" disabled={saving} type="button" onClick={() => setEditingAction(action)} title="Modifier l'action" aria-label="Modifier l'action">
+                  <Pencil size={15} />
+                </button>
+                <button className="ghost-icon danger-icon" disabled={saving} type="button" onClick={() => handleDeleteAction(action)} title="Supprimer l'action" aria-label="Supprimer l'action">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </article>
+          ))
+        )}
+      </div>
+      {editingAction && (
+        <ActionEditDialog
+          action={editingAction}
+          saving={saving}
+          onClose={() => setEditingAction(null)}
+          onSubmit={(form) => handleUpdateAction(editingAction, form).then(() => setEditingAction(null)).catch(() => {})}
+        />
       )}
+    </>
+  );
+}
+
+function actionToForm(action) {
+  return {
+    topicRisk: action.topicRisk || "",
+    title: action.title || "",
+    responsible: action.responsible || "",
+    criticality: action.criticality || "3-faible",
+    expectedEvidence: action.expectedEvidence || "",
+    evidence: action.evidence || "",
+    evidenceFile: null,
+    deadline: action.deadline || "",
+    date1: action.date1 || "",
+    date2: action.date2 || "",
+    date3: action.date3 || "",
+    startDate: action.startDate || "",
+    endDate: action.endDate || "",
+    workDurationDays: action.workDurationDays ?? 1,
+    status: action.status || "TODO",
+    evidenceRequired: Boolean(action.evidenceRequired),
+    comment: action.comment || ""
+  };
+}
+
+function ActionCreateDialog({ actionForm, saving, onClose, onSubmit, updateActionForm }) {
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <form
+        aria-labelledby="create-action-title"
+        aria-modal="true"
+        className="dialog-card action-edit-dialog panel form-page"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={onSubmit}
+        role="dialog"
+      >
+        <div className="form-intro">
+          <div>
+            <p className="eyebrow">Action</p>
+            <h2 id="create-action-title">Ajouter une action</h2>
+          </div>
+          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="action-edit-grid">
+          <input value={actionForm.topicRisk} onChange={(event) => updateActionForm("topicRisk", event.target.value)} placeholder="Topic_Risk" />
+          <input required value={actionForm.title} onChange={(event) => updateActionForm("title", event.target.value)} placeholder="Point_verif" />
+          <select value={actionForm.responsible} onChange={(event) => updateActionForm("responsible", event.target.value)}>
+            <option value="">Pilote</option>
+            {userRoleOptions.map(([value, label]) => (
+              <option key={value} value={label}>{label}</option>
+            ))}
+          </select>
+          <select value={actionForm.criticality} onChange={(event) => updateActionForm("criticality", event.target.value)}>
+            <option value="1-critique">1-critique</option>
+            <option value="2-moyenne">2-moyenne</option>
+            <option value="3-faible">3-faible</option>
+          </select>
+          <input value={actionForm.expectedEvidence} onChange={(event) => updateActionForm("expectedEvidence", event.target.value)} placeholder="element_preuve" />
+          <input type="date" value={actionForm.startDate} onChange={(event) => updateActionForm("startDate", event.target.value)} title="Date debut" />
+          <input type="date" value={actionForm.endDate} onChange={(event) => updateActionForm("endDate", event.target.value)} title="Date fin" />
+          <input min="0" type="number" value={actionForm.workDurationDays} onChange={(event) => updateActionForm("workDurationDays", event.target.value)} title="Jours de travail" />
+          <label className="file-picker">
+            <Paperclip size={15} />
+            <span>{actionForm.evidenceFile ? actionForm.evidenceFile.name : "Evidence"}</span>
+            <input type="file" onChange={(event) => updateActionForm("evidenceFile", event.target.files?.[0] || null)} />
+          </label>
+          <label className="action-asset-toggle">
+            <input checked={actionForm.evidenceRequired} type="checkbox" onChange={(event) => updateActionForm("evidenceRequired", event.target.checked)} />
+            Asset requis
+          </label>
+          <select value={actionForm.status} onChange={(event) => updateActionForm("status", event.target.value)}>
+            <option value="TODO">TODO</option>
+            <option value="IN_PROGRESS">IN_PROGRESS</option>
+            <option value="DONE">DONE</option>
+            <option value="LATE">LATE</option>
+            <option value="CANCELLED">CANCELLED</option>
+          </select>
+        </div>
+        <div className="button-row">
+          <button className="primary-action" disabled={saving} type="submit">
+            <Save size={16} />
+            Enregistrer
+          </button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ActionEditDialog({ action, saving, onClose, onSubmit }) {
+  const [form, setForm] = useState(() => actionToForm(action));
+
+  function updateForm(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function submit(event) {
+    event.preventDefault();
+    onSubmit(form);
+  }
+
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <form
+        aria-labelledby="edit-action-title"
+        aria-modal="true"
+        className="dialog-card action-edit-dialog panel form-page"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={submit}
+        role="dialog"
+      >
+        <div className="form-intro">
+          <div>
+            <p className="eyebrow">Action</p>
+            <h2 id="edit-action-title">Modifier l'action</h2>
+            <p>{action.title}</p>
+          </div>
+          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="action-edit-grid">
+          <input value={form.topicRisk} onChange={(event) => updateForm("topicRisk", event.target.value)} placeholder="Topic_Risk" />
+          <input required value={form.title} onChange={(event) => updateForm("title", event.target.value)} placeholder="Point_verif" />
+          <select value={form.responsible} onChange={(event) => updateForm("responsible", event.target.value)}>
+            <option value="">Pilote</option>
+            {userRoleOptions.map(([value, label]) => (
+              <option key={value} value={label}>{label}</option>
+            ))}
+          </select>
+          <select value={form.criticality} onChange={(event) => updateForm("criticality", event.target.value)}>
+            <option value="1-critique">1-critique</option>
+            <option value="2-moyenne">2-moyenne</option>
+            <option value="3-faible">3-faible</option>
+          </select>
+          <input value={form.expectedEvidence} onChange={(event) => updateForm("expectedEvidence", event.target.value)} placeholder="element_preuve" />
+          <input type="date" value={form.startDate} onChange={(event) => updateForm("startDate", event.target.value)} title="Date debut" />
+          <input type="date" value={form.endDate} onChange={(event) => updateForm("endDate", event.target.value)} title="Date fin" />
+          <input min="0" type="number" value={form.workDurationDays} onChange={(event) => updateForm("workDurationDays", event.target.value)} title="Jours de travail" />
+          <label className="file-picker">
+            <Paperclip size={15} />
+            <span>{form.evidenceFile ? form.evidenceFile.name : action.evidenceFileName || "Evidence"}</span>
+            <input type="file" onChange={(event) => updateForm("evidenceFile", event.target.files?.[0] || null)} />
+          </label>
+          <label className="action-asset-toggle">
+            <input checked={form.evidenceRequired} type="checkbox" onChange={(event) => updateForm("evidenceRequired", event.target.checked)} />
+            Asset requis
+          </label>
+          <select value={form.status} onChange={(event) => updateForm("status", event.target.value)}>
+            <option value="TODO">TODO</option>
+            <option value="IN_PROGRESS">IN_PROGRESS</option>
+            <option value="DONE">DONE</option>
+            <option value="LATE">LATE</option>
+            <option value="CANCELLED">CANCELLED</option>
+          </select>
+          <textarea value={form.comment} onChange={(event) => updateForm("comment", event.target.value)} placeholder="Commentaire" />
+        </div>
+        <div className="button-row">
+          <button className="primary-action" disabled={saving} type="submit">
+            <Save size={16} />
+            Enregistrer
+          </button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -2037,48 +1573,18 @@ function ChecklistPanel({ checklist }) {
   return (
     <section className="checklist">
       {checklist.length === 0 ? (
-        <EmptyState title="Aucun point de verification" text="Les points de controle apparaitront ici pour la phase selectionnee." />
+        <EmptyState title="Aucun point de verification" text="Les points de controle apparaitront ici pour la phase selectionnée." />
       ) : (
         checklist.map((item) => (
           <article className="check-row" key={item.id}>
             <CheckCircle2 className={item.status === "OK" ? "ok" : ""} size={20} />
-            <div><h3>{item.verificationPoint}</h3><p>{item.topicRisk || "Risque non classe"} / {item.expectedEvidence || "Preuve non renseignee"}</p></div>
-            <span>{item.pilot || "A definir"}</span>
+            <div><h3>{item.verificationPoint}</h3><p>{item.topicRisk || "Risque non classé"} / {item.expectedEvidence || "Preuve non renseignée"}</p></div>
+            <span>{item.pilot || "A définir"}</span>
             <strong className={`status ${statusClass(item.status)}`}>{readableStatus(item.status)}</strong>
           </article>
         ))
       )}
     </section>
-  );
-}
-
-function EmptyState({ title, text, compact = false }) {
-  return (
-    <div className={compact ? "empty-state compact" : "empty-state"}>
-      <AlertTriangle size={compact ? 18 : 22} />
-      <strong>{title}</strong>
-      <span>{text}</span>
-    </div>
-  );
-}
-
-function PageHeader({ eyebrow, title, subtitle }) {
-  return (
-    <header className="page-header">
-      <p className="eyebrow">{eyebrow}</p>
-      <h1>{title}</h1>
-      <p>{subtitle}</p>
-    </header>
-  );
-}
-
-function StatCard({ icon: Icon, label, value }) {
-  return (
-    <article className="stat-card">
-      <Icon size={20} />
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </article>
   );
 }
 

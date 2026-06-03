@@ -62,6 +62,9 @@ public class EcrActionController {
     public ResponseEntity<EcrAction> create(@PathVariable Long requestId, @Valid @RequestBody EcrAction action) {
         return requestRepository.findById(requestId)
                 .map(request -> {
+                    if (isDone(action) && action.isEvidenceRequired()) {
+                        return ResponseEntity.badRequest().<EcrAction>build();
+                    }
                     action.setRequest(request);
                     EcrAction saved = actionRepository.save(action);
                     planningService.recalculateRequest(request);
@@ -83,7 +86,10 @@ public class EcrActionController {
                     action.setEvidenceRequired(updatedAction.isEvidenceRequired());
                     action.setEvidence(updatedAction.getEvidence());
                     action.setProofDocument(updatedAction.getProofDocument());
-                    if (updatedAction.isChecked() && action.isEvidenceRequired() && !hasEvidence(action)) {
+                    if (isDone(updatedAction) && updatedAction.isEvidenceRequired() && !hasEvidence(action)) {
+                        return ResponseEntity.badRequest().<EcrAction>build();
+                    }
+                    if (isDone(updatedAction) && !isDependencyCompleted(action)) {
                         return ResponseEntity.badRequest().<EcrAction>build();
                     }
                     action.setChecked(updatedAction.isChecked());
@@ -97,7 +103,7 @@ public class EcrActionController {
                     action.setDependsOnActionId(updatedAction.getDependsOnActionId());
                     action.setDependencyAnchor(updatedAction.getDependencyAnchor());
                     action.setStage(updatedAction.getStage());
-                    if (updatedAction.getStatus() == ActionStatus.DONE && action.isEvidenceRequired() && !hasEvidence(action)) {
+                    if (isDone(updatedAction) && !isDependencyCompleted(action)) {
                         return ResponseEntity.badRequest().<EcrAction>build();
                     }
                     action.setStatus(updatedAction.getStatus());
@@ -172,6 +178,19 @@ public class EcrActionController {
 
     private boolean hasEvidence(EcrAction action) {
         return action.getEvidenceFileName() != null && !action.getEvidenceFileName().trim().isEmpty();
+    }
+
+    private boolean isDone(EcrAction action) {
+        return action != null && (action.isChecked() || action.getStatus() == ActionStatus.DONE);
+    }
+
+    private boolean isDependencyCompleted(EcrAction action) {
+        if (action == null || action.getDependsOnActionId() == null) {
+            return true;
+        }
+        return actionRepository.findById(action.getDependsOnActionId())
+                .map(dependency -> dependency.isChecked() || dependency.getStatus() == ActionStatus.DONE)
+                .orElse(false);
     }
 
     private String safeFileName(String fileName) {

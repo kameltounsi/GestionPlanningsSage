@@ -1,0 +1,279 @@
+import React, { useState } from "react";
+import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
+import { EmptyState } from "../../components/common/EmptyState";
+import { emptyPlanningRuleForm } from "../../constants/forms";
+import { userRoleOptions } from "../../constants/roles";
+import { stageColors, stageDefinitions } from "../../constants/stages";
+import { criticalityClass } from "../../utils/status";
+import { stageColorClass, stageLabel } from "../../utils/stages";
+
+export function PlanningRulesAdmin({ form, rules, saving, onCancelEdit, onDelete, onEdit, onSubmit, setForm }) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [showNewProjectStages, setShowNewProjectStages] = useState(false);
+
+  function openCreateDialog(stage, type) {
+    setForm({
+      ...emptyPlanningRuleForm,
+      stage,
+      appliesToModification: type !== "newProject",
+      appliesToNewProject: type !== "modification"
+    });
+    setDialogOpen(true);
+  }
+
+  function openEditDialog(rule) {
+    onEdit(rule);
+    setDialogOpen(true);
+  }
+
+  function closeDialog() {
+    setDialogOpen(false);
+    onCancelEdit();
+  }
+
+  function submitDialog(event) {
+    onSubmit(event);
+    setDialogOpen(false);
+  }
+
+  return (
+    <section className="panel planning-admin">
+      <div className="section-title">
+        <div>
+          <h2>Actions standard par phase</h2>
+          <span>L'admin definit les actions, criticites, preuves et liaisons qui seront generees dans chaque nouvelle ECR.</span>
+        </div>
+        <span>{rules.length} actions</span>
+      </div>
+      <label className="project-type-toggle admin-project-toggle">
+        <input
+          aria-label="Afficher les phases nouveau projet"
+          checked={showNewProjectStages}
+          type="checkbox"
+          onChange={(event) => setShowNewProjectStages(event.target.checked)}
+        />
+        <span className="toggle-visual" aria-hidden="true" />
+        <span>
+          <strong>Nouveau Projet</strong>
+        </span>
+      </label>
+      <PhaseActionGrid
+        label={showNewProjectStages ? "Phases nouveau projet" : "Phases modification"}
+        newProject={showNewProjectStages}
+        rules={rules}
+        type={showNewProjectStages ? "newProject" : "modification"}
+        onCreate={openCreateDialog}
+      />
+      <div className="planning-rule-list">
+        {rules.length === 0 ? (
+          <EmptyState title="Aucune action standard" text="Cliquez sur une phase coloree pour creer la premiere action standard." />
+        ) : (
+          rules.map((rule) => (
+            <article className="planning-rule-row" key={rule.id}>
+              <span className={`stage-pill ${stageColorClass(rule.stage)}`}>{stageLabel(rule.stage)}</span>
+              <div>
+                <strong>{rule.actionTitle}</strong>
+                <span>{rule.topicRisk || "Topic non renseigne"}</span>
+              </div>
+              <strong className={`criticality ${criticalityClass(rule.criticality)}`}>{rule.criticality || "3-faible"}</strong>
+              <span>{[rule.appliesToModification ? "Modification" : "", rule.appliesToNewProject ? "Nouveau projet" : ""].filter(Boolean).join(" + ")}</span>
+              <span>{rule.dependencyActionTitle ? `Apres ${rule.dependencyAnchor === "INPUT" ? "entree" : "sortie"}: ${rule.dependencyActionTitle}` : "Depart reception ECR"}</span>
+              <strong className="duration-pill">{rule.durationDays} j</strong>
+              <div className="row-actions">
+                <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => openEditDialog(rule)} aria-label="Modifier la regle" title="Modifier">
+                  <Pencil size={15} />
+                </button>
+                <button className="ghost-icon" type="button" onClick={() => onDelete(rule.id)} title="Supprimer">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </article>
+          ))
+        )}
+      </div>
+      {dialogOpen && (
+        <ActionRuleDialog
+          form={form}
+          rules={rules}
+          saving={saving}
+          onClose={closeDialog}
+          onSubmit={submitDialog}
+          setForm={setForm}
+        />
+      )}
+    </section>
+  );
+}
+
+function PhaseActionGrid({ label, newProject = false, rules, type, onCreate }) {
+  const stages = stageDefinitions.filter((stage) => (newProject ? stage.newProject : stage.modification));
+
+  return (
+    <section className="admin-phase-section">
+      <div className="phase-preview-title">
+        <h3>{label}</h3>
+        <span>{stages.length} phases</span>
+      </div>
+      <div className="admin-phase-grid">
+        {stages.map((stage, index) => {
+          const count = rules.filter((rule) => (
+            rule.stage === stage.key && (newProject ? rule.appliesToNewProject : rule.appliesToModification)
+          )).length;
+          return (
+            <button className={`admin-phase-card ${stageColors[index % stageColors.length]}`} key={`${type}-${stage.key}`} type="button" onClick={() => onCreate(stage.key, type)}>
+              <strong>{newProject ? stage.newProjectLabel : stage.modificationLabel}</strong>
+              <span>{count} action{count > 1 ? "s" : ""}</span>
+              <Plus size={18} />
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function actionSequenceNumber(value) {
+  const match = String(value || "").match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+function sortActionRules(first, second) {
+  const firstNumber = actionSequenceNumber(first.actionTitle);
+  const secondNumber = actionSequenceNumber(second.actionTitle);
+  if (firstNumber !== null && secondNumber !== null && firstNumber !== secondNumber) {
+    return firstNumber - secondNumber;
+  }
+  if (firstNumber !== null && secondNumber === null) return -1;
+  if (firstNumber === null && secondNumber !== null) return 1;
+  return String(first.actionTitle || "").localeCompare(String(second.actionTitle || ""));
+}
+
+function previousDependencyOptions(rules, form) {
+  const candidates = rules
+    .filter((rule) => rule.stage === form.stage)
+    .filter((rule) => rule.actionTitle !== form.actionTitle)
+    .filter((rule) => (
+      (form.appliesToModification && rule.appliesToModification) ||
+      (form.appliesToNewProject && rule.appliesToNewProject)
+    ))
+    .sort(sortActionRules);
+
+  const currentNumber = actionSequenceNumber(form.actionTitle);
+  if (currentNumber !== null) {
+    return candidates.filter((rule) => {
+      const ruleNumber = actionSequenceNumber(rule.actionTitle);
+      return ruleNumber === null || ruleNumber < currentNumber;
+    });
+  }
+  return candidates;
+}
+
+function ActionRuleDialog({ form, rules, saving, onClose, onSubmit, setForm }) {
+  const phaseActions = rules
+    .filter((rule) => rule.stage === form.stage)
+    .filter((rule) => (
+      (form.appliesToModification && rule.appliesToModification) ||
+      (form.appliesToNewProject && rule.appliesToNewProject)
+    ))
+    .sort(sortActionRules);
+  const dependencyOptions = previousDependencyOptions(rules, form);
+
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <form
+        aria-labelledby="action-rule-dialog-title"
+        aria-modal="true"
+        className="dialog-card action-rule-dialog panel form-page"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={onSubmit}
+        role="dialog"
+      >
+        <div className="form-intro">
+          <div>
+            <p className="eyebrow">Action standard</p>
+            <h2 id="action-rule-dialog-title">{stageLabel(form.stage)}</h2>
+            <p>Definissez l'action, sa criticite et ses dependances pour cette phase.</p>
+          </div>
+          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
+            <X size={18} />
+          </button>
+        </div>
+        <section className="phase-existing-actions">
+          <div className="phase-preview-title">
+            <h3>Actions deja creees dans cette phase</h3>
+            <span>{phaseActions.length} action{phaseActions.length > 1 ? "s" : ""}</span>
+          </div>
+          {phaseActions.length === 0 ? (
+            <p className="form-hint">Aucune action standard n'est encore definie pour cette phase.</p>
+          ) : (
+            <div className="phase-action-table">
+              {phaseActions.map((rule) => (
+                <article className="phase-action-table-row" key={rule.id || rule.actionTitle}>
+                  <strong>{rule.actionTitle}</strong>
+                  <span>{rule.topicRisk || "Topic non renseigne"}</span>
+                  <small className={`criticality ${criticalityClass(rule.criticality)}`}>{rule.criticality || "3-faible"}</small>
+                  <em>{rule.dependencyActionTitle ? `Bloquee par: ${rule.dependencyActionTitle}` : "Sans blocage"}</em>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+        <div className="planning-rule-form dialog-rule-form">
+          <label>
+            Phase
+            <input disabled value={stageLabel(form.stage, form.appliesToNewProject && !form.appliesToModification)} />
+          </label>
+          <label>
+            Action
+            <input required value={form.actionTitle} onChange={(event) => setForm((current) => ({ ...current, actionTitle: event.target.value, dependencyActionTitle: "" }))} placeholder="Ex: Action 7 - Validation input" />
+          </label>
+          <label>
+            Topic / risque
+            <input value={form.topicRisk} onChange={(event) => setForm((current) => ({ ...current, topicRisk: event.target.value }))} placeholder="Risque ou sujet" />
+          </label>
+          <label>
+            Responsable
+            <select value={form.responsible} onChange={(event) => setForm((current) => ({ ...current, responsible: event.target.value }))}>
+              <option value="">Pilote ECR</option>
+              {userRoleOptions.map(([value, label]) => (
+                <option key={value} value={label}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Criticite
+            <select value={form.criticality} onChange={(event) => setForm((current) => ({ ...current, criticality: event.target.value }))}>
+              <option value="1-critique">1-critique</option>
+              <option value="2-moyenne">2-moyenne</option>
+              <option value="3-faible">3-faible</option>
+            </select>
+          </label>
+          <label>
+            Bloquee par
+            <select value={form.dependencyActionTitle} onChange={(event) => setForm((current) => ({ ...current, dependencyActionTitle: event.target.value }))}>
+              <option value="">Aucune action</option>
+              {dependencyOptions.map((rule) => (
+                <option key={rule.id || rule.actionTitle} value={rule.actionTitle}>{rule.actionTitle}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Jours de travail
+            <input min="0" type="number" value={form.durationDays} onChange={(event) => setForm((current) => ({ ...current, durationDays: event.target.value }))} />
+          </label>
+          <label className="asset-required-field user-enabled-field">
+            <input checked={form.evidenceRequired} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, evidenceRequired: event.target.checked }))} />
+            Asset obligatoire
+          </label>
+        </div>
+        <div className="button-row">
+          <button className="primary-action" disabled={saving} type="submit">
+            <Save size={16} />
+            Enregistrer action
+          </button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
+        </div>
+      </form>
+    </div>
+  );
+}

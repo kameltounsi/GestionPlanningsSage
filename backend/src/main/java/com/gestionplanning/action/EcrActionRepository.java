@@ -12,4 +12,6 @@ public interface EcrActionRepository extends JpaRepository<EcrAction, Long> {
     List<EcrAction> findByRequest_IdAndStageOrderByDeadlineAscIdAsc(Long requestId, EcrStage stage);
 
     List<EcrAction> findByDeadlineBeforeAndStatusNotOrderByDeadlineAsc(LocalDate date, ActionStatus status);
+
+    void deleteByRequest_Id(Long requestId);
 }

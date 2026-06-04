@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, Database, FolderKanban, LayoutDashboard, Lis
 const navItems = [
   ["dashboard", "Tableau", LayoutDashboard],
   ["modifications", "Modifications", ListChecks],
-  ["projects", "Projets", FolderKanban],
+  ["projects", "Actions", FolderKanban],
   ["preferentials", "Préférentiels", Database],
   ["users", "Utilisateurs", Users],
   ["profile", "Profil", UserCircle]

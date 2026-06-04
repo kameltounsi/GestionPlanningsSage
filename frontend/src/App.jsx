@@ -908,28 +908,16 @@ function App() {
 
         {page === "projects" && (
           <ProjectsPage
-            editingProject={editingProject}
-            projectForm={projectForm}
-            projects={projects}
-            users={users}
             planningRuleForm={planningRuleForm}
             planningRules={planningRules}
             saving={saving}
-            onCancelEdit={() => {
-              setEditingProject(null);
-              setProjectForm({ name: "", projectTeam: "" });
-            }}
             onCancelPlanningRuleEdit={() => {
               setEditingPlanningRule(null);
               setPlanningRuleForm(emptyPlanningRuleForm);
             }}
-            onDelete={handleDeleteProject}
             onDeletePlanningRule={handleDeletePlanningRule}
-            onEdit={startProjectEdit}
             onEditPlanningRule={startPlanningRuleEdit}
-            onSubmit={handleSaveProject}
             onSubmitPlanningRule={handleSavePlanningRule}
-            setProjectForm={setProjectForm}
             setPlanningRuleForm={setPlanningRuleForm}
           />
         )}
@@ -940,9 +928,13 @@ function App() {
             clients={clientReferences}
             editingClient={editingClientReference}
             editingProduct={editingProductReference}
+            editingProject={editingProject}
             productForm={productReferenceForm}
             products={productReferences}
+            projectForm={projectForm}
+            projects={projects}
             saving={saving}
+            users={users}
             onCancelClientEdit={() => {
               setEditingClientReference(null);
               setClientReferenceForm({ name: "" });
@@ -951,14 +943,22 @@ function App() {
               setEditingProductReference(null);
               setProductReferenceForm({ name: "" });
             }}
+            onCancelProjectEdit={() => {
+              setEditingProject(null);
+              setProjectForm({ name: "", projectTeam: "" });
+            }}
             onDeleteClient={handleDeleteClientReference}
             onDeleteProduct={handleDeleteProductReference}
+            onDeleteProject={handleDeleteProject}
             onEditClient={startClientReferenceEdit}
             onEditProduct={startProductReferenceEdit}
+            onEditProject={startProjectEdit}
             onSubmitClient={handleSaveClientReference}
             onSubmitProduct={handleSaveProductReference}
+            onSubmitProject={handleSaveProject}
             setClientForm={setClientReferenceForm}
             setProductForm={setProductReferenceForm}
+            setProjectForm={setProjectForm}
           />
         )}
 
@@ -1337,7 +1337,7 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
         {projects.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un projet dans le référentiel projets.</p>}
         {ecrForm.modificationProject && projectTeamMembers.length === 0 && <p className="form-hint project-team-warning">Ce projet n'a pas encore d'Équipe projet.</p>}
         {projectTeamMembers.length > 0 && !ecrForm.pilot && <p className="form-hint project-team-warning">Sélectionnez un pilote dans l'équipe du projet.</p>}
-        <p className="form-hint">Les actions standard de chaque phase sont générées automatiquement depuis la page Projets / Actions standard par phase.</p>
+        <p className="form-hint">Les actions standard de chaque phase sont générées automatiquement depuis la page Actions.</p>
       </form>
     </section>
   );
@@ -1367,23 +1367,44 @@ function PreferentialsPage({
   clients,
   editingClient,
   editingProduct,
+  editingProject,
   productForm,
   products,
+  projectForm,
+  projects,
   saving,
+  users,
   onCancelClientEdit,
   onCancelProductEdit,
+  onCancelProjectEdit,
   onDeleteClient,
   onDeleteProduct,
+  onDeleteProject,
   onEditClient,
   onEditProduct,
+  onEditProject,
   onSubmitClient,
   onSubmitProduct,
+  onSubmitProject,
   setClientForm,
-  setProductForm
+  setProductForm,
+  setProjectForm
 }) {
   return (
     <section className="page-content">
-      <PageHeader eyebrow="Référentiel" title="Préférentiels" subtitle="Gérez les listes de clients et de produits utilisées dans les modifications." />
+      <PageHeader eyebrow="Référentiel" title="Préférentiels" subtitle="Gérez les projets, clients et produits utilisés dans les modifications." />
+      <ProjectPreferentialPanel
+        editingProject={editingProject}
+        projectForm={projectForm}
+        projects={projects}
+        saving={saving}
+        users={users}
+        onCancelEdit={onCancelProjectEdit}
+        onDelete={onDeleteProject}
+        onEdit={onEditProject}
+        onSubmit={onSubmitProject}
+        setProjectForm={setProjectForm}
+      />
       <div className="preferentials-grid">
         <PreferentialPanel
           count={clients.length}
@@ -1466,82 +1487,72 @@ function PreferentialPanel({ count, editing, emptyText, emptyTitle, form, refere
   );
 }
 
+function ProjectPreferentialPanel({ editingProject, projectForm, projects, saving, users, onCancelEdit, onDelete, onEdit, onSubmit, setProjectForm }) {
+  return (
+    <section className="panel project-preferential-panel">
+      <form className="form-page compact-preferential-form" onSubmit={onSubmit}>
+        <div className="section-title">
+          <div>
+            <h2>Projets</h2>
+            <span>{projects.length} projet{projects.length > 1 ? "s" : ""}</span>
+          </div>
+        </div>
+        <label>
+          Nom du projet
+          <input disabled={Boolean(editingProject)} required value={projectForm.name} onChange={(event) => setProjectForm((form) => ({ ...form, name: event.target.value }))} />
+        </label>
+        <ProjectTeamSelector
+          projectTeam={projectForm.projectTeam}
+          users={users}
+          onChange={(projectTeam) => setProjectForm((form) => ({ ...form, projectTeam }))}
+        />
+        <div className="button-row">
+          <button className="primary-action" disabled={saving} type="submit">
+            <Save size={16} />
+            Enregistrer
+          </button>
+          {editingProject && <button className="secondary-action" type="button" onClick={onCancelEdit}>Annuler</button>}
+        </div>
+      </form>
+      <div className="table-list">
+        {projects.length === 0 ? (
+          <EmptyState title="Aucun projet créé" text="Ajoutez un premier projet pour débloquer la création des modifications." compact />
+        ) : (
+          projects.map((project) => (
+            <article className="project-table-row" key={project.name}>
+              <div>
+                <strong>{project.name}</strong>
+                <span>{formatProjectTeamWithRoles(project.projectTeam, users)}</span>
+              </div>
+              <div className="row-actions">
+                <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(project)} aria-label="Modifier le projet" title="Modifier">
+                  <Pencil size={15} />
+                </button>
+                <button className="ghost-icon" type="button" onClick={() => onDelete(project.name)} title="Supprimer">
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </article>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
 function ProjectsPage({
-  editingProject,
   planningRuleForm,
   planningRules,
-  projectForm,
-  projects,
-  users,
   saving,
-  onCancelEdit,
   onCancelPlanningRuleEdit,
-  onDelete,
   onDeletePlanningRule,
-  onEdit,
   onEditPlanningRule,
-  onSubmit,
   onSubmitPlanningRule,
-  setPlanningRuleForm,
-  setProjectForm
+  setPlanningRuleForm
 }) {
   return (
     <section className="page-content">
-      <PageHeader eyebrow="Administration" title="Référentiel projets" subtitle="L'admin maintient ici la liste complète des projets utilisables pendant la création d'une modification." />
-      <div className="split-layout">
-        <form className="panel form-page" onSubmit={onSubmit}>
-          <div className="form-intro">
-            <div>
-              <h2>{editingProject ? "Modifier le projet" : "Ajouter un projet"}</h2>
-              <p>Gardez des noms courts et cohérents pour faciliter la recherche pendant la création ECR.</p>
-            </div>
-          </div>
-          <label>
-            Nom du projet
-            <input disabled={Boolean(editingProject)} required value={projectForm.name} onChange={(event) => setProjectForm((form) => ({ ...form, name: event.target.value }))} />
-          </label>
-          <ProjectTeamSelector
-            projectTeam={projectForm.projectTeam}
-            users={users}
-            onChange={(projectTeam) => setProjectForm((form) => ({ ...form, projectTeam }))}
-          />
-          <div className="button-row">
-            <button className="primary-action" disabled={saving} type="submit">
-              <Save size={16} />
-              Enregistrer
-            </button>
-            {editingProject && <button className="secondary-action" type="button" onClick={onCancelEdit}>Annuler</button>}
-          </div>
-        </form>
-        <section className="panel">
-          <div className="section-title">
-            <h2>Liste des projets</h2>
-            <span>{projects.length} projets</span>
-          </div>
-          <div className="table-list">
-            {projects.length === 0 ? (
-              <EmptyState title="Aucun projet créé" text="Ajoutez un premier projet pour débloquer la création des modifications." />
-            ) : (
-              projects.map((project) => (
-                <article className="project-table-row" key={project.name}>
-                  <div>
-                    <strong>{project.name}</strong>
-                    <span>{formatProjectTeamWithRoles(project.projectTeam, users)}</span>
-                  </div>
-                  <div className="row-actions">
-                    <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(project)} aria-label="Modifier le projet" title="Modifier">
-                      <Pencil size={15} />
-                    </button>
-                    <button className="ghost-icon" type="button" onClick={() => onDelete(project.name)} title="Supprimer">
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </article>
-              ))
-            )}
-          </div>
-        </section>
-      </div>
+      <PageHeader eyebrow="Administration" title="Actions standard" subtitle="Gérez les actions standard par phase et leurs durées de planning." />
       <PlanningRulesAdmin
         form={planningRuleForm}
         rules={planningRules}

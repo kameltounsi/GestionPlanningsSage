@@ -1229,8 +1229,9 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   display: grid;
   gap: 8px;
   grid-column: 1 / -1;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 170px));
+  grid-template-columns: repeat(auto-fit, minmax(118px, 150px));
   justify-content: start;
+  margin-top: 2px;
 }
 
 .request-image-grid a {
@@ -1238,8 +1239,8 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   border-radius: 8px;
   color: var(--ink);
   display: grid;
-  gap: 6px;
-  padding: 7px;
+  gap: 5px;
+  padding: 6px;
   text-decoration: none;
 }
 
@@ -1252,7 +1253,7 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 .request-image-grid img {
   aspect-ratio: 4 / 3;
   border-radius: 6px;
-  max-height: 82px;
+  max-height: 64px;
   object-fit: cover;
   width: 100%;
 }
@@ -1609,11 +1610,10 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 .details-header {
   align-items: start;
   display: grid;
-  gap: 10px;
+  gap: 10px 12px;
   grid-template-columns: minmax(300px, 1.2fr) auto minmax(360px, 1fr);
-  max-height: 250px;
   min-height: 0;
-  overflow-y: visible;
+  overflow: visible;
   padding-right: 4px;
 }
 
@@ -1721,8 +1721,9 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 
 .request-workspace {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   grid-template-rows: auto auto auto auto;
+  margin-top: 2px;
   min-height: 0;
   overflow: visible;
 }

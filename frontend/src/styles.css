@@ -1903,6 +1903,86 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   height: 100%;
 }
 
+.phase-validation-panel {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 14px 16px;
+}
+
+.phase-validation-panel strong {
+  display: block;
+  font-size: 14px;
+}
+
+.phase-validation-panel span {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.phase-validation-result {
+  border-left: 3px solid var(--line-strong);
+  margin-top: 10px;
+  padding-left: 10px;
+}
+
+.phase-validation-result.rejected {
+  border-color: var(--danger);
+}
+
+.phase-validation-result.approved {
+  border-color: var(--success);
+}
+
+.phase-validation-result p {
+  color: var(--text);
+  font-size: 12px;
+  margin: 4px 0 0;
+  white-space: pre-line;
+}
+
+.swal-action-list-title {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+  margin: 12px auto 8px;
+  max-width: 310px;
+  text-align: left;
+}
+
+.swal-action-list {
+  border: 1px solid #d7dee8;
+  border-radius: 8px;
+  margin: 0 auto;
+  max-height: 190px;
+  max-width: 310px;
+  overflow: auto;
+  padding: 8px;
+  text-align: left;
+}
+
+.swal-action-choice {
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+  padding: 7px 4px;
+}
+
+.swal-action-choice span {
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.swal-action-empty {
+  color: #64748b;
+  font-size: 13px;
+  margin: 8px;
+}
+
 .data-section {
   display: grid;
   gap: 10px;

@@ -11,9 +11,11 @@ import java.time.LocalDateTime;
 @Component
 public class AuthInterceptor implements HandlerInterceptor {
     private final AuthTokenRepository tokenRepository;
+    private final AccessControlService accessControlService;
 
-    public AuthInterceptor(AuthTokenRepository tokenRepository) {
+    public AuthInterceptor(AuthTokenRepository tokenRepository, AccessControlService accessControlService) {
         this.tokenRepository = tokenRepository;
+        this.accessControlService = accessControlService;
     }
 
     @Override
@@ -30,6 +32,13 @@ public class AuthInterceptor implements HandlerInterceptor {
         return tokenRepository.findByTokenAndExpiresAtAfter(token, LocalDateTime.now())
                 .filter(authToken -> authToken.getUser().isEnabled())
                 .map(authToken -> {
+                    if (isAdminOnlyRequest(request) && !accessControlService.isAdmin(authToken.getUser())) {
+                        try {
+                            response.sendError(HttpServletResponse.SC_FORBIDDEN);
+                        } catch (Exception ignored) {
+                        }
+                        return false;
+                    }
                     request.setAttribute("authenticatedUser", authToken.getUser());
                     return true;
                 })
@@ -55,5 +64,27 @@ public class AuthInterceptor implements HandlerInterceptor {
             return true;
         }
         return HttpMethod.GET.matches(method) && path.matches("/api/actions/\\d+/evidence");
+    }
+
+    private boolean isAdminOnlyRequest(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        String method = request.getMethod();
+        if (HttpMethod.GET.matches(method) || HttpMethod.OPTIONS.matches(method)) {
+            return false;
+        }
+        if (path.matches("/api/users(/.*)?")) {
+            return true;
+        }
+        if (path.matches("/api/projects(/.*)?")) {
+            return true;
+        }
+        if (path.matches("/api/preferentials/(clients|products)(/.*)?")) {
+            return true;
+        }
+        if (path.matches("/api/action-planning-rules(/.*)?")) {
+            return true;
+        }
+        return HttpMethod.POST.matches(method) && path.matches("/api/ecr-requests/\\d+/actions")
+                || HttpMethod.DELETE.matches(method) && path.matches("/api/actions/\\d+");
     }
 }

@@ -5,11 +5,13 @@ import com.gestionplanning.action.EcrActionAssetRepository;
 import com.gestionplanning.action.EcrActionEvidenceRepository;
 import com.gestionplanning.action.EcrActionRepository;
 import com.gestionplanning.action.ActionPlanningService;
+import com.gestionplanning.auth.AccessControlService;
 import com.gestionplanning.document.EcrDocument;
 import com.gestionplanning.document.EcrDocumentRepository;
 import com.gestionplanning.penalty.PenaltyRepository;
 import com.gestionplanning.storage.CloudinaryStorageService;
 import com.gestionplanning.storage.StoredAsset;
+import com.gestionplanning.user.AppUser;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,13 +35,14 @@ public class EcrRequestController {
     private final CloudinaryStorageService storageService;
     private final EcrTemplateService templateService;
     private final ActionPlanningService planningService;
+    private final AccessControlService accessControlService;
 
     public EcrRequestController(EcrRequestRepository requestRepository, ChecklistItemRepository checklistItemRepository,
                                 EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
                                 EcrActionAssetRepository assetRepository,
                                 EcrDocumentRepository documentRepository, PenaltyRepository penaltyRepository,
                                 CloudinaryStorageService storageService, EcrTemplateService templateService,
-                                ActionPlanningService planningService) {
+                                ActionPlanningService planningService, AccessControlService accessControlService) {
         this.requestRepository = requestRepository;
         this.checklistItemRepository = checklistItemRepository;
         this.actionRepository = actionRepository;
@@ -50,21 +53,25 @@ public class EcrRequestController {
         this.storageService = storageService;
         this.templateService = templateService;
         this.planningService = planningService;
+        this.accessControlService = accessControlService;
     }
 
     @GetMapping
-    public List<EcrRequest> list() {
+    public List<EcrRequest> list(@RequestAttribute("authenticatedUser") AppUser user) {
         requestRepository.findAll().stream()
                 .filter(request -> request.getCurrentStage() != EcrStage.CLOSED && request.getCurrentStage() != EcrStage.CANCELLED)
                 .forEach(templateService::ensureMissingActionsFor);
-        return requestRepository.findAllByOrderByReceptionDateDescIdDesc();
+        return requestRepository.findAllByOrderByReceptionDateDescIdDesc().stream()
+                .filter(request -> accessControlService.canAccessRequest(user, request))
+                .collect(java.util.stream.Collectors.toList());
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<EcrRequest> get(@PathVariable Long id) {
+    public ResponseEntity<EcrRequest> get(@PathVariable Long id, @RequestAttribute("authenticatedUser") AppUser user) {
         return requestRepository.findById(id)
+                .filter(request -> accessControlService.canAccessRequest(user, request))
                 .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+                .orElse(ResponseEntity.status(403).build());
     }
 
     @PostMapping
@@ -83,8 +90,10 @@ public class EcrRequestController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<EcrRequest> update(@PathVariable Long id, @Valid @RequestBody EcrRequest updatedRequest) {
+    public ResponseEntity<EcrRequest> update(@PathVariable Long id, @Valid @RequestBody EcrRequest updatedRequest,
+                                             @RequestAttribute("authenticatedUser") AppUser user) {
         return requestRepository.findById(id)
+                .filter(request -> accessControlService.canAccessRequest(user, request))
                 .map(request -> {
                     request.setModificationNumber(updatedRequest.getModificationNumber());
                     request.setClient(updatedRequest.getClient());
@@ -114,7 +123,7 @@ public class EcrRequestController {
                     planningService.recalculateRequest(saved);
                     return ResponseEntity.ok(saved);
                 })
-                .orElse(ResponseEntity.notFound().build());
+                .orElse(ResponseEntity.status(403).build());
     }
 
     @PostMapping(value = "/{id}/images/{type}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -183,8 +192,10 @@ public class EcrRequestController {
     }
 
     @PatchMapping("/{id}/stage")
-    public ResponseEntity<EcrRequest> updateStage(@PathVariable Long id, @RequestParam EcrStage stage) {
+    public ResponseEntity<EcrRequest> updateStage(@PathVariable Long id, @RequestParam EcrStage stage,
+                                                  @RequestAttribute("authenticatedUser") AppUser user) {
         return requestRepository.findById(id)
+                .filter(request -> accessControlService.canValidateRequest(user, request))
                 .map(request -> {
                     if (!EcrStage.isAllowed(stage, request.isNewVersion())) {
                         return ResponseEntity.badRequest().<EcrRequest>build();
@@ -192,18 +203,21 @@ public class EcrRequestController {
                     request.setCurrentStage(stage);
                     return ResponseEntity.ok(requestRepository.save(request));
                 })
-                .orElse(ResponseEntity.notFound().build());
+                .orElse(ResponseEntity.status(403).build());
     }
 
     @GetMapping("/{id}/checklist")
-    public ResponseEntity<List<ChecklistItem>> checklist(@PathVariable Long id, @RequestParam(required = false) EcrStage stage) {
-        if (!requestRepository.existsById(id)) {
-            return ResponseEntity.notFound().build();
-        }
-        if (stage == null) {
-            return ResponseEntity.ok(requestRepository.findById(id).get().getChecklistItems());
-        }
-        return ResponseEntity.ok(checklistItemRepository.findByRequestIdAndStageOrderById(id, stage));
+    public ResponseEntity<List<ChecklistItem>> checklist(@PathVariable Long id, @RequestParam(required = false) EcrStage stage,
+                                                         @RequestAttribute("authenticatedUser") AppUser user) {
+        return requestRepository.findById(id)
+                .filter(request -> accessControlService.canAccessRequest(user, request))
+                .map(request -> {
+                    if (stage == null) {
+                        return ResponseEntity.ok(request.getChecklistItems());
+                    }
+                    return ResponseEntity.ok(checklistItemRepository.findByRequestIdAndStageOrderById(id, stage));
+                })
+                .orElse(ResponseEntity.status(403).build());
     }
 
 }

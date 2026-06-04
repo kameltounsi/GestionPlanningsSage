@@ -3,9 +3,15 @@ package com.gestionplanning.action;
 import com.gestionplanning.ecr.EcrRequestRepository;
 import com.gestionplanning.ecr.EcrStage;
 import com.gestionplanning.ecr.EcrTemplateService;
+import com.gestionplanning.ecr.PhaseValidationRequest;
+import com.gestionplanning.ecr.PhaseValidationRequestRepository;
+import com.gestionplanning.ecr.PhaseValidationStatus;
+import com.gestionplanning.auth.AccessControlService;
 import com.gestionplanning.storage.CloudinaryStorageService;
 import com.gestionplanning.storage.CloudinaryStorageService.DownloadedAsset;
 import com.gestionplanning.storage.StoredAsset;
+import com.gestionplanning.user.AccountMailService;
+import com.gestionplanning.user.AppUser;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -31,12 +37,16 @@ public class EcrActionController {
     private final EcrTemplateService templateService;
     private final CloudinaryStorageService storageService;
     private final ActionAssigneeResolver assigneeResolver;
+    private final AccessControlService accessControlService;
+    private final PhaseValidationRequestRepository validationRepository;
+    private final AccountMailService accountMailService;
 
     public EcrActionController(EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
                                EcrActionAssetRepository assetRepository,
                                EcrRequestRepository requestRepository, ActionPlanningService planningService,
                                EcrTemplateService templateService, CloudinaryStorageService storageService,
-                               ActionAssigneeResolver assigneeResolver) {
+                               ActionAssigneeResolver assigneeResolver, AccessControlService accessControlService,
+                               PhaseValidationRequestRepository validationRepository, AccountMailService accountMailService) {
         this.actionRepository = actionRepository;
         this.evidenceRepository = evidenceRepository;
         this.assetRepository = assetRepository;
@@ -45,6 +55,9 @@ public class EcrActionController {
         this.templateService = templateService;
         this.storageService = storageService;
         this.assigneeResolver = assigneeResolver;
+        this.accessControlService = accessControlService;
+        this.validationRepository = validationRepository;
+        this.accountMailService = accountMailService;
     }
 
     @GetMapping("/actions")
@@ -62,8 +75,15 @@ public class EcrActionController {
     }
 
     @GetMapping("/ecr-requests/{requestId}/actions")
-    public ResponseEntity<List<EcrAction>> listByRequest(@PathVariable Long requestId, @RequestParam(required = false) EcrStage stage) {
+    public ResponseEntity<List<EcrAction>> listByRequest(@PathVariable Long requestId, @RequestParam(required = false) EcrStage stage,
+                                                         @RequestAttribute("authenticatedUser") AppUser user) {
         return requestRepository.findById(requestId).map(request -> {
+            if (!accessControlService.canAccessRequest(user, request)) {
+                return ResponseEntity.status(403).<List<EcrAction>>build();
+            }
+            if (!accessControlService.isAdmin(user) && stage != null && EcrStage.allowedStages(request.isNewVersion()).indexOf(stage) > EcrStage.allowedStages(request.isNewVersion()).indexOf(request.getCurrentStage())) {
+                return ResponseEntity.status(403).<List<EcrAction>>build();
+            }
             templateService.ensureActionsFor(request);
             planningService.recalculateRequest(request);
             List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(requestId);
@@ -77,7 +97,11 @@ public class EcrActionController {
     }
 
     @PostMapping("/ecr-requests/{requestId}/actions")
-    public ResponseEntity<EcrAction> create(@PathVariable Long requestId, @Valid @RequestBody EcrAction action) {
+    public ResponseEntity<EcrAction> create(@PathVariable Long requestId, @Valid @RequestBody EcrAction action,
+                                            @RequestAttribute("authenticatedUser") AppUser user) {
+        if (!accessControlService.isAdmin(user)) {
+            return ResponseEntity.status(403).build();
+        }
         return requestRepository.findById(requestId)
                 .map(request -> {
                     if (isDone(action) && requiresEvidence(action)) {
@@ -94,8 +118,10 @@ public class EcrActionController {
     }
 
     @PutMapping("/actions/{id}")
-    public ResponseEntity<EcrAction> update(@PathVariable Long id, @Valid @RequestBody EcrAction updatedAction) {
+    public ResponseEntity<EcrAction> update(@PathVariable Long id, @Valid @RequestBody EcrAction updatedAction,
+                                            @RequestAttribute("authenticatedUser") AppUser user) {
         return actionRepository.findById(id)
+                .filter(action -> accessControlService.canAccessRequest(user, action.getRequest()))
                 .map(action -> {
                     action.setTitle(updatedAction.getTitle());
                     action.setDescription(updatedAction.getDescription());
@@ -132,17 +158,20 @@ public class EcrActionController {
                     action.setComment(updatedAction.getComment());
                     EcrAction saved = actionRepository.save(action);
                     planningService.recalculateRequest(saved.getRequest());
+                    notifyIfPhaseReady(saved.getRequest(), saved.getStage(), user);
                     return ResponseEntity.ok(saved);
                 })
-                .orElse(ResponseEntity.notFound().build());
+                .orElse(ResponseEntity.status(403).build());
     }
 
     @PostMapping(value = "/actions/{id}/evidence", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<EcrAction> uploadEvidence(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
+    public ResponseEntity<EcrAction> uploadEvidence(@PathVariable Long id, @RequestParam("file") MultipartFile file,
+                                                    @RequestAttribute("authenticatedUser") AppUser user) {
         if (file.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
         return actionRepository.findById(id)
+                .filter(action -> accessControlService.canAccessRequest(user, action.getRequest()))
                 .map(action -> {
                     StoredAsset asset = storageService.upload(file, "gestion-planning/actions/" + id);
                     EcrActionAsset actionAsset = new EcrActionAsset();
@@ -163,7 +192,7 @@ public class EcrActionController {
                     action.setEvidence(asset.getFileName());
                     return ResponseEntity.ok(actionRepository.save(action));
                 })
-                .orElse(ResponseEntity.notFound().build());
+                .orElse(ResponseEntity.status(403).build());
     }
 
     @GetMapping("/actions/{id}/evidence")
@@ -186,7 +215,10 @@ public class EcrActionController {
     }
 
     @DeleteMapping("/actions/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
+    public ResponseEntity<Void> delete(@PathVariable Long id, @RequestAttribute("authenticatedUser") AppUser user) {
+        if (!accessControlService.isAdmin(user)) {
+            return ResponseEntity.status(403).build();
+        }
         return actionRepository.findById(id).map(action -> {
             Long requestId = action.getRequestId();
             assetRepository.findByAction_IdOrderByUploadedAtDescIdDesc(id)
@@ -234,6 +266,30 @@ public class EcrActionController {
         return actionRepository.findById(action.getDependsOnActionId())
                 .map(this::isDone)
                 .orElse(false);
+    }
+
+    private void notifyIfPhaseReady(com.gestionplanning.ecr.EcrRequest request, EcrStage stage, AppUser user) {
+        if (request == null || stage == null || stage != request.getCurrentStage()) {
+            return;
+        }
+        List<EcrAction> stageActions = actionRepository.findByRequest_IdAndStageOrderByDeadlineAscIdAsc(request.getId(), stage);
+        if (stageActions.isEmpty() || stageActions.stream().anyMatch(action -> !isDone(action))) {
+            return;
+        }
+        boolean pendingExists = validationRepository.findFirstByRequest_IdAndStageOrderByRequestedAtDescIdDesc(request.getId(), stage)
+                .map(validation -> validation.getStatus() == PhaseValidationStatus.PENDING)
+                .orElse(false);
+        if (pendingExists) {
+            return;
+        }
+        PhaseValidationRequest validation = new PhaseValidationRequest();
+        validation.setRequest(request);
+        validation.setStage(stage);
+        validation.setStatus(PhaseValidationStatus.PENDING);
+        validation.setRequestedBy(user.getFullName() == null || user.getFullName().trim().isEmpty() ? user.getEmail() : user.getFullName());
+        validation.setRequestedAt(LocalDateTime.now());
+        validationRepository.save(validation);
+        accountMailService.sendPhaseReadyEmail(request, stage, accessControlService.validatorsAndManagersFor(request));
     }
 
     private String safeFileName(String fileName) {

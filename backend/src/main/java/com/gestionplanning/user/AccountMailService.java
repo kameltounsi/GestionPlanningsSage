@@ -1,5 +1,7 @@
 package com.gestionplanning.user;
 
+import com.gestionplanning.ecr.EcrRequest;
+import com.gestionplanning.ecr.EcrStage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,7 +17,9 @@ import javax.mail.internet.MimeMessage;
 import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeBodyPart;
 import javax.mail.internet.MimeMultipart;
+import java.util.Collection;
 import java.util.Properties;
+import java.util.stream.Collectors;
 
 @Service
 public class AccountMailService {
@@ -72,6 +76,74 @@ public class AccountMailService {
         }
     }
 
+    public void sendPhaseReadyEmail(EcrRequest request, EcrStage stage, Collection<AppUser> recipients) {
+        if (!mailEnabled || request == null || recipients == null || recipients.isEmpty()) {
+            return;
+        }
+        String to = recipients.stream()
+                .map(AppUser::getEmail)
+                .filter(email -> !isBlank(email))
+                .distinct()
+                .collect(Collectors.joining(","));
+        if (isBlank(to)) {
+            return;
+        }
+        String title = "Phase prete a valider";
+        String text = "La phase " + value(stage == null ? null : stage.getLabel(request.isNewVersion()))
+                + " de la modification " + value(request.getModificationNumber())
+                + " est prete a etre validee.\nProjet: " + value(request.getModificationProject())
+                + "\nLien: " + value(applicationUrl);
+        String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
+                + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
+                + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
+                + "<div style=\"background:#111827;color:#ffffff;padding:24px 30px;\">"
+                + "<div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#bfdbfe;\">Gestion Planning Sage</div>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Phase prete a valider</h1>"
+                + "</div><div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
+                + "<p>La phase <strong>" + escape(stage == null ? "-" : stage.getLabel(request.isNewVersion())) + "</strong> de la modification <strong>" + escape(value(request.getModificationNumber())) + "</strong> est prete pour validation.</p>"
+                + "<p><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Client :</strong> " + escape(value(request.getClient())) + "<br><strong>Produit :</strong> " + escape(value(request.getProduct())) + "</p>"
+                + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
+                + "</div></div></div></body></html>";
+        sendMessage(to, title, text, html, "phase validation");
+    }
+
+    public void sendPhaseRejectedEmail(EcrRequest request, EcrStage stage, AppUser recipient, String reason, String actionsToRevisit) {
+        if (!mailEnabled || request == null || recipient == null || isBlank(recipient.getEmail())) {
+            return;
+        }
+        String title = "Phase refusee - actions a revisiter";
+        String text = "La phase " + value(stage == null ? null : stage.getLabel(request.isNewVersion()))
+                + " de la modification " + value(request.getModificationNumber())
+                + " a ete refusee.\nRaison: " + value(reason)
+                + "\nActions a revisiter: " + value(actionsToRevisit)
+                + "\nLien: " + value(applicationUrl);
+        String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
+                + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
+                + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
+                + "<div style=\"background:#7f1d1d;color:#ffffff;padding:24px 30px;\"><div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#fecaca;\">Gestion Planning Sage</div>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Phase refusee</h1></div>"
+                + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
+                + "<p>La phase <strong>" + escape(stage == null ? "-" : stage.getLabel(request.isNewVersion())) + "</strong> de la modification <strong>" + escape(value(request.getModificationNumber())) + "</strong> necessite une reprise.</p>"
+                + "<p><strong>Raison :</strong><br>" + escape(value(reason)) + "</p>"
+                + "<p><strong>Actions a revisiter :</strong><br>" + escape(value(actionsToRevisit)).replace("\n", "<br>") + "</p>"
+                + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#b42318;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
+                + "</div></div></div></body></html>";
+        sendMessage(recipient.getEmail(), title, text, html, "phase rejection");
+    }
+
+    private void sendMessage(String to, String subject, String plainText, String html, String logContext) {
+        try {
+            MimeMessage message = new MimeMessage(mailSession());
+            message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(to));
+            message.setFrom(new InternetAddress(fromAddress));
+            message.setSubject(subject, "UTF-8");
+            message.setContent(buildContent(plainText, html));
+            Transport.send(message);
+        } catch (MessagingException | RuntimeException exception) {
+            LOGGER.error("Unable to send {} email to {}", logContext, to, exception);
+        }
+    }
+
     private Session mailSession() {
         Properties properties = new Properties();
         properties.put("mail.smtp.host", host);
@@ -93,14 +165,18 @@ public class AccountMailService {
     }
 
     private MimeMultipart buildContent(AppUser user, String temporaryPassword) throws MessagingException {
+        return buildContent(buildPlainText(user, temporaryPassword), buildHtml(user, temporaryPassword));
+    }
+
+    private MimeMultipart buildContent(String plainTextValue, String htmlValue) throws MessagingException {
         MimeMultipart content = new MimeMultipart("alternative");
 
         MimeBodyPart plainText = new MimeBodyPart();
-        plainText.setText(buildPlainText(user, temporaryPassword), "UTF-8");
+        plainText.setText(plainTextValue, "UTF-8");
         content.addBodyPart(plainText);
 
         MimeBodyPart html = new MimeBodyPart();
-        html.setContent(buildHtml(user, temporaryPassword), "text/html; charset=UTF-8");
+        html.setContent(htmlValue, "text/html; charset=UTF-8");
         content.addBodyPart(html);
 
         return content;

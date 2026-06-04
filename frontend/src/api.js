@@ -110,6 +110,30 @@ export function updateEcrStage(requestId, stage) {
   });
 }
 
+export function getPhaseValidations(requestId) {
+  return request(`/ecr-requests/${requestId}/phase-validations`);
+}
+
+export function requestPhaseValidation(requestId, stage) {
+  return request(`/ecr-requests/${requestId}/phase-validations`, {
+    method: "POST",
+    body: JSON.stringify({ stage })
+  });
+}
+
+export function approvePhaseValidation(requestId, validationId) {
+  return request(`/ecr-requests/${requestId}/phase-validations/${validationId}/approve`, {
+    method: "POST"
+  });
+}
+
+export function rejectPhaseValidation(requestId, validationId, payload) {
+  return request(`/ecr-requests/${requestId}/phase-validations/${validationId}/reject`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 export function getChecklist(requestId, stage) {
   const query = stage ? `?stage=${stage}` : "";
   return request(`/ecr-requests/${requestId}/checklist${query}`);

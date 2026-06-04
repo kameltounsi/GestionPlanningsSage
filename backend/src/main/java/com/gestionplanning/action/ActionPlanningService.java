@@ -1,6 +1,7 @@
 package com.gestionplanning.action;
 
 import com.gestionplanning.ecr.EcrRequest;
+import com.gestionplanning.ecr.EcrRequestRepository;
 import com.gestionplanning.ecr.EcrStage;
 import org.springframework.stereotype.Service;
 
@@ -17,12 +18,14 @@ public class ActionPlanningService {
     private final EcrActionRepository actionRepository;
     private final ActionPlanningRuleRepository ruleRepository;
     private final ActionAssigneeResolver assigneeResolver;
+    private final EcrRequestRepository requestRepository;
 
     public ActionPlanningService(EcrActionRepository actionRepository, ActionPlanningRuleRepository ruleRepository,
-                                 ActionAssigneeResolver assigneeResolver) {
+                                 ActionAssigneeResolver assigneeResolver, EcrRequestRepository requestRepository) {
         this.actionRepository = actionRepository;
         this.ruleRepository = ruleRepository;
         this.assigneeResolver = assigneeResolver;
+        this.requestRepository = requestRepository;
     }
 
     public void recalculateRequest(EcrRequest request) {
@@ -65,7 +68,9 @@ public class ActionPlanningService {
                     .orElse(nextPhaseStart);
         }
 
+        updateSopDate(request, actions, fallbackStart);
         actionRepository.saveAll(actions);
+        requestRepository.save(request);
     }
 
     private void applyRule(EcrAction action, Map<String, ActionPlanningRule> rules, Map<String, EcrAction> actionsByKey,
@@ -107,6 +112,14 @@ public class ActionPlanningService {
         action.setStartDate(start);
         action.setEndDate(start.plusDays(duration));
         action.setDeadline(action.getEndDate());
+    }
+
+    private void updateSopDate(EcrRequest request, List<EcrAction> actions, LocalDate fallbackStart) {
+        int totalDuration = actions.stream()
+                .map(EcrAction::getWorkDurationDays)
+                .mapToInt(this::durationOrDefault)
+                .sum();
+        request.setSopDate(fallbackStart.plusDays(totalDuration));
     }
 
     private int durationOrDefault(Integer duration) {

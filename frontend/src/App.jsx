@@ -21,21 +21,27 @@ import {
 import {
   createAction,
   createActionPlanningRule,
+  createClientReference,
   createEcrRequest,
+  createProductReference,
   createProject,
   createUser,
   clearSession,
   deleteActionPlanningRule,
   deleteAction,
+  deleteClientReference,
   deleteEcrRequest,
+  deleteProductReference,
   deleteProject,
   deleteUser,
   getActionPlanningRules,
   getActions,
   getChecklist,
+  getClientReferences,
   getCurrentUser,
   getEcrRequests,
   getPilots,
+  getProductReferences,
   getProjects,
   getStoredSession,
   getUsers,
@@ -44,8 +50,10 @@ import {
   storeSession,
   updateAction,
   updateActionPlanningRule,
+  updateClientReference,
   updateEcrRequest,
   updateEcrStage,
+  updateProductReference,
   updateProject,
   updateUser,
   updateUserProfile,
@@ -80,6 +88,8 @@ function App() {
   const [requests, setRequests] = useState([]);
   const [pilots, setPilots] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [clientReferences, setClientReferences] = useState([]);
+  const [productReferences, setProductReferences] = useState([]);
   const [planningRules, setPlanningRules] = useState([]);
   const [users, setUsers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
@@ -91,6 +101,8 @@ function App() {
   const [ecrEditForm, setEcrEditForm] = useState(emptyEcrForm);
   const [actionForm, setActionForm] = useState(emptyActionForm);
   const [projectForm, setProjectForm] = useState({ name: "", projectTeam: "" });
+  const [clientReferenceForm, setClientReferenceForm] = useState({ name: "" });
+  const [productReferenceForm, setProductReferenceForm] = useState({ name: "" });
   const [planningRuleForm, setPlanningRuleForm] = useState(emptyPlanningRuleForm);
   const [userForm, setUserForm] = useState(emptyUserForm);
   const [profileForm, setProfileForm] = useState(emptyUserForm);
@@ -98,6 +110,8 @@ function App() {
   const [editingPlanningRule, setEditingPlanningRule] = useState(null);
   const [editingProject, setEditingProject] = useState(null);
   const [editingEcrRequest, setEditingEcrRequest] = useState(null);
+  const [editingClientReference, setEditingClientReference] = useState(null);
+  const [editingProductReference, setEditingProductReference] = useState(null);
   const [editingUser, setEditingUser] = useState(null);
   const [query, setQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
@@ -131,8 +145,14 @@ function App() {
     ].filter(Boolean);
     return [...new Set(names)].sort((a, b) => a.localeCompare(b));
   }, [projects, requests]);
-  const clientOptions = useMemo(() => uniqueSorted(requests.map((request) => request.client)), [requests]);
-  const productOptions = useMemo(() => uniqueSorted(requests.map((request) => request.product)), [requests]);
+  const clientOptions = useMemo(
+    () => uniqueSorted(clientReferences.map((client) => client.name)),
+    [clientReferences]
+  );
+  const productOptions = useMemo(
+    () => uniqueSorted(productReferences.map((product) => product.name)),
+    [productReferences]
+  );
 
   const dashboardStats = useMemo(() => {
     const active = requests.filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED").length;
@@ -141,11 +161,13 @@ function App() {
   }, [requests, projects]);
 
   function loadInitialData() {
-    return Promise.all([getEcrRequests(), getPilots(), getProjects(), getActionPlanningRules(), getUsers(), getCurrentUser()])
-      .then(([requestData, pilotData, projectData, planningRuleData, userData, currentUserData]) => {
+    return Promise.all([getEcrRequests(), getPilots(), getProjects(), getClientReferences(), getProductReferences(), getActionPlanningRules(), getUsers(), getCurrentUser()])
+      .then(([requestData, pilotData, projectData, clientReferenceData, productReferenceData, planningRuleData, userData, currentUserData]) => {
         setRequests(requestData);
         setPilots(pilotData);
         setProjects(projectData);
+        setClientReferences(clientReferenceData);
+        setProductReferences(productReferenceData);
         setPlanningRules(planningRuleData);
         setUsers(userData);
         setCurrentUser(currentUserData);
@@ -223,13 +245,12 @@ function App() {
   }
 
   function buildEcrPayload(form) {
-    const { beforePhotoFile, afterPhotoFile, ...payload } = form;
+    const { beforePhotoFile, afterPhotoFile, sopDate, ...payload } = form;
     return {
       ...payload,
       accessInternalNumber: form.accessInternalNumber ? Number(form.accessInternalNumber) : null,
       currentStage: safeStage(form.currentStage, form.newVersion),
       receptionDate: form.receptionDate || null,
-      sopDate: form.sopDate || null,
       initialActions: (form.initialActions || [])
         .filter((action) => action.title.trim())
         .map(({ clientId, ...action }) => ({
@@ -578,6 +599,80 @@ function App() {
       .catch(() => setError("Suppression projet impossible."));
   }
 
+  function handleSaveClientReference(event) {
+    event.preventDefault();
+    const name = clientReferenceForm.name.trim();
+    if (!name) return;
+    setSaving(true);
+    setError("");
+    const request = editingClientReference
+      ? updateClientReference(editingClientReference, { name })
+      : createClientReference({ name });
+    request
+      .then((savedClient) => {
+        setClientReferences((items) => [...items.filter((item) => item.id !== savedClient.id), savedClient].sort((a, b) => a.name.localeCompare(b.name)));
+        setClientReferenceForm({ name: "" });
+        setEditingClientReference(null);
+      })
+      .catch(() => setError("Sauvegarde client impossible. Vérifiez le nom."))
+      .finally(() => setSaving(false));
+  }
+
+  function startClientReferenceEdit(client) {
+    setEditingClientReference(client.id);
+    setClientReferenceForm({ name: client.name || "" });
+  }
+
+  function handleDeleteClientReference(id) {
+    setError("");
+    deleteClientReference(id)
+      .then(() => {
+        setClientReferences((items) => items.filter((item) => item.id !== id));
+        if (editingClientReference === id) {
+          setEditingClientReference(null);
+          setClientReferenceForm({ name: "" });
+        }
+      })
+      .catch(() => setError("Suppression client impossible."));
+  }
+
+  function handleSaveProductReference(event) {
+    event.preventDefault();
+    const name = productReferenceForm.name.trim();
+    if (!name) return;
+    setSaving(true);
+    setError("");
+    const request = editingProductReference
+      ? updateProductReference(editingProductReference, { name })
+      : createProductReference({ name });
+    request
+      .then((savedProduct) => {
+        setProductReferences((items) => [...items.filter((item) => item.id !== savedProduct.id), savedProduct].sort((a, b) => a.name.localeCompare(b.name)));
+        setProductReferenceForm({ name: "" });
+        setEditingProductReference(null);
+      })
+      .catch(() => setError("Sauvegarde produit impossible. Vérifiez le nom."))
+      .finally(() => setSaving(false));
+  }
+
+  function startProductReferenceEdit(product) {
+    setEditingProductReference(product.id);
+    setProductReferenceForm({ name: product.name || "" });
+  }
+
+  function handleDeleteProductReference(id) {
+    setError("");
+    deleteProductReference(id)
+      .then(() => {
+        setProductReferences((items) => items.filter((item) => item.id !== id));
+        if (editingProductReference === id) {
+          setEditingProductReference(null);
+          setProductReferenceForm({ name: "" });
+        }
+      })
+      .catch(() => setError("Suppression produit impossible."));
+  }
+
   function handleSavePlanningRule(event) {
     event.preventDefault();
     if (!planningRuleForm.actionTitle.trim()) return;
@@ -839,6 +934,34 @@ function App() {
           />
         )}
 
+        {page === "preferentials" && (
+          <PreferentialsPage
+            clientForm={clientReferenceForm}
+            clients={clientReferences}
+            editingClient={editingClientReference}
+            editingProduct={editingProductReference}
+            productForm={productReferenceForm}
+            products={productReferences}
+            saving={saving}
+            onCancelClientEdit={() => {
+              setEditingClientReference(null);
+              setClientReferenceForm({ name: "" });
+            }}
+            onCancelProductEdit={() => {
+              setEditingProductReference(null);
+              setProductReferenceForm({ name: "" });
+            }}
+            onDeleteClient={handleDeleteClientReference}
+            onDeleteProduct={handleDeleteProductReference}
+            onEditClient={startClientReferenceEdit}
+            onEditProduct={startProductReferenceEdit}
+            onSubmitClient={handleSaveClientReference}
+            onSubmitProduct={handleSaveProductReference}
+            setClientForm={setClientReferenceForm}
+            setProductForm={setProductReferenceForm}
+          />
+        )}
+
         {page === "modifications" && (
           <ModificationsPage
             actionForm={actionForm}
@@ -1061,6 +1184,8 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
   const selectedProject = projects.find((project) => project.name === ecrForm.modificationProject);
   const projectTeamMembers = parseProjectTeam(selectedProject?.projectTeam);
   const canCreateModification = projects.length > 0 && projectTeamMembers.length > 0 && Boolean(ecrForm.pilot);
+  const displayedClientOptions = includeCurrentOption(clientOptions, ecrForm.client);
+  const displayedProductOptions = includeCurrentOption(productOptions, ecrForm.product);
   const titleId = mode === "edit" ? "edit-modification-title" : "create-modification-title";
   const currentBeforePhoto = existingRequest?.beforePhotoUrl;
   const currentAfterPhoto = existingRequest?.afterPhotoUrl;
@@ -1100,10 +1225,10 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
           </label>
           <label>
             Client
-            <input required list="client-list" value={ecrForm.client} onChange={(event) => updateEcrForm("client", event.target.value)} />
-            <datalist id="client-list">
-              {clientOptions.map((client) => <option key={client} value={client} />)}
-            </datalist>
+            <select required value={ecrForm.client} onChange={(event) => updateEcrForm("client", event.target.value)}>
+              <option value="">Sélectionner un client</option>
+              {displayedClientOptions.map((client) => <option key={client} value={client}>{client}</option>)}
+            </select>
           </label>
           <label>
             Projet
@@ -1116,10 +1241,10 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
           </label>
           <label>
             Produit
-            <input list="product-list" value={ecrForm.product} onChange={(event) => updateEcrForm("product", event.target.value)} />
-            <datalist id="product-list">
-              {productOptions.map((product) => <option key={product} value={product} />)}
-            </datalist>
+            <select required value={ecrForm.product} onChange={(event) => updateEcrForm("product", event.target.value)}>
+              <option value="">Sélectionner un produit</option>
+              {displayedProductOptions.map((product) => <option key={product} value={product}>{product}</option>)}
+            </select>
           </label>
           <label>
             Pilote
@@ -1134,10 +1259,10 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
             Réception
             <input type="date" value={ecrForm.receptionDate} onChange={(event) => updateEcrForm("receptionDate", event.target.value)} />
           </label>
-          <label>
-            SOP
-            <input type="date" value={ecrForm.sopDate} onChange={(event) => updateEcrForm("sopDate", event.target.value)} />
-          </label>
+          <div className="calculated-field">
+            <span>SOP</span>
+            <strong>{ecrForm.sopDate || "Calculé après génération des actions"}</strong>
+          </div>
           <label>
             Mixabilité
             <select value={ecrForm.mixability} onChange={(event) => updateEcrForm("mixability", event.target.value)}>
@@ -1231,6 +1356,110 @@ function PhasePreview({ stages }) {
             <strong>{index + 1}</strong>
             {label}
           </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PreferentialsPage({
+  clientForm,
+  clients,
+  editingClient,
+  editingProduct,
+  productForm,
+  products,
+  saving,
+  onCancelClientEdit,
+  onCancelProductEdit,
+  onDeleteClient,
+  onDeleteProduct,
+  onEditClient,
+  onEditProduct,
+  onSubmitClient,
+  onSubmitProduct,
+  setClientForm,
+  setProductForm
+}) {
+  return (
+    <section className="page-content">
+      <PageHeader eyebrow="Référentiel" title="Préférentiels" subtitle="Gérez les listes de clients et de produits utilisées dans les modifications." />
+      <div className="preferentials-grid">
+        <PreferentialPanel
+          count={clients.length}
+          editing={editingClient}
+          emptyText="Ajoutez les clients disponibles pour la création des modifications."
+          emptyTitle="Aucun client"
+          form={clientForm}
+          saving={saving}
+          title="Clients"
+          onCancelEdit={onCancelClientEdit}
+          onDelete={onDeleteClient}
+          onEdit={onEditClient}
+          onSubmit={onSubmitClient}
+          references={clients}
+          setForm={setClientForm}
+        />
+        <PreferentialPanel
+          count={products.length}
+          editing={editingProduct}
+          emptyText="Ajoutez les produits disponibles pour la création des modifications."
+          emptyTitle="Aucun produit"
+          form={productForm}
+          saving={saving}
+          title="Produits"
+          onCancelEdit={onCancelProductEdit}
+          onDelete={onDeleteProduct}
+          onEdit={onEditProduct}
+          onSubmit={onSubmitProduct}
+          references={products}
+          setForm={setProductForm}
+        />
+      </div>
+    </section>
+  );
+}
+
+function PreferentialPanel({ count, editing, emptyText, emptyTitle, form, references, saving, title, onCancelEdit, onDelete, onEdit, onSubmit, setForm }) {
+  return (
+    <section className="panel preferential-panel">
+      <form className="form-page compact-preferential-form" onSubmit={onSubmit}>
+        <div className="section-title">
+          <div>
+            <h2>{title}</h2>
+            <span>{count} élément{count > 1 ? "s" : ""}</span>
+          </div>
+        </div>
+        <label>
+          Nom
+          <input required value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
+        </label>
+        <div className="button-row">
+          <button className="primary-action" disabled={saving} type="submit">
+            <Save size={16} />
+            Enregistrer
+          </button>
+          {editing && <button className="secondary-action" type="button" onClick={onCancelEdit}>Annuler</button>}
+        </div>
+      </form>
+      <div className="table-list">
+        {references.length === 0 ? (
+          <EmptyState title={emptyTitle} text={emptyText} compact />
+        ) : references.map((reference) => (
+          <article className="project-table-row" key={reference.id}>
+            <div>
+              <strong>{reference.name}</strong>
+              <span>ID #{reference.id}</span>
+            </div>
+            <div className="row-actions">
+              <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(reference)} aria-label={`Modifier ${reference.name}`} title="Modifier">
+                <Pencil size={15} />
+              </button>
+              <button className="ghost-icon" type="button" onClick={() => onDelete(reference.id)} title="Supprimer">
+                <Trash2 size={15} />
+              </button>
+            </div>
+          </article>
         ))}
       </div>
     </section>
@@ -1447,6 +1676,13 @@ function requestToEcrForm(request) {
 
 function uniqueSorted(values) {
   return [...new Set(values.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
+}
+
+function includeCurrentOption(options, currentValue) {
+  if (!currentValue || options.includes(currentValue)) {
+    return options;
+  }
+  return uniqueSorted([...options, currentValue]);
 }
 
 function mixabilityLabel(value) {

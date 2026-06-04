@@ -572,6 +572,28 @@ textarea {
   font-weight: 740;
 }
 
+.calculated-field {
+  background: #f8fafc;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: #344054;
+  display: grid;
+  gap: 7px;
+  min-height: 43px;
+  padding: 10px 12px;
+}
+
+.calculated-field span {
+  font-size: 13px;
+  font-weight: 740;
+}
+
+.calculated-field strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 760;
+}
+
 .form-page input,
 .form-page select,
 .form-page textarea,
@@ -905,6 +927,23 @@ textarea {
   display: grid;
   gap: 13px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.preferentials-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.preferential-panel {
+  align-content: start;
+  display: grid;
+  gap: 14px;
+}
+
+.compact-preferential-form {
+  display: grid;
+  gap: 12px;
 }
 
 .primary-action,
@@ -2510,6 +2549,7 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 
   .work-layout,
   .list-panel,
+  .preferentials-grid,
   .modifications-toolbar {
     grid-template-columns: 1fr;
   }

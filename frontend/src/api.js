@@ -143,6 +143,54 @@ export function deleteProject(name) {
   });
 }
 
+export function getClientReferences() {
+  return request("/preferentials/clients");
+}
+
+export function createClientReference(payload) {
+  return request("/preferentials/clients", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateClientReference(id, payload) {
+  return request(`/preferentials/clients/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteClientReference(id) {
+  return request(`/preferentials/clients/${id}`, {
+    method: "DELETE"
+  });
+}
+
+export function getProductReferences() {
+  return request("/preferentials/products");
+}
+
+export function createProductReference(payload) {
+  return request("/preferentials/products", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateProductReference(id, payload) {
+  return request(`/preferentials/products/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteProductReference(id) {
+  return request(`/preferentials/products/${id}`, {
+    method: "DELETE"
+  });
+}
+
 export function getActionPlanningRules() {
   return request("/action-planning-rules");
 }

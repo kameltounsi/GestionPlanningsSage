@@ -1,10 +1,11 @@
 import React from "react";
-import { ChevronLeft, ChevronRight, FolderKanban, LayoutDashboard, ListChecks, LogOut, UserCircle, Users } from "lucide-react";
+import { ChevronLeft, ChevronRight, Database, FolderKanban, LayoutDashboard, ListChecks, LogOut, UserCircle, Users } from "lucide-react";
 
 const navItems = [
   ["dashboard", "Tableau", LayoutDashboard],
   ["modifications", "Modifications", ListChecks],
   ["projects", "Projets", FolderKanban],
+  ["preferentials", "Préférentiels", Database],
   ["users", "Utilisateurs", Users],
   ["profile", "Profil", UserCircle]
 ];

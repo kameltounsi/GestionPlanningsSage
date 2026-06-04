@@ -4,6 +4,7 @@ import com.gestionplanning.action.EcrAction;
 import com.gestionplanning.action.EcrActionAssetRepository;
 import com.gestionplanning.action.EcrActionEvidenceRepository;
 import com.gestionplanning.action.EcrActionRepository;
+import com.gestionplanning.action.ActionPlanningService;
 import com.gestionplanning.document.EcrDocument;
 import com.gestionplanning.document.EcrDocumentRepository;
 import com.gestionplanning.penalty.PenaltyRepository;
@@ -31,12 +32,14 @@ public class EcrRequestController {
     private final PenaltyRepository penaltyRepository;
     private final CloudinaryStorageService storageService;
     private final EcrTemplateService templateService;
+    private final ActionPlanningService planningService;
 
     public EcrRequestController(EcrRequestRepository requestRepository, ChecklistItemRepository checklistItemRepository,
                                 EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
                                 EcrActionAssetRepository assetRepository,
                                 EcrDocumentRepository documentRepository, PenaltyRepository penaltyRepository,
-                                CloudinaryStorageService storageService, EcrTemplateService templateService) {
+                                CloudinaryStorageService storageService, EcrTemplateService templateService,
+                                ActionPlanningService planningService) {
         this.requestRepository = requestRepository;
         this.checklistItemRepository = checklistItemRepository;
         this.actionRepository = actionRepository;
@@ -46,6 +49,7 @@ public class EcrRequestController {
         this.penaltyRepository = penaltyRepository;
         this.storageService = storageService;
         this.templateService = templateService;
+        this.planningService = planningService;
     }
 
     @GetMapping
@@ -84,7 +88,6 @@ public class EcrRequestController {
                     request.setProduct(updatedRequest.getProduct());
                     request.setModificationProject(updatedRequest.getModificationProject());
                     request.setReceptionDate(updatedRequest.getReceptionDate());
-                    request.setSopDate(updatedRequest.getSopDate());
                     request.setPilot(updatedRequest.getPilot());
                     request.setModificationReason(updatedRequest.getModificationReason());
                     request.setModificationDetail(updatedRequest.getModificationDetail());
@@ -104,7 +107,9 @@ public class EcrRequestController {
                     request.setCurrentStage(EcrStage.isAllowed(updatedRequest.getCurrentStage(), updatedRequest.isNewVersion())
                             ? updatedRequest.getCurrentStage()
                             : EcrStage.firstAllowed(updatedRequest.isNewVersion()));
-                    return ResponseEntity.ok(requestRepository.save(request));
+                    EcrRequest saved = requestRepository.save(request);
+                    planningService.recalculateRequest(saved);
+                    return ResponseEntity.ok(saved);
                 })
                 .orElse(ResponseEntity.notFound().build());
     }

@@ -80,6 +80,71 @@ import { getStages, safeStage, stageColorClass, stageLabel } from "./utils/stage
 import { userRoleLabel, userToForm } from "./utils/users";
 import "./styles.css";
 
+const swalButtons = {
+  confirmButtonColor: "#2563eb",
+  cancelButtonColor: "#64748b"
+};
+
+function successToast(title) {
+  return Swal.fire({
+    title,
+    icon: "success",
+    timer: 1500,
+    showConfirmButton: false
+  });
+}
+
+function errorAlert(message) {
+  return Swal.fire({
+    title: "Erreur",
+    text: message,
+    icon: "error",
+    confirmButtonText: "OK",
+    confirmButtonColor: "#2563eb"
+  });
+}
+
+function warningAlert(title, message) {
+  return Swal.fire({
+    title,
+    text: message,
+    icon: "warning",
+    confirmButtonText: "OK",
+    confirmButtonColor: "#2563eb"
+  });
+}
+
+function confirmDelete(title, text) {
+  return Swal.fire({
+    title,
+    text,
+    icon: "warning",
+    showCancelButton: true,
+    confirmButtonText: "Supprimer",
+    cancelButtonText: "Annuler",
+    confirmButtonColor: "#b42318",
+    cancelButtonColor: "#64748b"
+  });
+}
+
+function localDateTimeNow() {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 19);
+}
+
+function formattedDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value).replace("T", " ").slice(0, 16);
+  }
+  return new Intl.DateTimeFormat("fr-FR", {
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(date);
+}
+
 function App() {
   const [authSession, setAuthSession] = useState(getStoredSession());
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
@@ -276,7 +341,9 @@ function App() {
         return Promise.all(uploads)
           .then(() => savedRequest)
           .catch(() => {
-            setError("Modification créée, mais l'upload d'une image a échoué.");
+            const message = "Modification creee, mais l'upload d'une image a echoue.";
+            setError(message);
+            warningAlert("Upload incomplet", message);
             return savedRequest;
           });
       })
@@ -286,9 +353,14 @@ function App() {
         setSelectedStage(savedRequest.currentStage);
         setShowCreateForm(false);
         setPage("modifications");
+        successToast("Modification creee");
         return loadInitialData();
       })
-      .catch(() => setError("Création ECR impossible. Créez d'abord le projet, puis vérifiez les champs obligatoires."))
+      .catch(() => {
+        const message = "Creation ECR impossible. Creez d'abord le projet, puis verifiez les champs obligatoires.";
+        setError(message);
+        errorAlert(message);
+      })
       .finally(() => setSaving(false));
   }
 
@@ -322,7 +394,9 @@ function App() {
         return Promise.all(uploads)
           .then(() => savedRequest)
           .catch(() => {
-            setError("Modification enregistrée, mais l'upload d'une image a échoué.");
+            const message = "Modification enregistree, mais l'upload d'une image a echoue.";
+            setError(message);
+            warningAlert("Upload incomplet", message);
             return savedRequest;
           });
       })
@@ -330,9 +404,14 @@ function App() {
         closeEditEcr();
         setSelectedId(savedRequest.id);
         setSelectedStage(safeStage(savedRequest.currentStage, Boolean(savedRequest.newVersion)));
+        successToast("Modification mise a jour");
         return loadInitialData();
       })
-      .catch(() => setError("Mise à jour de la modification impossible. Vérifiez les champs obligatoires."))
+      .catch(() => {
+        const message = "Mise a jour de la modification impossible. Verifiez les champs obligatoires.";
+        setError(message);
+        errorAlert(message);
+      })
       .finally(() => setSaving(false));
   }
 
@@ -340,8 +419,14 @@ function App() {
     if (!selectedRequest) return;
     setSelectedStage(stage);
     updateEcrStage(selectedRequest.id, stage)
-      .then((updatedRequest) => setRequests((items) => items.map((item) => (item.id === updatedRequest.id ? updatedRequest : item))))
-      .catch(() => setError("Impossible de sauvegarder l'étape ECR."));
+      .then((updatedRequest) => {
+        setRequests((items) => items.map((item) => (item.id === updatedRequest.id ? updatedRequest : item)));
+      })
+      .catch(() => {
+        const message = "Impossible de sauvegarder l'etape ECR.";
+        setError(message);
+        errorAlert(message);
+      });
   }
 
   function openRequest(request) {
@@ -354,15 +439,7 @@ function App() {
 
   function handleDeleteEcr(request) {
     const label = request.modificationNumber || request.client || `#${request.id}`;
-    Swal.fire({
-      title: "Supprimer la modification ?",
-      text: `La modification ${label} sera supprimée définitivement.`,
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonText: "Supprimer",
-      cancelButtonText: "Annuler",
-      confirmButtonColor: "#b42318"
-    }).then((result) => {
+    confirmDelete("Supprimer la modification ?", `La modification ${label} sera supprimee definitivement.`).then((result) => {
       if (!result.isConfirmed) return;
       setSaving(true);
       setError("");
@@ -375,11 +452,12 @@ function App() {
             setSelectedId(nextRequest?.id ?? null);
             setSelectedStage(nextRequest ? safeStage(nextRequest.currentStage, Boolean(nextRequest.newVersion)) : "FEASIBILITY_VALIDATION");
           }
-          Swal.fire({ title: "Suppression effectuee", icon: "success", timer: 1500, showConfirmButton: false });
+          successToast("Suppression effectuee");
         })
         .catch(() => {
-          setError("Suppression de la modification impossible. Vérifiez les droits ou les données liées.");
-          Swal.fire("Erreur", "Suppression de la modification impossible.", "error");
+          const message = "Suppression de la modification impossible. Verifiez les droits ou les donnees liees.";
+          setError(message);
+          errorAlert(message);
         })
         .finally(() => setSaving(false));
     });
@@ -387,12 +465,14 @@ function App() {
 
   function actionFormPayload(form, stage) {
     const evidenceRequired = form.evidenceRequired || isCriticalAction(form);
+    const done = form.status === "DONE";
     return {
       ...form,
       evidenceFile: undefined,
       evidenceRequired,
-      checked: form.status === "DONE",
-      closedDate: form.status === "DONE" ? new Date().toISOString().slice(0, 10) : null,
+      checked: done,
+      closedDate: done ? new Date().toISOString().slice(0, 10) : null,
+      finalizationDate: done ? form.finalizationDate || localDateTimeNow() : null,
       deadline: form.deadline || null,
       date1: form.date1 || null,
       date2: form.date2 || null,
@@ -421,19 +501,31 @@ function App() {
     return Boolean(action?.evidenceRequired) || isCriticalAction(action);
   }
 
+  function refreshCurrentActionsAndRequests() {
+    if (!selectedRequest) return Promise.resolve([]);
+    return Promise.all([getActions(selectedRequest.id, selectedStage), getEcrRequests()])
+      .then(([actionData, requestData]) => {
+        setActions(actionData);
+        setRequests(requestData);
+        return actionData;
+      });
+  }
+
   function handleCreateAction(event) {
     event.preventDefault();
     if (!selectedRequest) return Promise.resolve();
     const evidenceFiles = filesFromValue(actionForm.evidenceFile);
     if (requiresEvidence(actionForm) && actionForm.status === "DONE" && evidenceFiles.length === 0) {
-      setError("Ajoutez un asset avant de créer cette action comme terminée.");
-      Swal.fire("Asset requis", "Ajoutez un asset avant de créer cette action comme terminée.", "warning");
+      const message = "Ajoutez un asset avant de creer cette action comme terminee.";
+      setError(message);
+      warningAlert("Asset requis", message);
       return Promise.reject(new Error("Evidence required"));
     }
     setSaving(true);
+    setError("");
     const payload = actionFormPayload(actionForm, selectedStage);
     const createPayload = evidenceFiles.length > 0 && payload.status === "DONE"
-      ? { ...payload, checked: false, status: "TODO", closedDate: null }
+      ? { ...payload, checked: false, status: "TODO", closedDate: null, finalizationDate: null }
       : payload;
     return createAction(selectedRequest.id, createPayload)
       .then((savedAction) => {
@@ -443,12 +535,19 @@ function App() {
         }
         return savedAction;
       })
-      .then(() => getActions(selectedRequest.id, selectedStage))
+      .then(() => refreshCurrentActionsAndRequests())
       .then((actionData) => {
         setActions(actionData);
         setActionForm(emptyActionForm);
+        successToast("Action creee");
       })
-      .catch(() => setError("Création action impossible."))
+      .catch((error) => {
+        if (error.message === "Evidence required") throw error;
+        const message = "Creation action impossible.";
+        setError(message);
+        errorAlert(message);
+        throw error;
+      })
       .finally(() => setSaving(false));
   }
 
@@ -456,14 +555,16 @@ function App() {
     if (!selectedRequest) return Promise.resolve();
     if (form.status === "DONE" && dependencyBlocksCompletion(action)) {
       const dependency = dependencyFor(action);
-      setError("Terminez d'abord l'action précédente avant de valider cette action.");
-      Swal.fire("Action bloquée", `Terminez d'abord: ${dependency.title || "action précédente"}.`, "warning");
+      const message = `Terminez d'abord: ${dependency.title || "action precedente"}.`;
+      setError("Terminez d'abord l'action precedente avant de valider cette action.");
+      warningAlert("Action bloquee", message);
       return Promise.reject(new Error("Dependency incomplete"));
     }
     const evidenceFiles = filesFromValue(form.evidenceFile);
     if (requiresEvidence(form) && form.status === "DONE" && !hasActionAsset(action) && evidenceFiles.length === 0) {
-      setError("Ajoutez un asset avant de terminer cette action.");
-      Swal.fire("Asset requis", "Ajoutez un asset avant de terminer cette action.", "warning");
+      const message = "Ajoutez un asset avant de terminer cette action.";
+      setError(message);
+      warningAlert("Asset requis", message);
       return Promise.reject(new Error("Evidence required"));
     }
     setSaving(true);
@@ -477,14 +578,15 @@ function App() {
       ? uploadActionEvidenceFiles(action.id, evidenceFiles).then(() => updateAction(action.id, payload))
       : updateAction(action.id, payload);
     return saveRequest
-      .then(() => getActions(selectedRequest.id, selectedStage))
+      .then(() => refreshCurrentActionsAndRequests())
       .then((actionData) => {
         setActions(actionData);
-        Swal.fire({ title: "Action modifiée", icon: "success", timer: 1300, showConfirmButton: false });
+        successToast("Action modifiee");
       })
       .catch((error) => {
-        setError("Modification action impossible.");
-        Swal.fire("Erreur", "Modification action impossible.", "error");
+        const message = "Modification action impossible.";
+        setError(message);
+        errorAlert(message);
         throw error;
       })
       .finally(() => setSaving(false));
@@ -492,27 +594,20 @@ function App() {
 
   function handleDeleteAction(action) {
     if (!selectedRequest) return;
-    Swal.fire({
-      title: "Supprimer l'action ?",
-      text: action.title || "Cette action sera supprimée définitivement.",
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonText: "Supprimer",
-      cancelButtonText: "Annuler",
-      confirmButtonColor: "#b42318"
-    }).then((result) => {
+    confirmDelete("Supprimer l'action ?", action.title || "Cette action sera supprimee definitivement.").then((result) => {
       if (!result.isConfirmed) return;
       setSaving(true);
       setError("");
       deleteAction(action.id)
-        .then(() => getActions(selectedRequest.id, selectedStage))
+        .then(() => refreshCurrentActionsAndRequests())
         .then((actionData) => {
           setActions(actionData);
-          Swal.fire({ title: "Action supprimée", icon: "success", timer: 1300, showConfirmButton: false });
+          successToast("Action supprimee");
         })
         .catch(() => {
-          setError("Suppression action impossible.");
-          Swal.fire("Erreur", "Suppression action impossible.", "error");
+          const message = "Suppression action impossible.";
+          setError(message);
+          errorAlert(message);
         })
         .finally(() => setSaving(false));
     });
@@ -521,13 +616,15 @@ function App() {
   function handleToggleAction(action, completed) {
     if (completed && dependencyBlocksCompletion(action)) {
       const dependency = dependencyFor(action);
-      setError("Terminez d'abord l'action précédente avant de valider cette action.");
-      Swal.fire("Action bloquée", `Terminez d'abord: ${dependency.title || "action précédente"}.`, "warning");
+      const message = `Terminez d'abord: ${dependency.title || "action precedente"}.`;
+      setError("Terminez d'abord l'action precedente avant de valider cette action.");
+      warningAlert("Action bloquee", message);
       return;
     }
     if (completed && requiresEvidence(action) && !hasActionAsset(action)) {
-      setError("Cette action nécessite un asset avant d'être terminée.");
-      Swal.fire("Asset requis", "Ajoutez un asset avant de terminer cette action.", "warning");
+      const message = "Ajoutez un asset avant de terminer cette action.";
+      setError(message);
+      warningAlert("Asset requis", message);
       return;
     }
     const updatedAction = {
@@ -535,15 +632,22 @@ function App() {
       late: completed ? false : action.late,
       checked: completed,
       status: completed ? "DONE" : "TODO",
-      closedDate: completed ? new Date().toISOString().slice(0, 10) : null
+      closedDate: completed ? new Date().toISOString().slice(0, 10) : null,
+      finalizationDate: completed ? localDateTimeNow() : null
     };
 
     setActions((items) => items.map((item) => (item.id === action.id ? updatedAction : item)));
     updateAction(action.id, updatedAction)
-      .then((savedAction) => setActions((items) => items.map((item) => (item.id === savedAction.id ? savedAction : item))))
+      .then((savedAction) => {
+        setActions((items) => items.map((item) => (item.id === savedAction.id ? savedAction : item)));
+        getEcrRequests().then(setRequests).catch(() => {});
+        successToast(completed ? "Action terminee" : "Action reouverte");
+      })
       .catch(() => {
         setActions((items) => items.map((item) => (item.id === action.id ? action : item)));
-        setError("Impossible de mettre à jour l'action.");
+        const message = "Impossible de mettre a jour l'action.";
+        setError(message);
+        errorAlert(message);
       });
   }
 
@@ -553,8 +657,15 @@ function App() {
     setError("");
     uploadActionEvidenceFiles(action.id, files)
       .then(() => getActions(selectedId, selectedStage))
-      .then((actionData) => setActions(actionData))
-      .catch(() => setError("Ajout du fichier evidence impossible."));
+      .then((actionData) => {
+        setActions(actionData);
+        successToast("Asset ajoute");
+      })
+      .catch(() => {
+        const message = "Ajout du fichier evidence impossible.";
+        setError(message);
+        errorAlert(message);
+      });
   }
 
   function handleSaveProject(event) {
@@ -563,21 +674,28 @@ function App() {
     if (!name) return;
     const projectLeadCount = countSelectedProjectLeads(projectForm.projectTeam, users);
     if (projectLeadCount !== 1) {
-      setError("Choisissez un et un seul Chef de projet dans l'équipe projet.");
-      Swal.fire("Chef de projet requis", "Sélectionnez exactement un utilisateur avec le rôle Chef de projet.", "warning");
+      const message = "Selectionnez exactement un utilisateur avec le role Chef de projet.";
+      setError("Choisissez un et un seul Chef de projet dans l'equipe projet.");
+      warningAlert("Chef de projet requis", message);
       return;
     }
     setSaving(true);
     setError("");
     const payload = { name, projectTeam: projectForm.projectTeam.trim() || null };
-    const request = editingProject ? updateProject(editingProject, payload) : createProject(payload);
+    const isEdit = Boolean(editingProject);
+    const request = isEdit ? updateProject(editingProject, payload) : createProject(payload);
     request
       .then((savedProject) => {
         setProjects((items) => [...items.filter((item) => item.name !== editingProject && item.name !== savedProject.name), savedProject].sort((a, b) => a.name.localeCompare(b.name)));
         setProjectForm({ name: "", projectTeam: "" });
         setEditingProject(null);
+        successToast(isEdit ? "Projet modifie" : "Projet ajoute");
       })
-      .catch(() => setError("Sauvegarde projet impossible. Vérifiez le nom du projet."))
+      .catch(() => {
+        const message = "Sauvegarde projet impossible. Verifiez le nom du projet.";
+        setError(message);
+        errorAlert(message);
+      })
       .finally(() => setSaving(false));
   }
 
@@ -588,15 +706,23 @@ function App() {
 
   function handleDeleteProject(name) {
     setError("");
-    deleteProject(name)
-      .then(() => {
-        setProjects((items) => items.filter((item) => item.name !== name));
-        if (editingProject === name) {
-          setEditingProject(null);
-          setProjectForm({ name: "", projectTeam: "" });
-        }
-      })
-      .catch(() => setError("Suppression projet impossible."));
+    confirmDelete("Supprimer le projet ?", `Le projet ${name} sera supprime definitivement.`).then((result) => {
+      if (!result.isConfirmed) return;
+      deleteProject(name)
+        .then(() => {
+          setProjects((items) => items.filter((item) => item.name !== name));
+          if (editingProject === name) {
+            setEditingProject(null);
+            setProjectForm({ name: "", projectTeam: "" });
+          }
+          successToast("Projet supprime");
+        })
+        .catch(() => {
+          const message = "Suppression projet impossible.";
+          setError(message);
+          errorAlert(message);
+        });
+    });
   }
 
   function handleSaveClientReference(event) {
@@ -605,7 +731,8 @@ function App() {
     if (!name) return;
     setSaving(true);
     setError("");
-    const request = editingClientReference
+    const isEdit = Boolean(editingClientReference);
+    const request = isEdit
       ? updateClientReference(editingClientReference, { name })
       : createClientReference({ name });
     request
@@ -613,8 +740,13 @@ function App() {
         setClientReferences((items) => [...items.filter((item) => item.id !== savedClient.id), savedClient].sort((a, b) => a.name.localeCompare(b.name)));
         setClientReferenceForm({ name: "" });
         setEditingClientReference(null);
+        successToast(isEdit ? "Client modifie" : "Client ajoute");
       })
-      .catch(() => setError("Sauvegarde client impossible. Vérifiez le nom."))
+      .catch(() => {
+        const message = "Sauvegarde client impossible. Verifiez le nom.";
+        setError(message);
+        errorAlert(message);
+      })
       .finally(() => setSaving(false));
   }
 
@@ -624,16 +756,25 @@ function App() {
   }
 
   function handleDeleteClientReference(id) {
+    const client = clientReferences.find((item) => item.id === id);
     setError("");
-    deleteClientReference(id)
-      .then(() => {
-        setClientReferences((items) => items.filter((item) => item.id !== id));
-        if (editingClientReference === id) {
-          setEditingClientReference(null);
-          setClientReferenceForm({ name: "" });
-        }
-      })
-      .catch(() => setError("Suppression client impossible."));
+    confirmDelete("Supprimer le client ?", `Le client ${client?.name || "selectionne"} sera supprime definitivement.`).then((result) => {
+      if (!result.isConfirmed) return;
+      deleteClientReference(id)
+        .then(() => {
+          setClientReferences((items) => items.filter((item) => item.id !== id));
+          if (editingClientReference === id) {
+            setEditingClientReference(null);
+            setClientReferenceForm({ name: "" });
+          }
+          successToast("Client supprime");
+        })
+        .catch(() => {
+          const message = "Suppression client impossible.";
+          setError(message);
+          errorAlert(message);
+        });
+    });
   }
 
   function handleSaveProductReference(event) {
@@ -642,7 +783,8 @@ function App() {
     if (!name) return;
     setSaving(true);
     setError("");
-    const request = editingProductReference
+    const isEdit = Boolean(editingProductReference);
+    const request = isEdit
       ? updateProductReference(editingProductReference, { name })
       : createProductReference({ name });
     request
@@ -650,8 +792,13 @@ function App() {
         setProductReferences((items) => [...items.filter((item) => item.id !== savedProduct.id), savedProduct].sort((a, b) => a.name.localeCompare(b.name)));
         setProductReferenceForm({ name: "" });
         setEditingProductReference(null);
+        successToast(isEdit ? "Produit modifie" : "Produit ajoute");
       })
-      .catch(() => setError("Sauvegarde produit impossible. Vérifiez le nom."))
+      .catch(() => {
+        const message = "Sauvegarde produit impossible. Verifiez le nom.";
+        setError(message);
+        errorAlert(message);
+      })
       .finally(() => setSaving(false));
   }
 
@@ -661,16 +808,25 @@ function App() {
   }
 
   function handleDeleteProductReference(id) {
+    const product = productReferences.find((item) => item.id === id);
     setError("");
-    deleteProductReference(id)
-      .then(() => {
-        setProductReferences((items) => items.filter((item) => item.id !== id));
-        if (editingProductReference === id) {
-          setEditingProductReference(null);
-          setProductReferenceForm({ name: "" });
-        }
-      })
-      .catch(() => setError("Suppression produit impossible."));
+    confirmDelete("Supprimer le produit ?", `Le produit ${product?.name || "selectionne"} sera supprime definitivement.`).then((result) => {
+      if (!result.isConfirmed) return;
+      deleteProductReference(id)
+        .then(() => {
+          setProductReferences((items) => items.filter((item) => item.id !== id));
+          if (editingProductReference === id) {
+            setEditingProductReference(null);
+            setProductReferenceForm({ name: "" });
+          }
+          successToast("Produit supprime");
+        })
+        .catch(() => {
+          const message = "Suppression produit impossible.";
+          setError(message);
+          errorAlert(message);
+        });
+    });
   }
 
   function handleSavePlanningRule(event) {
@@ -688,19 +844,25 @@ function App() {
       dependencyAnchor: "OUTPUT",
       durationDays: Number(planningRuleForm.durationDays) || 0
     };
-    const request = editingPlanningRule ? updateActionPlanningRule(editingPlanningRule, payload) : createActionPlanningRule(payload);
+    const isEdit = Boolean(editingPlanningRule);
+    const request = isEdit ? updateActionPlanningRule(editingPlanningRule, payload) : createActionPlanningRule(payload);
     request
       .then((savedRule) => {
         setPlanningRules((items) => [...items.filter((item) => item.id !== savedRule.id), savedRule].sort(comparePlanningRules));
         setPlanningRuleForm(emptyPlanningRuleForm);
         setEditingPlanningRule(null);
+        successToast(isEdit ? "Regle planning modifiee" : "Regle planning ajoutee");
         return selectedId ? Promise.all([getActions(selectedId, selectedStage), getEcrRequests()]) : Promise.resolve([actions, requests]);
       })
       .then(([actionData, requestData]) => {
         if (Array.isArray(actionData)) setActions(actionData);
         if (Array.isArray(requestData)) setRequests(requestData);
       })
-      .catch(() => setError("Sauvegarde règle planning impossible. Vérifiez l'action et la durée."))
+      .catch(() => {
+        const message = "Sauvegarde regle planning impossible. Verifiez l'action et la duree.";
+        setError(message);
+        errorAlert(message);
+      })
       .finally(() => setSaving(false));
   }
 
@@ -723,16 +885,25 @@ function App() {
   }
 
   function handleDeletePlanningRule(id) {
+    const rule = planningRules.find((item) => item.id === id);
     setError("");
-    deleteActionPlanningRule(id)
-      .then(() => {
-        setPlanningRules((items) => items.filter((item) => item.id !== id));
-        if (editingPlanningRule === id) {
-          setEditingPlanningRule(null);
-          setPlanningRuleForm(emptyPlanningRuleForm);
-        }
-      })
-      .catch(() => setError("Suppression règle planning impossible."));
+    confirmDelete("Supprimer la regle planning ?", `La regle ${rule?.actionTitle || "selectionnee"} sera supprimee definitivement.`).then((result) => {
+      if (!result.isConfirmed) return;
+      deleteActionPlanningRule(id)
+        .then(() => {
+          setPlanningRules((items) => items.filter((item) => item.id !== id));
+          if (editingPlanningRule === id) {
+            setEditingPlanningRule(null);
+            setPlanningRuleForm(emptyPlanningRuleForm);
+          }
+          successToast("Regle planning supprimee");
+        })
+        .catch(() => {
+          const message = "Suppression regle planning impossible.";
+          setError(message);
+          errorAlert(message);
+        });
+    });
   }
 
   function handleSaveUser(event) {
@@ -747,7 +918,8 @@ function App() {
       jobTitle: userForm.jobTitle.trim(),
       phone: userForm.phone.trim()
     };
-    const request = editingUser ? updateUser(editingUser, payload) : createUser(payload);
+    const isEdit = Boolean(editingUser);
+    const request = isEdit ? updateUser(editingUser, payload) : createUser(payload);
     request
       .then((savedUser) => {
         setUsers((items) => [...items.filter((item) => item.id !== savedUser.id), savedUser].sort((a, b) => String(a.fullName).localeCompare(String(b.fullName))));
@@ -757,8 +929,13 @@ function App() {
         }
         setUserForm(emptyUserForm);
         setEditingUser(null);
+        successToast(isEdit ? "Utilisateur modifie" : "Utilisateur ajoute");
       })
-      .catch(() => setError("Sauvegarde utilisateur impossible. Vérifiez username/email uniques et les champs obligatoires."))
+      .catch(() => {
+        const message = "Sauvegarde utilisateur impossible. Verifiez username/email uniques et les champs obligatoires.";
+        setError(message);
+        errorAlert(message);
+      })
       .finally(() => setSaving(false));
   }
 
@@ -768,16 +945,25 @@ function App() {
   }
 
   function handleDeleteUser(id) {
+    const user = users.find((item) => item.id === id);
     setError("");
-    deleteUser(id)
-      .then(() => {
-        setUsers((items) => items.filter((item) => item.id !== id));
-        if (editingUser === id) {
-          setEditingUser(null);
-          setUserForm(emptyUserForm);
-        }
-      })
-      .catch(() => setError("Suppression utilisateur impossible."));
+    confirmDelete("Supprimer l'utilisateur ?", `Le compte ${user?.fullName || user?.email || "selectionne"} sera supprime definitivement.`).then((result) => {
+      if (!result.isConfirmed) return;
+      deleteUser(id)
+        .then(() => {
+          setUsers((items) => items.filter((item) => item.id !== id));
+          if (editingUser === id) {
+            setEditingUser(null);
+            setUserForm(emptyUserForm);
+          }
+          successToast("Utilisateur supprime");
+        })
+        .catch(() => {
+          const message = "Suppression utilisateur impossible.";
+          setError(message);
+          errorAlert(message);
+        });
+    });
   }
 
   function handleSaveProfile(event) {
@@ -790,8 +976,13 @@ function App() {
         setCurrentUser(savedUser);
         setProfileForm(userToForm(savedUser));
         setUsers((items) => items.map((item) => (item.id === savedUser.id ? savedUser : item)));
+        successToast("Profil mis a jour");
       })
-      .catch(() => setError("Mise à jour du profil impossible."))
+      .catch(() => {
+        const message = "Mise a jour du profil impossible.";
+        setError(message);
+        errorAlert(message);
+      })
       .finally(() => setSaving(false));
   }
 
@@ -799,14 +990,23 @@ function App() {
     event.preventDefault();
     if (!currentUser) return;
     if (!passwordForm.password || passwordForm.password !== passwordForm.confirmation) {
-      setError("Confirmez le nouveau mot de passe avec la même valeur.");
+      const message = "Confirmez le nouveau mot de passe avec la meme valeur.";
+      setError(message);
+      warningAlert("Confirmation requise", message);
       return;
     }
     setSaving(true);
     setError("");
     changeUserPassword(currentUser.id, passwordForm.password)
-      .then(() => setPasswordForm({ password: "", confirmation: "" }))
-      .catch(() => setError("Changement de mot de passe impossible."))
+      .then(() => {
+        setPasswordForm({ password: "", confirmation: "" });
+        successToast("Mot de passe modifie");
+      })
+      .catch(() => {
+        const message = "Changement de mot de passe impossible.";
+        setError(message);
+        errorAlert(message);
+      })
       .finally(() => setSaving(false));
   }
 
@@ -817,8 +1017,13 @@ function App() {
       .then((savedUser) => {
         setCurrentUser(savedUser);
         setUsers((items) => items.map((item) => (item.id === savedUser.id ? savedUser : item)));
+        successToast("Photo mise a jour");
       })
-      .catch(() => setError("Ajout de la photo impossible."));
+      .catch(() => {
+        const message = "Ajout de la photo impossible.";
+        setError(message);
+        errorAlert(message);
+      });
   }
 
   function handleLogin(event) {
@@ -832,21 +1037,38 @@ function App() {
         setCurrentUser(session.user);
         setProfileForm(userToForm(session.user));
         setLoginForm({ email: "", password: "" });
+        successToast("Connexion reussie");
       })
-      .catch(() => setError("Email ou mot de passe incorrect."))
+      .catch(() => {
+        const message = "Email ou mot de passe incorrect.";
+        setError(message);
+        errorAlert(message);
+      })
       .finally(() => setSaving(false));
   }
 
   function handleLogout() {
-    logout()
-      .catch(() => clearSession())
-      .finally(() => {
-        setAuthSession(null);
-        setCurrentUser(null);
-        setRequests([]);
-        setUsers([]);
-        setPage("dashboard");
-      });
+    Swal.fire({
+      title: "Se deconnecter ?",
+      text: "Votre session active sera fermee.",
+      icon: "question",
+      showCancelButton: true,
+      confirmButtonText: "Se deconnecter",
+      cancelButtonText: "Annuler",
+      ...swalButtons
+    }).then((result) => {
+      if (!result.isConfirmed) return;
+      logout()
+        .catch(() => clearSession())
+        .finally(() => {
+          setAuthSession(null);
+          setCurrentUser(null);
+          setRequests([]);
+          setUsers([]);
+          setPage("dashboard");
+          successToast("Deconnexion effectuee");
+        });
+    });
   }
 
   function openCreateFlow() {
@@ -2130,6 +2352,7 @@ function ActionList({ actions, expanded = false, handleDeleteAction, handleToggl
                 <span><em>Criticite</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>
                 <span><em>Debut</em><strong>{action.startDate || "-"}</strong></span>
                 <span><em>Fin</em><strong>{action.endDate || "-"}</strong></span>
+                <span><em>Finalisation</em><strong>{formattedDateTime(action.finalizationDate)}</strong></span>
                 <span><em>Jours</em><strong>{action.workDurationDays ?? "-"}</strong></span>
                 <span><em>Asset</em><strong>{requiresEvidence(action) ? "Obligatoire" : "Optionnel"}</strong></span>
                 <span className="evidence-meta">
@@ -2188,6 +2411,7 @@ function actionToForm(action) {
     date3: action.date3 || "",
     startDate: action.startDate || "",
     endDate: action.endDate || "",
+    finalizationDate: action.finalizationDate || "",
     workDurationDays: action.workDurationDays ?? 1,
     status: action.status || "TODO",
     evidenceRequired: Boolean(action.evidenceRequired),

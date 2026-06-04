@@ -18,11 +18,13 @@ public class AppUserController {
     private final AppUserRepository userRepository;
     private final CloudinaryStorageService storageService;
     private final PasswordService passwordService;
+    private final AccountMailService accountMailService;
 
-    public AppUserController(AppUserRepository userRepository, CloudinaryStorageService storageService, PasswordService passwordService) {
+    public AppUserController(AppUserRepository userRepository, CloudinaryStorageService storageService, PasswordService passwordService, AccountMailService accountMailService) {
         this.userRepository = userRepository;
         this.storageService = storageService;
         this.passwordService = passwordService;
+        this.accountMailService = accountMailService;
     }
 
     @GetMapping
@@ -36,8 +38,10 @@ public class AppUserController {
         if (user.getUsername() == null || user.getUsername().trim().isEmpty() || userRepository.existsByUsername(user.getUsername()) || userRepository.existsByEmail(user.getEmail())) {
             return ResponseEntity.badRequest().build();
         }
+        String initialPassword = user.getPassword();
         user.setPassword(passwordService.encode(user.getPassword()));
         AppUser saved = userRepository.save(user);
+        accountMailService.sendAccountCreatedEmail(saved, initialPassword);
         return ResponseEntity.created(URI.create("/api/users/" + saved.getId())).body(saved);
     }
 

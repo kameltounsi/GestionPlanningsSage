@@ -54,6 +54,9 @@ public class EcrRequestController {
 
     @GetMapping
     public List<EcrRequest> list() {
+        requestRepository.findAll().stream()
+                .filter(request -> request.getCurrentStage() != EcrStage.CLOSED && request.getCurrentStage() != EcrStage.CANCELLED)
+                .forEach(templateService::ensureMissingActionsFor);
         return requestRepository.findAllByOrderByReceptionDateDescIdDesc();
     }
 

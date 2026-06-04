@@ -7,6 +7,7 @@ import com.gestionplanning.ecr.EcrStage;
 import javax.persistence.*;
 import javax.validation.constraints.NotBlank;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -77,6 +78,7 @@ public class EcrAction {
     private ActionStatus status = ActionStatus.TODO;
 
     private LocalDate closedDate;
+    private LocalDateTime finalizationDate;
 
     @Column(length = 2000)
     private String comment;
@@ -327,6 +329,14 @@ public class EcrAction {
 
     public void setClosedDate(LocalDate closedDate) {
         this.closedDate = closedDate;
+    }
+
+    public LocalDateTime getFinalizationDate() {
+        return finalizationDate;
+    }
+
+    public void setFinalizationDate(LocalDateTime finalizationDate) {
+        this.finalizationDate = finalizationDate;
     }
 
     public String getComment() {

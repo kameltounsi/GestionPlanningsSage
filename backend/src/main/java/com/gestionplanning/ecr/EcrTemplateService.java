@@ -10,7 +10,10 @@ import com.gestionplanning.action.EcrActionRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -66,6 +69,29 @@ public class EcrTemplateService {
         }
         if (actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId()).isEmpty()) {
             createActionsFor(request, new ArrayList<>());
+            return;
+        }
+        ensureMissingActionsFor(request);
+    }
+
+    public void ensureMissingActionsFor(EcrRequest request) {
+        if (request == null || request.getId() == null || request.getCurrentStage() == EcrStage.CLOSED || request.getCurrentStage() == EcrStage.CANCELLED) {
+            return;
+        }
+
+        Set<String> existingKeys = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId()).stream()
+                .map(this::actionKey)
+                .collect(Collectors.toCollection(HashSet::new));
+        List<EcrAction> missingActions = ruleRepository.findAllByOrderByStageAscActionTitleAsc().stream()
+                .filter(rule -> EcrStage.isAllowed(rule.getStage(), request.isNewVersion()))
+                .filter(rule -> appliesToRequest(rule, request))
+                .filter(rule -> !existingKeys.contains(ruleKey(rule)))
+                .map(rule -> fromRule(request, rule))
+                .collect(Collectors.toList());
+
+        if (!missingActions.isEmpty()) {
+            actionRepository.saveAll(missingActions);
+            planningService.recalculateRequest(request);
         }
     }
 
@@ -109,6 +135,22 @@ public class EcrTemplateService {
 
     private boolean appliesToRequest(ActionPlanningRule rule, EcrRequest request) {
         return request.isNewVersion() ? rule.isAppliesToNewProject() : rule.isAppliesToModification();
+    }
+
+    private String ruleKey(ActionPlanningRule rule) {
+        return key(rule.getStage().name(), rule.getActionTitle());
+    }
+
+    private String actionKey(EcrAction action) {
+        return key(action.getStage().name(), action.getTitle());
+    }
+
+    private String key(String stage, String title) {
+        return stage + "::" + normalize(title);
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     private void createDefaultChecklistForAllStages(EcrRequest request) {

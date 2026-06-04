@@ -15,6 +15,7 @@ import org.springframework.web.multipart.MultipartFile;
 import javax.validation.Valid;
 import java.net.URI;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -77,6 +78,7 @@ public class EcrActionController {
                     }
                     action.setRequest(request);
                     action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
+                    syncFinalizationDate(action, action);
                     EcrAction saved = actionRepository.save(action);
                     planningService.recalculateRequest(request);
                     return ResponseEntity.created(URI.create("/api/actions/" + saved.getId())).body(saved);
@@ -119,6 +121,7 @@ public class EcrActionController {
                     }
                     action.setStatus(updatedAction.getStatus());
                     action.setClosedDate(updatedAction.getClosedDate());
+                    syncFinalizationDate(action, updatedAction);
                     action.setComment(updatedAction.getComment());
                     EcrAction saved = actionRepository.save(action);
                     planningService.recalculateRequest(saved.getRequest());
@@ -177,18 +180,17 @@ public class EcrActionController {
 
     @DeleteMapping("/actions/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
-        if (!actionRepository.existsById(id)) {
-            return ResponseEntity.notFound().build();
-        }
-        actionRepository.findById(id).ifPresent(action -> {
+        return actionRepository.findById(id).map(action -> {
+            Long requestId = action.getRequestId();
             assetRepository.findByAction_IdOrderByUploadedAtDescIdDesc(id)
                     .forEach(asset -> storageService.deleteQuietly(asset.getPublicId(), asset.getResourceType()));
             storageService.deleteQuietly(action.getEvidencePublicId(), action.getEvidenceResourceType());
             assetRepository.deleteByAction_Id(id);
             deleteLocalEvidenceIfPresent(id);
             actionRepository.deleteById(id);
-        });
-        return ResponseEntity.noContent().build();
+            requestRepository.findById(requestId).ifPresent(planningService::recalculateRequest);
+            return ResponseEntity.noContent().<Void>build();
+        }).orElse(ResponseEntity.notFound().build());
     }
 
     private void deleteLocalEvidenceIfPresent(Long actionId) {
@@ -208,6 +210,14 @@ public class EcrActionController {
 
     private boolean isDone(EcrAction action) {
         return action != null && (action.isChecked() || action.getStatus() == ActionStatus.DONE);
+    }
+
+    private void syncFinalizationDate(EcrAction target, EcrAction source) {
+        if (isDone(target)) {
+            target.setFinalizationDate(source.getFinalizationDate() == null ? LocalDateTime.now() : source.getFinalizationDate());
+        } else {
+            target.setFinalizationDate(null);
+        }
     }
 
     private boolean isDependencyCompleted(EcrAction action) {

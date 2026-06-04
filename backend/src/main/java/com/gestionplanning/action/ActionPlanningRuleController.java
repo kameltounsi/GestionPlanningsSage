@@ -1,6 +1,8 @@
 package com.gestionplanning.action;
 
 import com.gestionplanning.ecr.EcrRequestRepository;
+import com.gestionplanning.ecr.EcrStage;
+import com.gestionplanning.ecr.EcrTemplateService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,12 +16,14 @@ public class ActionPlanningRuleController {
     private final ActionPlanningRuleRepository ruleRepository;
     private final EcrRequestRepository requestRepository;
     private final ActionPlanningService planningService;
+    private final EcrTemplateService templateService;
 
     public ActionPlanningRuleController(ActionPlanningRuleRepository ruleRepository, EcrRequestRepository requestRepository,
-                                        ActionPlanningService planningService) {
+                                        ActionPlanningService planningService, EcrTemplateService templateService) {
         this.ruleRepository = ruleRepository;
         this.requestRepository = requestRepository;
         this.planningService = planningService;
+        this.templateService = templateService;
     }
 
     @GetMapping
@@ -84,6 +88,11 @@ public class ActionPlanningRuleController {
     }
 
     private void recalculateAllRequests() {
-        requestRepository.findAll().forEach(planningService::recalculateRequest);
+        requestRepository.findAll().stream()
+                .filter(request -> request.getCurrentStage() != EcrStage.CLOSED && request.getCurrentStage() != EcrStage.CANCELLED)
+                .forEach(request -> {
+                    templateService.ensureMissingActionsFor(request);
+                    planningService.recalculateRequest(request);
+                });
     }
 }

@@ -1,6 +1,7 @@
 package com.gestionplanning.action;
 
 import com.gestionplanning.ecr.EcrRequest;
+import com.gestionplanning.ecr.EcrStage;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -15,10 +16,13 @@ public class ActionPlanningService {
 
     private final EcrActionRepository actionRepository;
     private final ActionPlanningRuleRepository ruleRepository;
+    private final ActionAssigneeResolver assigneeResolver;
 
-    public ActionPlanningService(EcrActionRepository actionRepository, ActionPlanningRuleRepository ruleRepository) {
+    public ActionPlanningService(EcrActionRepository actionRepository, ActionPlanningRuleRepository ruleRepository,
+                                 ActionAssigneeResolver assigneeResolver) {
         this.actionRepository = actionRepository;
         this.ruleRepository = ruleRepository;
+        this.assigneeResolver = assigneeResolver;
     }
 
     public void recalculateRequest(EcrRequest request) {
@@ -38,8 +42,27 @@ public class ActionPlanningService {
                 .collect(Collectors.toMap(this::actionKey, Function.identity(), (first, second) -> first));
         LocalDate fallbackStart = request.getReceptionDate() == null ? LocalDate.now() : request.getReceptionDate();
 
-        for (EcrAction action : actions) {
-            applyRule(action, rules, actionsByKey, fallbackStart, new HashSet<>());
+        LocalDate nextPhaseStart = fallbackStart;
+        for (EcrStage stage : EcrStage.allowedStages(request.isNewVersion())) {
+            List<EcrAction> stageActions = actions.stream()
+                    .filter(action -> action.getStage() == stage)
+                    .collect(Collectors.toList());
+            if (stageActions.isEmpty()) {
+                continue;
+            }
+            for (EcrAction action : stageActions) {
+                action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
+                applyRule(action, rules, actionsByKey, nextPhaseStart, new HashSet<>());
+                if (action.getStartDate() != null && action.getStartDate().isBefore(nextPhaseStart)) {
+                    shiftActionTo(action, nextPhaseStart);
+                }
+            }
+            nextPhaseStart = stageActions.stream()
+                    .map(EcrAction::getEndDate)
+                    .filter(Objects::nonNull)
+                    .max(LocalDate::compareTo)
+                    .map(date -> date.plusDays(1))
+                    .orElse(nextPhaseStart);
         }
 
         actionRepository.saveAll(actions);
@@ -77,6 +100,13 @@ public class ActionPlanningService {
         action.setEndDate(start.plusDays(duration));
         action.setDeadline(action.getEndDate());
         visiting.remove(action.getId());
+    }
+
+    private void shiftActionTo(EcrAction action, LocalDate start) {
+        int duration = durationOrDefault(action.getWorkDurationDays());
+        action.setStartDate(start);
+        action.setEndDate(start.plusDays(duration));
+        action.setDeadline(action.getEndDate());
     }
 
     private int durationOrDefault(Integer duration) {

@@ -1535,6 +1535,7 @@ function isProjectLead(user) {
 
 function ModificationsPage(props) {
   const [listOpen, setListOpen] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
   const {
     actionForm,
     actions,
@@ -1651,16 +1652,24 @@ function ModificationsPage(props) {
                 {(selectedRequest.beforePhotoUrl || selectedRequest.afterPhotoUrl) && (
                   <div className="request-image-grid">
                     {selectedRequest.beforePhotoUrl && (
-                      <a href={selectedRequest.beforePhotoUrl} target="_blank" rel="noreferrer">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewImage({ title: "Photo état", url: selectedRequest.beforePhotoUrl })}
+                        title="Agrandir la photo état"
+                      >
                         <span>Photo état</span>
                         <img alt="Photo état" src={selectedRequest.beforePhotoUrl} />
-                      </a>
+                      </button>
                     )}
                     {selectedRequest.afterPhotoUrl && (
-                      <a href={selectedRequest.afterPhotoUrl} target="_blank" rel="noreferrer">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewImage({ title: "Photo devient", url: selectedRequest.afterPhotoUrl })}
+                        title="Agrandir la photo devient"
+                      >
                         <span>Photo devient</span>
                         <img alt="Photo devient" src={selectedRequest.afterPhotoUrl} />
-                      </a>
+                      </button>
                     )}
                   </div>
                 )}
@@ -1735,6 +1744,30 @@ function ModificationsPage(props) {
                   <strong className={`stage-pill ${stageColorClass(request.currentStage)}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</strong>
                 </button>
               ))}
+            </div>
+          </section>
+        </div>
+      )}
+      {previewImage && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={() => setPreviewImage(null)}>
+          <section
+            aria-labelledby="image-preview-title"
+            aria-modal="true"
+            className="image-preview-dialog"
+            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <header className="actions-dialog-header">
+              <div>
+                <p className="eyebrow">Aperçu</p>
+                <h2 id="image-preview-title">{previewImage.title}</h2>
+              </div>
+              <button className="ghost-icon" type="button" onClick={() => setPreviewImage(null)} title="Fermer">
+                <X size={18} />
+              </button>
+            </header>
+            <div className="image-preview-frame">
+              <img alt={previewImage.title} src={previewImage.url} />
             </div>
           </section>
         </div>

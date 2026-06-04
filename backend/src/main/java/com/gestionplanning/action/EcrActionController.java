@@ -28,11 +28,13 @@ public class EcrActionController {
     private final ActionPlanningService planningService;
     private final EcrTemplateService templateService;
     private final CloudinaryStorageService storageService;
+    private final ActionAssigneeResolver assigneeResolver;
 
     public EcrActionController(EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
                                EcrActionAssetRepository assetRepository,
                                EcrRequestRepository requestRepository, ActionPlanningService planningService,
-                               EcrTemplateService templateService, CloudinaryStorageService storageService) {
+                               EcrTemplateService templateService, CloudinaryStorageService storageService,
+                               ActionAssigneeResolver assigneeResolver) {
         this.actionRepository = actionRepository;
         this.evidenceRepository = evidenceRepository;
         this.assetRepository = assetRepository;
@@ -40,6 +42,7 @@ public class EcrActionController {
         this.planningService = planningService;
         this.templateService = templateService;
         this.storageService = storageService;
+        this.assigneeResolver = assigneeResolver;
     }
 
     @GetMapping("/actions")
@@ -54,6 +57,7 @@ public class EcrActionController {
     public ResponseEntity<List<EcrAction>> listByRequest(@PathVariable Long requestId, @RequestParam(required = false) EcrStage stage) {
         return requestRepository.findById(requestId).map(request -> {
             templateService.ensureActionsFor(request);
+            planningService.recalculateRequest(request);
             List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(requestId);
             if (stage != null) {
                 actions = actions.stream()
@@ -72,6 +76,7 @@ public class EcrActionController {
                         return ResponseEntity.badRequest().<EcrAction>build();
                     }
                     action.setRequest(request);
+                    action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
                     EcrAction saved = actionRepository.save(action);
                     planningService.recalculateRequest(request);
                     return ResponseEntity.created(URI.create("/api/actions/" + saved.getId())).body(saved);
@@ -86,7 +91,7 @@ public class EcrActionController {
                     action.setTitle(updatedAction.getTitle());
                     action.setDescription(updatedAction.getDescription());
                     action.setTopicRisk(updatedAction.getTopicRisk());
-                    action.setResponsible(updatedAction.getResponsible());
+                    action.setResponsible(assigneeResolver.resolve(action.getRequest(), updatedAction.getResponsible()));
                     action.setCriticality(updatedAction.getCriticality());
                     action.setExpectedEvidence(updatedAction.getExpectedEvidence());
                     action.setEvidenceRequired(updatedAction.isEvidenceRequired());

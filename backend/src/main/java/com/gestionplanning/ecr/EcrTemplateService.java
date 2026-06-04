@@ -4,6 +4,7 @@ import com.gestionplanning.action.ActionStatus;
 import com.gestionplanning.action.ActionPlanningRule;
 import com.gestionplanning.action.ActionPlanningRuleRepository;
 import com.gestionplanning.action.ActionPlanningService;
+import com.gestionplanning.action.ActionAssigneeResolver;
 import com.gestionplanning.action.EcrAction;
 import com.gestionplanning.action.EcrActionRepository;
 import org.springframework.stereotype.Service;
@@ -17,12 +18,14 @@ public class EcrTemplateService {
     private final EcrActionRepository actionRepository;
     private final ActionPlanningRuleRepository ruleRepository;
     private final ActionPlanningService planningService;
+    private final ActionAssigneeResolver assigneeResolver;
 
     public EcrTemplateService(EcrActionRepository actionRepository, ActionPlanningRuleRepository ruleRepository,
-                              ActionPlanningService planningService) {
+                              ActionPlanningService planningService, ActionAssigneeResolver assigneeResolver) {
         this.actionRepository = actionRepository;
         this.ruleRepository = ruleRepository;
         this.planningService = planningService;
+        this.assigneeResolver = assigneeResolver;
     }
 
     public void applyTo(EcrRequest request) {
@@ -36,6 +39,7 @@ public class EcrTemplateService {
                 .map(action -> {
                     action.setRequest(request);
                     action.setStatus(action.getStatus() == null ? ActionStatus.TODO : action.getStatus());
+                    action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
                     action.setChecked(false);
                     return action;
                 })
@@ -73,7 +77,7 @@ public class EcrTemplateService {
             action.setStage(stage);
             action.setTitle("Revue et validation - " + stage.getLabel(request.isNewVersion()));
             action.setTopicRisk("Suivi ECR");
-            action.setResponsible(request.getPilot());
+            action.setResponsible(assigneeResolver.resolve(request, request.getPilot()));
             action.setCriticality("3-faible");
             action.setExpectedEvidence("Compte rendu, preuve ou document de validation");
             action.setEvidenceRequired(false);
@@ -92,7 +96,7 @@ public class EcrTemplateService {
         action.setStage(rule.getStage());
         action.setTitle(rule.getActionTitle());
         action.setTopicRisk(rule.getTopicRisk());
-        action.setResponsible(rule.getResponsible() == null || rule.getResponsible().trim().isEmpty() ? request.getPilot() : rule.getResponsible());
+        action.setResponsible(assigneeResolver.resolve(request, rule.getResponsible()));
         action.setCriticality(rule.getCriticality());
         action.setExpectedEvidence(rule.getExpectedEvidence());
         action.setEvidenceRequired(rule.isEvidenceRequired());

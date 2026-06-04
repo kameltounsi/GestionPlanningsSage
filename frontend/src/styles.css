@@ -1234,14 +1234,21 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   margin-top: 2px;
 }
 
-.request-image-grid a {
+.request-image-grid button {
+  background: #ffffff;
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--ink);
+  cursor: zoom-in;
   display: grid;
   gap: 5px;
   padding: 6px;
-  text-decoration: none;
+  text-align: left;
+}
+
+.request-image-grid button:hover {
+  border-color: #9db4ca;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.1);
 }
 
 .request-image-grid span {
@@ -1256,6 +1263,36 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   max-height: 64px;
   object-fit: cover;
   width: 100%;
+}
+
+.image-preview-dialog {
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.28);
+  display: grid;
+  gap: 12px;
+  max-height: min(90vh, 820px);
+  padding: 16px;
+  width: min(94vw, 1080px);
+}
+
+.image-preview-frame {
+  align-items: center;
+  background: #f6f8fb;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  min-height: 280px;
+  overflow: hidden;
+}
+
+.image-preview-frame img {
+  display: block;
+  max-height: calc(90vh - 130px);
+  max-width: 100%;
+  object-fit: contain;
 }
 
 .request-list,

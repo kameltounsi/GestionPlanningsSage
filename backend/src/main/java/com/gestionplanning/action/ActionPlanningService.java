@@ -69,8 +69,47 @@ public class ActionPlanningService {
         }
 
         updateSopDate(request, actions, fallbackStart);
+        refreshActionStatuses(actions);
         actionRepository.saveAll(actions);
         requestRepository.save(request);
+    }
+
+    public void refreshActionStatuses(List<EcrAction> actions) {
+        LocalDate today = LocalDate.now();
+        for (EcrAction action : actions) {
+            refreshActionStatus(action, today);
+        }
+    }
+
+    public void refreshActionStatus(EcrAction action) {
+        refreshActionStatus(action, LocalDate.now());
+    }
+
+    private void refreshActionStatus(EcrAction action, LocalDate today) {
+        if (action == null || action.getStatus() == ActionStatus.CANCELLED && !action.isChecked()) {
+            return;
+        }
+        if (action.isChecked() || action.getStatus() == ActionStatus.DONE || action.getStatus() == ActionStatus.DONE_LATE) {
+            action.setChecked(true);
+            action.setStatus(isFinishedLate(action) ? ActionStatus.DONE_LATE : ActionStatus.DONE);
+            return;
+        }
+        action.setChecked(false);
+        if (action.getEndDate() != null && today.isAfter(action.getEndDate())) {
+            action.setStatus(ActionStatus.LATE);
+            return;
+        }
+        if (action.getStartDate() != null && !today.isBefore(action.getStartDate())) {
+            action.setStatus(ActionStatus.IN_PROGRESS);
+            return;
+        }
+        action.setStatus(ActionStatus.TODO);
+    }
+
+    private boolean isFinishedLate(EcrAction action) {
+        return action.getFinalizationDate() != null
+                && action.getEndDate() != null
+                && action.getFinalizationDate().toLocalDate().isAfter(action.getEndDate());
     }
 
     private void applyRule(EcrAction action, Map<String, ActionPlanningRule> rules, Map<String, EcrAction> actionsByKey,

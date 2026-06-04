@@ -145,6 +145,10 @@ function formattedDateTime(value) {
   }).format(date);
 }
 
+function isActionDone(action) {
+  return Boolean(action?.checked) || action?.status === "DONE" || action?.status === "DONE_LATE";
+}
+
 function App() {
   const [authSession, setAuthSession] = useState(getStoredSession());
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
@@ -188,7 +192,7 @@ function App() {
 
   const selectedRequest = requests.find((request) => request.id === selectedId);
   const selectedStages = getStages(Boolean(selectedRequest?.newVersion));
-  const doneCount = actions.filter((action) => action.checked || action.status === "DONE").length;
+  const doneCount = actions.filter(isActionDone).length;
   const completion = actions.length ? Math.round((doneCount / actions.length) * 100) : 0;
   const lateActions = actions.filter((action) => action.late).length;
 
@@ -465,7 +469,7 @@ function App() {
 
   function actionFormPayload(form, stage) {
     const evidenceRequired = form.evidenceRequired || isCriticalAction(form);
-    const done = form.status === "DONE";
+    const done = isActionDone(form);
     return {
       ...form,
       evidenceFile: undefined,
@@ -490,7 +494,7 @@ function App() {
 
   function dependencyBlocksCompletion(action) {
     const dependency = dependencyFor(action);
-    return dependency && !(dependency.checked || dependency.status === "DONE");
+    return dependency && !isActionDone(dependency);
   }
 
   function isCriticalAction(action) {
@@ -515,7 +519,7 @@ function App() {
     event.preventDefault();
     if (!selectedRequest) return Promise.resolve();
     const evidenceFiles = filesFromValue(actionForm.evidenceFile);
-    if (requiresEvidence(actionForm) && actionForm.status === "DONE" && evidenceFiles.length === 0) {
+    if (requiresEvidence(actionForm) && isActionDone(actionForm) && evidenceFiles.length === 0) {
       const message = "Ajoutez un asset avant de creer cette action comme terminee.";
       setError(message);
       warningAlert("Asset requis", message);
@@ -524,14 +528,14 @@ function App() {
     setSaving(true);
     setError("");
     const payload = actionFormPayload(actionForm, selectedStage);
-    const createPayload = evidenceFiles.length > 0 && payload.status === "DONE"
+    const createPayload = evidenceFiles.length > 0 && isActionDone(payload)
       ? { ...payload, checked: false, status: "TODO", closedDate: null, finalizationDate: null }
       : payload;
     return createAction(selectedRequest.id, createPayload)
       .then((savedAction) => {
         if (evidenceFiles.length > 0) {
           return uploadActionEvidenceFiles(savedAction.id, evidenceFiles)
-            .then((actionWithEvidence) => (payload.status === "DONE" ? updateAction(actionWithEvidence.id, payload) : actionWithEvidence));
+            .then((actionWithEvidence) => (isActionDone(payload) ? updateAction(actionWithEvidence.id, payload) : actionWithEvidence));
         }
         return savedAction;
       })
@@ -553,7 +557,7 @@ function App() {
 
   function handleUpdateAction(action, form) {
     if (!selectedRequest) return Promise.resolve();
-    if (form.status === "DONE" && dependencyBlocksCompletion(action)) {
+    if (isActionDone(form) && dependencyBlocksCompletion(action)) {
       const dependency = dependencyFor(action);
       const message = `Terminez d'abord: ${dependency.title || "action precedente"}.`;
       setError("Terminez d'abord l'action precedente avant de valider cette action.");
@@ -561,7 +565,7 @@ function App() {
       return Promise.reject(new Error("Dependency incomplete"));
     }
     const evidenceFiles = filesFromValue(form.evidenceFile);
-    if (requiresEvidence(form) && form.status === "DONE" && !hasActionAsset(action) && evidenceFiles.length === 0) {
+    if (requiresEvidence(form) && isActionDone(form) && !hasActionAsset(action) && evidenceFiles.length === 0) {
       const message = "Ajoutez un asset avant de terminer cette action.";
       setError(message);
       warningAlert("Asset requis", message);
@@ -2340,8 +2344,8 @@ function ActionList({ actions, expanded = false, handleDeleteAction, handleToggl
         ) : (
           actions.map((action) => (
             <article className={action.late ? "action-row late" : "action-row"} key={action.id}>
-              <label className="action-check" title={action.status === "DONE" ? "Marquer non terminée" : "Marquer terminée"}>
-                <input checked={action.checked || action.status === "DONE"} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
+              <label className="action-check" title={isActionDone(action) ? "Marquer non terminee" : "Marquer terminee"}>
+                <input checked={isActionDone(action)} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
               </label>
               <div className="action-main">
                 <h3>{action.title}</h3>
@@ -2475,6 +2479,7 @@ function ActionCreateDialog({ actionForm, isCriticalAction, saving, onClose, onS
             <option value="TODO">TODO</option>
             <option value="IN_PROGRESS">IN_PROGRESS</option>
             <option value="DONE">DONE</option>
+            <option value="DONE_LATE">DONE_LATE</option>
             <option value="LATE">LATE</option>
             <option value="CANCELLED">CANCELLED</option>
           </select>
@@ -2559,6 +2564,7 @@ function ActionEditDialog({ action, isCriticalAction, saving, onClose, onSubmit 
             <option value="TODO">TODO</option>
             <option value="IN_PROGRESS">IN_PROGRESS</option>
             <option value="DONE">DONE</option>
+            <option value="DONE_LATE">DONE_LATE</option>
             <option value="LATE">LATE</option>
             <option value="CANCELLED">CANCELLED</option>
           </select>

@@ -348,6 +348,6 @@ public class EcrAction {
     }
 
     public boolean isLate() {
-        return deadline != null && deadline.isBefore(LocalDate.now()) && status != ActionStatus.DONE;
+        return deadline != null && deadline.isBefore(LocalDate.now()) && status != ActionStatus.DONE && status != ActionStatus.DONE_LATE;
     }
 }

@@ -14,6 +14,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import javax.validation.Valid;
 import java.net.URI;
+import java.util.Arrays;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -49,9 +50,15 @@ public class EcrActionController {
     @GetMapping("/actions")
     public List<EcrAction> list(@RequestParam(required = false) Boolean late) {
         if (Boolean.TRUE.equals(late)) {
-            return actionRepository.findByDeadlineBeforeAndStatusNotOrderByDeadlineAsc(LocalDate.now(), ActionStatus.DONE);
+            List<EcrAction> actions = actionRepository.findByDeadlineBeforeAndStatusNotInOrderByDeadlineAsc(LocalDate.now(), Arrays.asList(ActionStatus.DONE, ActionStatus.DONE_LATE));
+            planningService.refreshActionStatuses(actions);
+            return actionRepository.saveAll(actions).stream()
+                    .filter(action -> action.getStatus() != ActionStatus.DONE && action.getStatus() != ActionStatus.DONE_LATE)
+                    .collect(Collectors.toList());
         }
-        return actionRepository.findAll();
+        List<EcrAction> actions = actionRepository.findAll();
+        planningService.refreshActionStatuses(actions);
+        return actionRepository.saveAll(actions);
     }
 
     @GetMapping("/ecr-requests/{requestId}/actions")
@@ -209,7 +216,7 @@ public class EcrActionController {
     }
 
     private boolean isDone(EcrAction action) {
-        return action != null && (action.isChecked() || action.getStatus() == ActionStatus.DONE);
+        return action != null && (action.isChecked() || action.getStatus() == ActionStatus.DONE || action.getStatus() == ActionStatus.DONE_LATE);
     }
 
     private void syncFinalizationDate(EcrAction target, EcrAction source) {
@@ -225,7 +232,7 @@ public class EcrActionController {
             return true;
         }
         return actionRepository.findById(action.getDependsOnActionId())
-                .map(dependency -> dependency.isChecked() || dependency.getStatus() == ActionStatus.DONE)
+                .map(this::isDone)
                 .orElse(false);
     }
 

@@ -2284,6 +2284,11 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   color: var(--success);
 }
 
+.status.done_late {
+  background: #fff4de;
+  color: #9a5b00;
+}
+
 .status.in_progress {
   background: var(--accent-soft);
   color: var(--accent-dark);

@@ -1398,9 +1398,14 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   text-align: left;
 }
 
-.admin-phase-card:hover {
+.admin-phase-card:hover,
+.admin-phase-card:has(.phase-select-action:focus-visible) {
   box-shadow: 0 12px 26px var(--stage-shadow);
   transform: translateY(-1px);
+}
+
+.admin-phase-card.selected {
+  box-shadow: 0 0 0 2px var(--stage-accent), 0 12px 26px var(--stage-shadow);
 }
 
 .admin-phase-card strong {
@@ -1414,17 +1419,44 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   opacity: 0.78;
 }
 
-.admin-phase-card svg {
+.phase-select-action {
+  align-items: start;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  min-height: 72px;
+  padding: 0 42px 0 0;
+  text-align: left;
+}
+
+.phase-select-action:focus-visible {
+  outline: 2px solid var(--stage-accent);
+  outline-offset: 3px;
+}
+
+.phase-add-action {
+  align-items: center;
   background: #ffffff;
   border: 1px solid var(--stage-border);
   border-radius: 8px;
   bottom: 10px;
   color: var(--stage-accent);
+  cursor: pointer;
+  display: inline-flex;
   height: 32px;
+  justify-content: center;
   padding: 7px;
   position: absolute;
   right: 10px;
   width: 32px;
+}
+
+.phase-add-action:hover {
+  background: var(--stage-accent);
+  color: #ffffff;
 }
 
 .planning-rule-form {

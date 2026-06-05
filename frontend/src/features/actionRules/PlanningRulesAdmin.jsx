@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { EmptyState } from "../../components/common/EmptyState";
 import { emptyPlanningRuleForm } from "../../constants/forms";
@@ -10,6 +10,24 @@ import { stageColorClass, stageLabel } from "../../utils/stages";
 export function PlanningRulesAdmin({ form, rules, saving, onCancelEdit, onDelete, onEdit, onSubmit, setForm }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [showNewProjectStages, setShowNewProjectStages] = useState(false);
+  const visibleStages = useMemo(
+    () => stageDefinitions.filter((stage) => (showNewProjectStages ? stage.newProject : stage.modification)),
+    [showNewProjectStages]
+  );
+  const [selectedStage, setSelectedStage] = useState(visibleStages[0]?.key || "FEASIBILITY_VALIDATION");
+  const activeType = showNewProjectStages ? "newProject" : "modification";
+  const filteredRules = useMemo(
+    () => rules
+      .filter((rule) => rule.stage === selectedStage)
+      .filter((rule) => (showNewProjectStages ? rule.appliesToNewProject : rule.appliesToModification)),
+    [rules, selectedStage, showNewProjectStages]
+  );
+
+  useEffect(() => {
+    if (!visibleStages.some((stage) => stage.key === selectedStage)) {
+      setSelectedStage(visibleStages[0]?.key || "FEASIBILITY_VALIDATION");
+    }
+  }, [selectedStage, visibleStages]);
 
   function openCreateDialog(stage, type) {
     setForm({
@@ -43,7 +61,7 @@ export function PlanningRulesAdmin({ form, rules, saving, onCancelEdit, onDelete
           <h2>Actions standard par phase</h2>
           <span>L'admin définit les actions, criticités, preuves et liaisons qui seront générées dans chaque nouvelle ECR.</span>
         </div>
-        <span>{rules.length} actions</span>
+        <span>{filteredRules.length} action{filteredRules.length > 1 ? "s" : ""}</span>
       </div>
       <label className="project-type-toggle admin-project-toggle">
         <input
@@ -61,16 +79,18 @@ export function PlanningRulesAdmin({ form, rules, saving, onCancelEdit, onDelete
         label={showNewProjectStages ? "Phases nouveau projet" : "Phases modification"}
         newProject={showNewProjectStages}
         rules={rules}
-        type={showNewProjectStages ? "newProject" : "modification"}
+        selectedStage={selectedStage}
+        type={activeType}
         onCreate={openCreateDialog}
+        onSelect={setSelectedStage}
       />
       <div className="planning-rule-list">
-        {rules.length === 0 ? (
-          <EmptyState title="Aucune action standard" text="Cliquez sur une phase colorée pour créer la première action standard." />
+        {filteredRules.length === 0 ? (
+          <EmptyState title="Aucune action standard" text="Cliquez sur + dans la phase selectionnee pour creer la premiere action standard." />
         ) : (
-          rules.map((rule) => (
+          filteredRules.map((rule) => (
             <article className="planning-rule-row" key={rule.id}>
-              <span className={`stage-pill ${stageColorClass(rule.stage)}`}>{stageLabel(rule.stage)}</span>
+              <span className={`stage-pill ${stageColorClass(rule.stage)}`}>{stageLabel(rule.stage, showNewProjectStages)}</span>
               <div>
                 <strong>{rule.actionTitle}</strong>
                 <span>{rule.topicRisk || "Topic non renseigné"}</span>
@@ -96,6 +116,7 @@ export function PlanningRulesAdmin({ form, rules, saving, onCancelEdit, onDelete
           form={form}
           rules={rules}
           saving={saving}
+          stageNewProject={showNewProjectStages}
           onClose={closeDialog}
           onSubmit={submitDialog}
           setForm={setForm}
@@ -105,7 +126,7 @@ export function PlanningRulesAdmin({ form, rules, saving, onCancelEdit, onDelete
   );
 }
 
-function PhaseActionGrid({ label, newProject = false, rules, type, onCreate }) {
+function PhaseActionGrid({ label, newProject = false, rules, selectedStage, type, onCreate, onSelect }) {
   const stages = stageDefinitions.filter((stage) => (newProject ? stage.newProject : stage.modification));
 
   return (
@@ -120,11 +141,18 @@ function PhaseActionGrid({ label, newProject = false, rules, type, onCreate }) {
             rule.stage === stage.key && (newProject ? rule.appliesToNewProject : rule.appliesToModification)
           )).length;
           return (
-            <button className={`admin-phase-card ${stageColors[index % stageColors.length]}`} key={`${type}-${stage.key}`} type="button" onClick={() => onCreate(stage.key, type)}>
-              <strong>{newProject ? stage.newProjectLabel : stage.modificationLabel}</strong>
-              <span>{count} action{count > 1 ? "s" : ""}</span>
-              <Plus size={18} />
-            </button>
+            <article className={`admin-phase-card ${stageColors[index % stageColors.length]} ${selectedStage === stage.key ? "selected" : ""}`} key={`${type}-${stage.key}`}>
+              <button className="phase-select-action" type="button" onClick={() => onSelect(stage.key)}>
+                <strong>{newProject ? stage.newProjectLabel : stage.modificationLabel}</strong>
+                <span>{count} action{count > 1 ? "s" : ""}</span>
+              </button>
+              <button className="phase-add-action" type="button" onClick={(event) => {
+                event.stopPropagation();
+                onCreate(stage.key, type);
+              }} aria-label="Ajouter une action standard" title="Ajouter">
+                <Plus size={18} />
+              </button>
+            </article>
           );
         })}
       </div>
@@ -168,7 +196,7 @@ function previousDependencyOptions(rules, form) {
   return candidates;
 }
 
-function ActionRuleDialog({ form, rules, saving, onClose, onSubmit, setForm }) {
+function ActionRuleDialog({ form, rules, saving, stageNewProject, onClose, onSubmit, setForm }) {
   const phaseActions = rules
     .filter((rule) => rule.stage === form.stage)
     .filter((rule) => (
@@ -191,7 +219,7 @@ function ActionRuleDialog({ form, rules, saving, onClose, onSubmit, setForm }) {
         <div className="form-intro">
           <div>
             <p className="eyebrow">Action standard</p>
-            <h2 id="action-rule-dialog-title">{stageLabel(form.stage)}</h2>
+            <h2 id="action-rule-dialog-title">{stageLabel(form.stage, stageNewProject)}</h2>
             <p>Definissez l'action, sa criticite et ses dependances pour cette phase.</p>
           </div>
           <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">

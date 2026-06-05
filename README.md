@@ -49,8 +49,14 @@ Variables disponibles si votre base n'utilise pas les valeurs par defaut:
 
 ```powershell
 $env:SERVER_PORT="3001"
-$env:APP_FRONTEND_URL="http://192.168.1.117:3000"
-$env:SPRING_DATASOURCE_URL="jdbc:postgresql://192.168.1.117:5433/plannings"
+$env:APP_FRONTEND_URL="http://localhost:3000"
+# VM access fallback:
+# $env:APP_FRONTEND_URL="http://192.168.1.117:3000"
+$env:SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:5432/plannings"
+# Docker Compose local fallback:
+# $env:SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:5433/plannings"
+# VM access fallback:
+# $env:SPRING_DATASOURCE_URL="jdbc:postgresql://192.168.1.117:5433/plannings"
 $env:SPRING_DATASOURCE_USERNAME="postgres"
 $env:SPRING_DATASOURCE_PASSWORD="supersecret"
 ```
@@ -60,7 +66,7 @@ cd backend
 mvn spring-boot:run
 ```
 
-API: `http://192.168.1.117:3001/api`
+API: `http://localhost:3001/api`
 
 ## Lancer le frontend
 
@@ -70,12 +76,14 @@ npm install
 npm run dev
 ```
 
-Interface: `http://192.168.1.117:3000`
+Interface: `http://localhost:3000`
 
 Si l'API backend tourne sur une autre adresse ou un autre port:
 
 ```powershell
-$env:VITE_API_BASE_URL="http://192.168.1.117:3001/api"
+$env:VITE_API_BASE_URL="http://localhost:3001/api"
+# VM access fallback:
+# $env:VITE_API_BASE_URL="http://192.168.1.117:3001/api"
 npm run dev
 ```
 
@@ -109,7 +117,9 @@ Valeurs importantes a adapter dans `.env`:
 ```env
 POSTGRES_PASSWORD=votre_mot_de_passe_fort
 POSTGRES_HOST_PORT=5433
-APP_FRONTEND_URL=http://192.168.1.117:3000
+APP_FRONTEND_URL=http://localhost:3000
+# VM access fallback:
+# APP_FRONTEND_URL=http://192.168.1.117:3000
 VITE_API_BASE_URL=/api
 CLOUDINARY_CLOUD_NAME=votre_cloud_name
 CLOUDINARY_API_KEY=votre_api_key

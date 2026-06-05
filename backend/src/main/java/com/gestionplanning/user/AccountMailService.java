@@ -63,6 +63,10 @@ public class AccountMailService {
             LOGGER.warn("Account creation email skipped because recipient email is missing.");
             return;
         }
+        if (!isMailConfigured()) {
+            LOGGER.error("Account creation email skipped because SMTP configuration is incomplete.");
+            return;
+        }
 
         try {
             MimeMessage message = new MimeMessage(mailSession());
@@ -88,6 +92,10 @@ public class AccountMailService {
         if (isBlank(to)) {
             return;
         }
+        if (!isMailConfigured()) {
+            LOGGER.error("Phase validation email skipped because SMTP configuration is incomplete.");
+            return;
+        }
         String title = "Phase prete a valider";
         String text = "La phase " + value(stage == null ? null : stage.getLabel(request.isNewVersion()))
                 + " de la modification " + value(request.getModificationNumber())
@@ -109,6 +117,10 @@ public class AccountMailService {
 
     public void sendPhaseRejectedEmail(EcrRequest request, EcrStage stage, AppUser recipient, String reason, String actionsToRevisit) {
         if (!mailEnabled || request == null || recipient == null || isBlank(recipient.getEmail())) {
+            return;
+        }
+        if (!isMailConfigured()) {
+            LOGGER.error("Phase rejection email skipped because SMTP configuration is incomplete.");
             return;
         }
         String title = "Phase refusee - actions a revisiter";
@@ -162,6 +174,13 @@ public class AccountMailService {
                 return new PasswordAuthentication(fromAddress, password);
             }
         });
+    }
+
+    private boolean isMailConfigured() {
+        if (isBlank(host) || port <= 0 || isBlank(fromAddress)) {
+            return false;
+        }
+        return !smtpAuth || !isBlank(password);
     }
 
     private MimeMultipart buildContent(AppUser user, String temporaryPassword) throws MessagingException {

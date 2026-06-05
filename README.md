@@ -114,6 +114,11 @@ VITE_API_BASE_URL=/api
 CLOUDINARY_CLOUD_NAME=votre_cloud_name
 CLOUDINARY_API_KEY=votre_api_key
 CLOUDINARY_API_SECRET=votre_api_secret
+SPRING_MAIL_HOST=smtp.gmail.com
+SPRING_MAIL_PORT=587
+SPRING_MAIL_USERNAME=votre_adresse_gmail
+SPRING_MAIL_PASSWORD=votre_mot_de_passe_application_gmail
+APP_ACCOUNT_MAIL_ENABLED=true
 ```
 
 Demarrer toute l'application:

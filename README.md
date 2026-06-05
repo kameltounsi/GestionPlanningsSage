@@ -48,6 +48,8 @@ docker compose up -d postgres
 Variables disponibles si votre base n'utilise pas les valeurs par defaut:
 
 ```powershell
+$env:SERVER_PORT="8088"
+$env:APP_FRONTEND_URL="http://localhost:3000"
 $env:SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:5432/plannings"
 $env:SPRING_DATASOURCE_USERNAME="postgres"
 $env:SPRING_DATASOURCE_PASSWORD="supersecret"
@@ -68,7 +70,14 @@ npm install
 npm run dev
 ```
 
-Interface: `http://localhost:5173`
+Interface: `http://localhost:3000`
+
+Si l'API backend tourne sur une autre adresse ou un autre port:
+
+```powershell
+$env:VITE_API_BASE_URL="http://localhost:8088/api"
+npm run dev
+```
 
 ## Prochaines etapes
 

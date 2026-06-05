@@ -16,7 +16,7 @@ public class CorsConfig {
     private final String frontendUrl;
 
     public CorsConfig(List<HandlerInterceptor> interceptors,
-                      @Value("${app.frontend.url:http://localhost:3000}") String frontendUrl) {
+                      @Value("${app.frontend.url:http://192.168.1.117:3000}") String frontendUrl) {
         this.interceptors = interceptors;
         this.frontendUrl = frontendUrl;
     }
@@ -27,7 +27,7 @@ public class CorsConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/api/**")
-                        .allowedOrigins(frontendUrl, frontendUrl.replace("localhost", "127.0.0.1"))
+                        .allowedOrigins(frontendUrl)
                         .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                         .allowedHeaders("*");
             }

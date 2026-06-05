@@ -49,8 +49,8 @@ Variables disponibles si votre base n'utilise pas les valeurs par defaut:
 
 ```powershell
 $env:SERVER_PORT="3001"
-$env:APP_FRONTEND_URL="http://localhost:3000"
-$env:SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:5432/plannings"
+$env:APP_FRONTEND_URL="http://192.168.1.117:3000"
+$env:SPRING_DATASOURCE_URL="jdbc:postgresql://192.168.1.117:5433/plannings"
 $env:SPRING_DATASOURCE_USERNAME="postgres"
 $env:SPRING_DATASOURCE_PASSWORD="supersecret"
 ```
@@ -60,7 +60,7 @@ cd backend
 mvn spring-boot:run
 ```
 
-API: `http://localhost:3001/api`
+API: `http://192.168.1.117:3001/api`
 
 ## Lancer le frontend
 
@@ -70,12 +70,12 @@ npm install
 npm run dev
 ```
 
-Interface: `http://localhost:3000`
+Interface: `http://192.168.1.117:3000`
 
 Si l'API backend tourne sur une autre adresse ou un autre port:
 
 ```powershell
-$env:VITE_API_BASE_URL="http://localhost:3001/api"
+$env:VITE_API_BASE_URL="http://192.168.1.117:3001/api"
 npm run dev
 ```
 
@@ -108,7 +108,8 @@ Valeurs importantes a adapter dans `.env`:
 
 ```env
 POSTGRES_PASSWORD=votre_mot_de_passe_fort
-APP_FRONTEND_URL=http://IP_DE_LA_VM:3000
+POSTGRES_HOST_PORT=5433
+APP_FRONTEND_URL=http://192.168.1.117:3000
 VITE_API_BASE_URL=/api
 ```
 
@@ -131,12 +132,12 @@ Ouvrir les ports sur la VM:
 ```bash
 sudo ufw allow 3000
 sudo ufw allow 3001
-sudo ufw allow 5432
+sudo ufw allow 5433
 ```
 
-Interface web: `http://IP_DE_LA_VM:3000`
+Interface web: `http://192.168.1.117:3000`
 
-API backend: `http://IP_DE_LA_VM:3001/api`
+API backend: `http://192.168.1.117:3001/api`
 
 Pour mettre a jour apres un push GitHub:
 

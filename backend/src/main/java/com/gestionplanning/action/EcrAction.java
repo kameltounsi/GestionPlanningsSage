@@ -83,6 +83,9 @@ public class EcrAction {
     @Column(length = 2000)
     private String comment;
 
+    @Column(length = 10000)
+    private String dossierReview;
+
     public Long getId() {
         return id;
     }
@@ -345,6 +348,14 @@ public class EcrAction {
 
     public void setComment(String comment) {
         this.comment = comment;
+    }
+
+    public String getDossierReview() {
+        return dossierReview;
+    }
+
+    public void setDossierReview(String dossierReview) {
+        this.dossierReview = dossierReview;
     }
 
     public boolean isLate() {

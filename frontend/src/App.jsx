@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   CircleAlert,
   ClipboardList,
+  FileText,
   FolderKanban,
   Gauge,
   Maximize2,
@@ -161,6 +162,41 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function previewText(value, maxLength = 80) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+}
+
+function dossierReviewMetaLine(request) {
+  return [
+    `Demande #${request.accessInternalNumber || request.id}`,
+    request.modificationNumber,
+    request.client,
+    request.product
+  ].filter(Boolean).join(" | ");
+}
+
+function dossierReviewExportText(request, value) {
+  return [
+    "Revue dossier",
+    dossierReviewMetaLine(request),
+    "",
+    value || "Revue dossier vide."
+  ].join("\n");
+}
+
+function downloadTextFile(fileName, content) {
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function isAdminUser(user) {
@@ -368,6 +404,12 @@ function App() {
 
   function handleCreateEcr(event) {
     event.preventDefault();
+    if (parseSelectedProducts(ecrForm.product).length === 0) {
+      const message = "Selectionnez au moins un produit.";
+      setError(message);
+      warningAlert("Produit requis", message);
+      return;
+    }
     setSaving(true);
     setError("");
     createEcrRequest(buildEcrPayload(ecrForm))
@@ -421,6 +463,12 @@ function App() {
   function handleUpdateEcr(event) {
     event.preventDefault();
     if (!editingEcrRequest) return;
+    if (parseSelectedProducts(ecrEditForm.product).length === 0) {
+      const message = "Selectionnez au moins un produit.";
+      setError(message);
+      warningAlert("Produit requis", message);
+      return;
+    }
     setSaving(true);
     setError("");
     updateEcrRequest(editingEcrRequest.id, buildEcrPayload(ecrEditForm))
@@ -452,6 +500,30 @@ function App() {
         const message = "Mise a jour de la modification impossible. Verifiez les champs obligatoires.";
         setError(message);
         errorAlert(message);
+      })
+      .finally(() => setSaving(false));
+  }
+
+  function handleUpdateDossierReview(request, dossierReview) {
+    if (!request) return Promise.resolve();
+    const payload = {
+      ...buildEcrPayload(requestToEcrForm(request)),
+      dossierReview
+    };
+    setSaving(true);
+    setError("");
+    return updateEcrRequest(request.id, payload)
+      .then((savedRequest) => {
+        setRequests((items) => items.map((item) => (item.id === savedRequest.id ? savedRequest : item)));
+        setSelectedId(savedRequest.id);
+        successToast("Revue dossier enregistree");
+        return savedRequest;
+      })
+      .catch((error) => {
+        const message = "Enregistrement de la revue dossier impossible.";
+        setError(message);
+        errorAlert(message);
+        throw error;
       })
       .finally(() => setSaving(false));
   }
@@ -1350,6 +1422,7 @@ function App() {
             handleRejectPhase={handleRejectPhase}
             handleRequestPhaseValidation={handleRequestPhaseValidation}
             isCriticalAction={isCriticalAction}
+            onUpdateDossierReview={handleUpdateDossierReview}
             requiresEvidence={requiresEvidence}
             updateActionForm={updateActionForm}
           />
@@ -1542,7 +1615,8 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
   const projectTeamMembers = parseProjectTeam(selectedProject?.projectTeam);
   const canCreateModification = projects.length > 0 && projectTeamMembers.length > 0 && Boolean(ecrForm.pilot);
   const displayedClientOptions = includeCurrentOption(clientOptions, ecrForm.client);
-  const displayedProductOptions = includeCurrentOption(productOptions, ecrForm.product);
+  const selectedProducts = parseSelectedProducts(ecrForm.product);
+  const displayedProductOptions = includeCurrentOptions(productOptions, selectedProducts);
   const titleId = mode === "edit" ? "edit-modification-title" : "create-modification-title";
   const currentBeforePhoto = existingRequest?.beforePhotoUrl;
   const currentAfterPhoto = existingRequest?.afterPhotoUrl;
@@ -1596,13 +1670,26 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
               ))}
             </select>
           </label>
-          <label>
-            Produit
-            <select required value={ecrForm.product} onChange={(event) => updateEcrForm("product", event.target.value)}>
-              <option value="">Sélectionner un produit</option>
-              {displayedProductOptions.map((product) => <option key={product} value={product}>{product}</option>)}
-            </select>
-          </label>
+          <fieldset className="product-picker-field">
+            <legend>Produit</legend>
+            <div className="product-picker-options">
+              {displayedProductOptions.map((product) => {
+                const checked = selectedProducts.includes(product);
+                return (
+                  <label className={checked ? "product-option selected" : "product-option"} key={product}>
+                    <input
+                      checked={checked}
+                      type="checkbox"
+                      onChange={(event) => updateEcrForm("product", toggleSelectedProduct(selectedProducts, product, event.target.checked).join("; "))}
+                    />
+                    <span>{product}</span>
+                  </label>
+                );
+              })}
+            </div>
+            {displayedProductOptions.length === 0 && <span className="form-hint">Ajoutez d'abord des produits dans le referentiel.</span>}
+            <span className="form-hint">{selectedProducts.length} produit{selectedProducts.length > 1 ? "s" : ""} selectionne{selectedProducts.length > 1 ? "s" : ""}</span>
+          </fieldset>
           <label>
             Pilote
             <select required disabled={!ecrForm.modificationProject || projectTeamMembers.length === 0} value={ecrForm.pilot} onChange={(event) => updateEcrForm("pilot", event.target.value)}>
@@ -2053,6 +2140,24 @@ function includeCurrentOption(options, currentValue) {
   return uniqueSorted([...options, currentValue]);
 }
 
+function includeCurrentOptions(options, currentValues) {
+  return uniqueSorted([...options, ...currentValues]);
+}
+
+function parseSelectedProducts(value) {
+  return String(value || "")
+    .split(/[,;]+/)
+    .map((product) => product.trim())
+    .filter(Boolean);
+}
+
+function toggleSelectedProduct(selectedProducts, product, checked) {
+  if (checked) {
+    return uniqueSorted([...selectedProducts, product]);
+  }
+  return selectedProducts.filter((selectedProduct) => selectedProduct !== product);
+}
+
 function mixabilityLabel(value) {
   if (value === "MIXABLE") return "Oui mixable";
   if (value === "NON_MIXABLE") return "Non mixable";
@@ -2145,6 +2250,7 @@ function isProjectLead(user) {
 function ModificationsPage(props) {
   const [listOpen, setListOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
+  const [dossierDialogOpen, setDossierDialogOpen] = useState(false);
   const {
     actionForm,
     actions,
@@ -2170,6 +2276,7 @@ function ModificationsPage(props) {
     projectOptions,
     query,
     onEditRequest,
+    onUpdateDossierReview,
     saving,
     selectedId,
     selectedRequest,
@@ -2267,7 +2374,11 @@ function ModificationsPage(props) {
                   <div><CalendarDays size={16} /><span>SOP</span><strong>{selectedRequest.sopDate || "-"}</strong></div>
                   <div><ClipboardList size={16} /><span>Mixabilité</span><strong>{mixabilityLabel(selectedRequest.mixability)}</strong></div>
                   <div><ClipboardList size={16} /><span>Type</span><strong>{modificationTypesLabel(selectedRequest)}</strong></div>
-                  <div><ClipboardList size={16} /><span>Revue dossier</span><strong>{selectedRequest.dossierReview || "-"}</strong></div>
+                  <button className="dossier-review-card" type="button" onClick={() => setDossierDialogOpen(true)} title="Ouvrir la revue dossier">
+                    <FileText size={16} />
+                    <span>Revue dossier</span>
+                    <strong>{selectedRequest.dossierReview ? "Revue renseignee" : "Cliquer pour ajouter une revue"}</strong>
+                  </button>
                 </div>
                 {(selectedRequest.beforePhotoUrl || selectedRequest.afterPhotoUrl) && (
                   <div className="request-image-grid">
@@ -2404,7 +2515,83 @@ function ModificationsPage(props) {
           </section>
         </div>
       )}
+      {dossierDialogOpen && selectedRequest && (
+        <DossierReviewDialog
+          request={selectedRequest}
+          saving={saving}
+          onClose={() => setDossierDialogOpen(false)}
+          onSubmit={(value) => onUpdateDossierReview(selectedRequest, value)}
+        />
+      )}
     </section>
+  );
+}
+
+function DossierReviewDialog({ request, saving, onClose, onSubmit }) {
+  const [value, setValue] = useState(request.dossierReview || "");
+  const fileBaseName = `revue-dossier-${request.accessInternalNumber || request.id}`;
+
+  function submit(event) {
+    event.preventDefault();
+    onSubmit(value).then(() => onClose()).catch(() => {});
+  }
+
+  function exportTxt() {
+    downloadTextFile(`${fileBaseName}.txt`, dossierReviewExportText(request, value));
+  }
+
+  function exportPdf() {
+    const title = `Revue dossier - ${request.modificationNumber || `Demande #${request.id}`}`;
+    const win = window.open("", "_blank");
+    if (!win) return;
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
+      body{font-family:Arial,sans-serif;color:#111827;margin:32px;line-height:1.5}
+      h1{font-size:22px;margin:0 0 8px}
+      .meta{color:#475569;font-size:13px;margin-bottom:20px}
+      pre{white-space:pre-wrap;border:1px solid #d7dee8;border-radius:8px;padding:16px;font-family:Arial,sans-serif;min-height:360px}
+      @media print{body{margin:18mm}}
+    </style></head><body><h1>${escapeHtml(title)}</h1><div class="meta">${escapeHtml(dossierReviewMetaLine(request))}</div><pre>${escapeHtml(value || "Revue dossier vide.")}</pre><script>window.onload=function(){window.print();};</script></body></html>`);
+    win.document.close();
+  }
+
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <form
+        aria-labelledby="dossier-review-title"
+        aria-modal="true"
+        className="dossier-review-dialog panel form-page"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={submit}
+        role="dialog"
+      >
+        <header className="actions-dialog-header">
+          <div>
+            <p className="eyebrow">Document modifiable</p>
+            <h2 id="dossier-review-title">Revue dossier</h2>
+            <span>{dossierReviewMetaLine(request)}</span>
+          </div>
+          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
+            <X size={18} />
+          </button>
+        </header>
+        <textarea className="dossier-review-editor" value={value} onChange={(event) => setValue(event.target.value)} placeholder="Ajouter les notes de revue, decisions, points ouverts, actions a suivre..." />
+        <div className="button-row dossier-review-actions">
+          <button className="primary-action" disabled={saving} type="submit">
+            <Save size={16} />
+            Enregistrer
+          </button>
+          <button className="secondary-action" type="button" onClick={exportTxt}>
+            <FileText size={16} />
+            Export TXT
+          </button>
+          <button className="secondary-action" type="button" onClick={exportPdf}>
+            <FileText size={16} />
+            Export PDF
+          </button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -2573,6 +2760,10 @@ function ActionList({ actions, canAdmin, expanded = false, handleDeleteAction, h
                     )) : "-"}
                   </strong>
                 </span>
+                <span className="dossier-review-meta" title={action.dossierReview || "Revue dossier vide"}>
+                  <em>Revue dossier</em>
+                  <strong>{action.dossierReview ? "Renseignee" : "Vide"}</strong>
+                </span>
                 <span><em>Status</em><small className={`status ${statusClass(action.status)}`}>{readableStatus(action.status)}</small></span>
               </div>
               <div className="action-row-tools">
@@ -2580,6 +2771,9 @@ function ActionList({ actions, canAdmin, expanded = false, handleDeleteAction, h
                   <Upload size={15} />
                   <input multiple type="file" onChange={(event) => handleUploadEvidence(action, event.target.files)} />
                 </label>
+                <button className="ghost-icon" disabled={saving || !canAdmin} type="button" onClick={() => setEditingAction(action)} title="Ouvrir la revue dossier" aria-label="Ouvrir la revue dossier">
+                  <FileText size={15} />
+                </button>
                 <button className="ghost-icon" disabled={saving || !canAdmin} type="button" onClick={() => setEditingAction(action)} title="Modifier l'action" aria-label="Modifier l'action">
                   <Pencil size={15} />
                 </button>
@@ -2623,7 +2817,8 @@ function actionToForm(action) {
     workDurationDays: action.workDurationDays ?? 1,
     status: action.status || "TODO",
     evidenceRequired: Boolean(action.evidenceRequired),
-    comment: action.comment || ""
+    comment: action.comment || "",
+    dossierReview: action.dossierReview || ""
   };
 }
 
@@ -2687,6 +2882,7 @@ function ActionCreateDialog({ actionForm, isCriticalAction, saving, onClose, onS
             <option value="LATE">LATE</option>
             <option value="CANCELLED">CANCELLED</option>
           </select>
+          <textarea className="action-review-field" value={actionForm.dossierReview} onChange={(event) => updateActionForm("dossierReview", event.target.value)} placeholder="Revue dossier: notes, points ouverts, decisions, prochaines actions..." />
         </div>
         <div className="button-row">
           <button className="primary-action" disabled={saving} type="submit">
@@ -2772,6 +2968,7 @@ function ActionEditDialog({ action, isCriticalAction, saving, onClose, onSubmit 
             <option value="LATE">LATE</option>
             <option value="CANCELLED">CANCELLED</option>
           </select>
+          <textarea className="action-review-field" value={form.dossierReview} onChange={(event) => updateForm("dossierReview", event.target.value)} placeholder="Revue dossier: notes, points ouverts, decisions, prochaines actions..." />
           <textarea value={form.comment} onChange={(event) => updateForm("comment", event.target.value)} placeholder="Commentaire" />
         </div>
         <div className="button-row">

@@ -39,7 +39,8 @@ export const emptyActionForm = {
   workDurationDays: 1,
   status: "TODO",
   evidenceRequired: false,
-  comment: ""
+  comment: "",
+  dossierReview: ""
 };
 
 export const emptyPlanningRuleForm = {

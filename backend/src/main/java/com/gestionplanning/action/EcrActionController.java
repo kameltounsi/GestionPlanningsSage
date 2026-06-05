@@ -156,6 +156,7 @@ public class EcrActionController {
                     action.setClosedDate(updatedAction.getClosedDate());
                     syncFinalizationDate(action, updatedAction);
                     action.setComment(updatedAction.getComment());
+                    action.setDossierReview(updatedAction.getDossierReview());
                     EcrAction saved = actionRepository.save(action);
                     planningService.recalculateRequest(saved.getRequest());
                     notifyIfPhaseReady(saved.getRequest(), saved.getStage(), user);

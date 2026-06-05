@@ -2,6 +2,8 @@ package com.gestionplanning.storage;
 
 import com.cloudinary.Cloudinary;
 import com.cloudinary.utils.ObjectUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StreamUtils;
@@ -14,6 +16,8 @@ import java.util.Map;
 
 @Service
 public class CloudinaryStorageService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(CloudinaryStorageService.class);
+
     private final Cloudinary cloudinary;
     private final String cloudName;
     private final String apiKey;
@@ -52,6 +56,10 @@ public class CloudinaryStorageService {
                     String.valueOf(uploadResult.get("resource_type"))
             );
         } catch (IOException exception) {
+            LOGGER.error("Cloudinary upload failed for folder {}", folder, exception);
+            throw new IllegalStateException("Impossible d'envoyer le fichier vers Cloudinary", exception);
+        } catch (RuntimeException exception) {
+            LOGGER.error("Cloudinary upload failed for folder {}", folder, exception);
             throw new IllegalStateException("Impossible d'envoyer le fichier vers Cloudinary", exception);
         }
     }

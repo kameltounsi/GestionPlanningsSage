@@ -111,6 +111,9 @@ POSTGRES_PASSWORD=votre_mot_de_passe_fort
 POSTGRES_HOST_PORT=5433
 APP_FRONTEND_URL=http://192.168.1.117:3000
 VITE_API_BASE_URL=/api
+CLOUDINARY_CLOUD_NAME=votre_cloud_name
+CLOUDINARY_API_KEY=votre_api_key
+CLOUDINARY_API_SECRET=votre_api_secret
 ```
 
 Demarrer toute l'application:

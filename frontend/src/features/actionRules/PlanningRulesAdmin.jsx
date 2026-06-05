@@ -251,7 +251,7 @@ function ActionRuleDialog({ form, rules, saving, stageNewProject, onClose, onSub
             Phase
             <input disabled value={stageLabel(form.stage, form.appliesToNewProject && !form.appliesToModification)} />
           </label>
-          <label>
+          <label className="planning-action-title-field">
             Action
             <input required value={form.actionTitle} onChange={(event) => setForm((current) => ({ ...current, actionTitle: event.target.value, dependencyActionTitle: "" }))} placeholder="Ex: Action 7 - Validation input" />
           </label>
@@ -262,7 +262,7 @@ function ActionRuleDialog({ form, rules, saving, stageNewProject, onClose, onSub
           <label>
             Responsable
             <select value={form.responsible} onChange={(event) => setForm((current) => ({ ...current, responsible: event.target.value }))}>
-              <option value="">Pilote ECR</option>
+              <option value="">Selectionner un role</option>
               {userRoleOptions.map(([value, label]) => (
                 <option key={value} value={label}>{label}</option>
               ))}

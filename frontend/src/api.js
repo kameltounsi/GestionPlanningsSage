@@ -275,6 +275,10 @@ export function actionEvidenceUrl(actionId) {
   return `${API_BASE}/actions/${actionId}/evidence`;
 }
 
+export function actionAssetDownloadUrl(assetId) {
+  return `${API_BASE}/action-assets/${assetId}/download`;
+}
+
 export function getEcrDocuments(requestId) {
   return request(`/ecr-requests/${requestId}/documents`);
 }

@@ -199,19 +199,32 @@ public class EcrActionController {
     public ResponseEntity<?> downloadEvidence(@PathVariable Long id) {
         return actionRepository.findById(id).<ResponseEntity<?>>map(action -> {
             if (action.getEvidenceFileUrl() != null && !action.getEvidenceFileUrl().trim().isEmpty()) {
-                DownloadedAsset asset = storageService.download(action.getEvidenceFileUrl(), action.getEvidenceContentType());
+                DownloadedAsset asset = storageService.download(action.getEvidencePublicId(), action.getEvidenceResourceType(), action.getEvidenceFileUrl(), action.getEvidenceContentType());
                 return ResponseEntity.ok()
-                        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFileName(action.getEvidenceFileName()) + "\"")
+                        .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(action.getEvidenceFileName(), asset.getContentType()))
                         .contentType(MediaType.parseMediaType(asset.getContentType()))
                             .body(asset.getData());
             }
             return evidenceRepository.findById(id)
                     .<ResponseEntity<?>>map(evidence -> ResponseEntity.ok()
-                            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFileName(action.getEvidenceFileName()) + "\"")
+                            .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(action.getEvidenceFileName(), action.getEvidenceContentType()))
                             .contentType(MediaType.parseMediaType(action.getEvidenceContentType() == null ? MediaType.APPLICATION_OCTET_STREAM_VALUE : action.getEvidenceContentType()))
                             .body(evidence.getData()))
                     .orElseGet(() -> ResponseEntity.notFound().build());
         }).orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/action-assets/{assetId}/download")
+    public ResponseEntity<?> downloadActionAsset(@PathVariable Long assetId) {
+        return assetRepository.findById(assetId)
+                .<ResponseEntity<?>>map(actionAsset -> {
+                    DownloadedAsset asset = storageService.download(actionAsset.getPublicId(), actionAsset.getResourceType(), actionAsset.getFileUrl(), actionAsset.getContentType());
+                    return ResponseEntity.ok()
+                            .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(actionAsset.getFileName(), asset.getContentType()))
+                            .contentType(MediaType.parseMediaType(asset.getContentType()))
+                            .body(asset.getData());
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/actions/{id}")
@@ -297,5 +310,12 @@ public class EcrActionController {
             return "evidence";
         }
         return fileName.replace("\"", "");
+    }
+
+    private String contentDisposition(String fileName, String contentType) {
+        String disposition = contentType != null && (contentType.equalsIgnoreCase(MediaType.APPLICATION_PDF_VALUE) || contentType.startsWith("image/"))
+                ? "inline"
+                : "attachment";
+        return disposition + "; filename=\"" + safeFileName(fileName) + "\"";
     }
 }

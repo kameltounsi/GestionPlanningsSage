@@ -40,9 +40,11 @@ public class CloudinaryStorageService {
     public StoredAsset upload(MultipartFile file, String folder) {
         validateConfiguration();
         try {
+            String resourceType = resourceTypeFor(file);
             Map uploadResult = cloudinary.uploader().upload(file.getBytes(), ObjectUtils.asMap(
                     "folder", folder,
-                    "resource_type", "auto",
+                    "resource_type", resourceType,
+                    "access_mode", "public",
                     "filename_override", file.getOriginalFilename(),
                     "use_filename", true,
                     "unique_filename", true
@@ -64,10 +66,32 @@ public class CloudinaryStorageService {
         }
     }
 
+    public DownloadedAsset download(String publicId, String resourceType, String fileUrl, String fallbackContentType) {
+        if (publicId != null && !publicId.trim().isEmpty()) {
+            if ("raw".equalsIgnoreCase(resourceType)) {
+                try {
+                    return downloadFromUrl(privateDownloadUrl(publicId, resourceType), fallbackContentType);
+                } catch (RuntimeException exception) {
+                    LOGGER.warn("Cloudinary private download failed for {}: {}", publicId, exception.getMessage());
+                }
+            }
+            try {
+                return downloadFromUrl(signedUrl(publicId, resourceType, fileUrl), fallbackContentType);
+            } catch (RuntimeException exception) {
+                LOGGER.warn("Cloudinary signed download failed for {}: {}", publicId, exception.getMessage());
+            }
+        }
+        return download(fileUrl, fallbackContentType);
+    }
+
     public DownloadedAsset download(String fileUrl, String fallbackContentType) {
         if (fileUrl == null || fileUrl.trim().isEmpty()) {
             throw new IllegalArgumentException("URL fichier manquante");
         }
+        return downloadFromUrl(fileUrl, fallbackContentType);
+    }
+
+    private DownloadedAsset downloadFromUrl(String fileUrl, String fallbackContentType) {
         try {
             HttpURLConnection connection = (HttpURLConnection) new URL(fileUrl).openConnection();
             connection.setConnectTimeout(10000);
@@ -82,6 +106,30 @@ public class CloudinaryStorageService {
             return new DownloadedAsset(StreamUtils.copyToByteArray(connection.getInputStream()), contentType);
         } catch (IOException exception) {
             throw new IllegalStateException("Impossible de telecharger le fichier depuis Cloudinary", exception);
+        }
+    }
+
+    private String signedUrl(String publicId, String resourceType, String fileUrl) {
+        com.cloudinary.Url url = cloudinary.url()
+                .secure(true)
+                .signed(true)
+                .resourceType(resourceType == null || resourceType.trim().isEmpty() ? "image" : resourceType);
+        String version = versionFromUrl(fileUrl);
+        if (version != null) {
+            url.version(version);
+        }
+        return url.generate(publicId);
+    }
+
+    private String privateDownloadUrl(String publicId, String resourceType) {
+        try {
+            return cloudinary.privateDownload(publicId, null, ObjectUtils.asMap(
+                    "resource_type", resourceType == null || resourceType.trim().isEmpty() ? "raw" : resourceType,
+                    "type", "upload",
+                    "attachment", false
+            ));
+        } catch (Exception exception) {
+            throw new IllegalStateException("Impossible de generer l'URL privee Cloudinary", exception);
         }
     }
 
@@ -127,4 +175,27 @@ public class CloudinaryStorageService {
             throw new IllegalStateException("Configuration Cloudinary manquante: " + propertyName);
         }
     }
+
+    private String resourceTypeFor(MultipartFile file) {
+        String contentType = file.getContentType();
+        if (contentType == null) {
+            return "raw";
+        }
+        if (contentType.startsWith("image/")) {
+            return "image";
+        }
+        if (contentType.startsWith("video/")) {
+            return "video";
+        }
+        return "raw";
+    }
+
+    private String versionFromUrl(String fileUrl) {
+        if (fileUrl == null) {
+            return null;
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("/v(\\d+)/").matcher(fileUrl);
+        return matcher.find() ? matcher.group(1) : null;
+    }
+
 }

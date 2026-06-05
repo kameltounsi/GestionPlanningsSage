@@ -76,9 +76,9 @@ public class EcrDocumentController {
     public ResponseEntity<?> download(@PathVariable Long id) {
         return documentRepository.findById(id)
                 .<ResponseEntity<?>>map(document -> {
-                    DownloadedAsset asset = storageService.download(document.getFileUrl(), document.getFileType());
+                    DownloadedAsset asset = storageService.download(document.getPublicId(), document.getResourceType(), document.getFileUrl(), document.getFileType());
                     return ResponseEntity.ok()
-                            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFileName(document.getFileName()) + "\"")
+                            .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(document.getFileName(), asset.getContentType()))
                             .contentType(MediaType.parseMediaType(asset.getContentType()))
                             .body(asset.getData());
                 })
@@ -102,5 +102,12 @@ public class EcrDocumentController {
             return "document";
         }
         return fileName.replace("\"", "");
+    }
+
+    private String contentDisposition(String fileName, String contentType) {
+        String disposition = contentType != null && (contentType.equalsIgnoreCase(MediaType.APPLICATION_PDF_VALUE) || contentType.startsWith("image/"))
+                ? "inline"
+                : "attachment";
+        return disposition + "; filename=\"" + safeFileName(fileName) + "\"";
     }
 }

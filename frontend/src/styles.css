@@ -1547,6 +1547,10 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   overflow-y: auto;
 }
 
+.planning-action-title-field {
+  grid-column: span 2;
+}
+
 .planning-rule-list {
   display: grid;
   gap: 10px;
@@ -2267,6 +2271,11 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
+.action-edit-grid .action-title-input {
+  grid-column: span 2;
+  min-width: min(100%, 360px);
+}
+
 .action-edit-grid textarea {
   grid-column: 1 / -1;
   min-height: 88px;
@@ -2667,6 +2676,12 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 
   .password-panel {
     grid-column: auto;
+  }
+
+  .planning-action-title-field,
+  .action-edit-grid .action-title-input {
+    grid-column: 1 / -1;
+    min-width: 0;
   }
 
   .work-layout,

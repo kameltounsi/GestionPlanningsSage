@@ -59,6 +59,7 @@ import {
   updateUserProfile,
   uploadActionEvidence,
   uploadEcrRequestImage,
+  actionAssetDownloadUrl,
   actionEvidenceUrl,
   approvePhaseValidation,
   changeUserPassword,
@@ -2085,6 +2086,7 @@ function actionAssets(action) {
   if (!action?.evidenceFileName) return [];
   return [{
     id: `legacy-${action.id}`,
+    legacy: true,
     fileName: action.evidenceFileName,
     fileUrl: actionEvidenceUrl(action.id)
   }];
@@ -2092,6 +2094,10 @@ function actionAssets(action) {
 
 function hasActionAsset(action) {
   return actionAssets(action).length > 0;
+}
+
+function actionAssetUrl(action, asset) {
+  return asset?.legacy ? actionEvidenceUrl(action.id) : actionAssetDownloadUrl(asset.id);
 }
 
 function modificationTypesLabel(request) {
@@ -2561,7 +2567,7 @@ function ActionList({ actions, canAdmin, expanded = false, handleDeleteAction, h
                   <em>Assets</em>
                   <strong className="asset-link-list">
                     {actionAssets(action).length > 0 ? actionAssets(action).map((asset) => (
-                      <a className="file-link" href={asset.fileUrl || actionEvidenceUrl(action.id)} key={asset.id || asset.fileName} target="_blank" rel="noreferrer">
+                      <a className="file-link" href={actionAssetUrl(action, asset)} key={asset.id || asset.fileName} target="_blank" rel="noreferrer">
                         {asset.fileName || "Asset"}
                       </a>
                     )) : "-"}
@@ -2643,9 +2649,9 @@ function ActionCreateDialog({ actionForm, isCriticalAction, saving, onClose, onS
         </div>
         <div className="action-edit-grid">
           <input value={actionForm.topicRisk} onChange={(event) => updateActionForm("topicRisk", event.target.value)} placeholder="Topic_Risk" />
-          <input required value={actionForm.title} onChange={(event) => updateActionForm("title", event.target.value)} placeholder="Point_verif" />
+          <input className="action-title-input" required value={actionForm.title} onChange={(event) => updateActionForm("title", event.target.value)} placeholder="Point_verif" />
           <select value={actionForm.responsible} onChange={(event) => updateActionForm("responsible", event.target.value)}>
-            <option value="">Pilote</option>
+            <option value="">Selectionner un role</option>
             {userRoleOptions.map(([value, label]) => (
               <option key={value} value={label}>{label}</option>
             ))}
@@ -2728,9 +2734,9 @@ function ActionEditDialog({ action, isCriticalAction, saving, onClose, onSubmit 
         </div>
         <div className="action-edit-grid">
           <input value={form.topicRisk} onChange={(event) => updateForm("topicRisk", event.target.value)} placeholder="Topic_Risk" />
-          <input required value={form.title} onChange={(event) => updateForm("title", event.target.value)} placeholder="Point_verif" />
+          <input className="action-title-input" required value={form.title} onChange={(event) => updateForm("title", event.target.value)} placeholder="Point_verif" />
           <select value={form.responsible} onChange={(event) => updateForm("responsible", event.target.value)}>
-            <option value="">Pilote</option>
+            <option value="">Selectionner un role</option>
             {userRoleOptions.map(([value, label]) => (
               <option key={value} value={label}>{label}</option>
             ))}

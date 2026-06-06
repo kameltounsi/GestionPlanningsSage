@@ -81,7 +81,7 @@ public class AuthInterceptor implements HandlerInterceptor {
         if (path.matches("/api/projects(/.*)?")) {
             return true;
         }
-        if (path.matches("/api/preferentials/(clients|products)(/.*)?")) {
+        if (path.matches("/api/preferentials/(clients|products|roles)(/.*)?")) {
             return true;
         }
         if (path.matches("/api/action-planning-rules(/.*)?")) {

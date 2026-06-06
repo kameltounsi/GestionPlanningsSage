@@ -33,7 +33,8 @@ public class AccountMailService {
     private final boolean startTlsEnabled;
     private final boolean startTlsRequired;
     private final String applicationUrl;
-    private final boolean mailEnabled;
+    private final boolean accountMailEnabled;
+    private final boolean alertMailEnabled;
 
     public AccountMailService(@Value("${spring.mail.host:smtp.gmail.com}") String host,
                               @Value("${spring.mail.port:587}") int port,
@@ -43,7 +44,8 @@ public class AccountMailService {
                               @Value("${spring.mail.properties.mail.smtp.starttls.enable:true}") boolean startTlsEnabled,
                               @Value("${spring.mail.properties.mail.smtp.starttls.required:true}") boolean startTlsRequired,
                               @Value("${app.frontend.url:http://localhost:3000}") String applicationUrl,
-                              @Value("${app.account.mail.enabled:true}") boolean mailEnabled) {
+                              @Value("${app.account.mail.enabled:true}") boolean accountMailEnabled,
+                              @Value("${app.alert.mail.enabled:true}") boolean alertMailEnabled) {
         this.host = host;
         this.port = port;
         this.fromAddress = fromAddress;
@@ -52,11 +54,19 @@ public class AccountMailService {
         this.startTlsEnabled = startTlsEnabled;
         this.startTlsRequired = startTlsRequired;
         this.applicationUrl = applicationUrl;
-        this.mailEnabled = mailEnabled;
+        this.accountMailEnabled = accountMailEnabled;
+        this.alertMailEnabled = alertMailEnabled;
     }
 
     public void sendAccountCreatedEmail(AppUser user, String temporaryPassword) {
-        if (!mailEnabled) {
+        if (!accountMailEnabled) {
+            throw new MailDeliveryException("L'envoi email est desactive par APP_ACCOUNT_MAIL_ENABLED.");
+        }
+        sendAccountCreatedEmailQuietly(user, temporaryPassword);
+    }
+
+    public void sendAccountCreatedEmailQuietly(AppUser user, String temporaryPassword) {
+        if (!accountMailEnabled) {
             return;
         }
         if (user == null || isBlank(user.getEmail())) {
@@ -65,7 +75,7 @@ public class AccountMailService {
         }
         if (!isMailConfigured()) {
             LOGGER.error("Account creation email skipped because SMTP configuration is incomplete.");
-            return;
+            throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
         }
 
         try {
@@ -75,14 +85,22 @@ public class AccountMailService {
             message.setSubject("Vos acces Gestion Planning Sage", "UTF-8");
             message.setContent(buildContent(user, temporaryPassword));
             Transport.send(message);
+            LOGGER.info("Account creation email sent to {}", user.getEmail());
         } catch (MessagingException | RuntimeException exception) {
             LOGGER.error("Unable to send account creation email to {}", user.getEmail(), exception);
+            throw new MailDeliveryException("Echec d'envoi email: " + rootMessage(exception), exception);
         }
     }
 
     public void sendPhaseReadyEmail(EcrRequest request, EcrStage stage, Collection<AppUser> recipients) {
-        if (!mailEnabled || request == null || recipients == null || recipients.isEmpty()) {
+        if (!alertMailEnabled) {
+            throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");
+        }
+        if (request == null) {
             return;
+        }
+        if (recipients == null || recipients.isEmpty()) {
+            throw new MailDeliveryException("Aucun validateur/manager destinataire pour l'email de validation.");
         }
         String to = recipients.stream()
                 .map(AppUser::getEmail)
@@ -90,11 +108,11 @@ public class AccountMailService {
                 .distinct()
                 .collect(Collectors.joining(","));
         if (isBlank(to)) {
-            return;
+            throw new MailDeliveryException("Les validateurs/managers n'ont pas d'adresse email renseignee.");
         }
         if (!isMailConfigured()) {
             LOGGER.error("Phase validation email skipped because SMTP configuration is incomplete.");
-            return;
+            throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
         }
         String title = "Phase prete a valider";
         String text = "La phase " + value(stage == null ? null : stage.getLabel(request.isNewVersion()))
@@ -116,12 +134,18 @@ public class AccountMailService {
     }
 
     public void sendPhaseRejectedEmail(EcrRequest request, EcrStage stage, AppUser recipient, String reason, String actionsToRevisit) {
-        if (!mailEnabled || request == null || recipient == null || isBlank(recipient.getEmail())) {
+        if (!alertMailEnabled) {
+            throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");
+        }
+        if (request == null) {
             return;
+        }
+        if (recipient == null || isBlank(recipient.getEmail())) {
+            throw new MailDeliveryException("Le chef de projet destinataire n'a pas d'adresse email renseignee.");
         }
         if (!isMailConfigured()) {
             LOGGER.error("Phase rejection email skipped because SMTP configuration is incomplete.");
-            return;
+            throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
         }
         String title = "Phase refusee - actions a revisiter";
         String text = "La phase " + value(stage == null ? null : stage.getLabel(request.isNewVersion()))
@@ -151,8 +175,10 @@ public class AccountMailService {
             message.setSubject(subject, "UTF-8");
             message.setContent(buildContent(plainText, html));
             Transport.send(message);
+            LOGGER.info("{} email sent to {}", logContext, to);
         } catch (MessagingException | RuntimeException exception) {
             LOGGER.error("Unable to send {} email to {}", logContext, to, exception);
+            throw new MailDeliveryException("Echec d'envoi email: " + rootMessage(exception), exception);
         }
     }
 
@@ -163,6 +189,10 @@ public class AccountMailService {
         properties.put("mail.smtp.auth", String.valueOf(smtpAuth));
         properties.put("mail.smtp.starttls.enable", String.valueOf(startTlsEnabled));
         properties.put("mail.smtp.starttls.required", String.valueOf(startTlsRequired));
+        properties.put("mail.smtp.connectiontimeout", "10000");
+        properties.put("mail.smtp.timeout", "10000");
+        properties.put("mail.smtp.writetimeout", "10000");
+        properties.put("mail.debug", "false");
 
         if (!smtpAuth) {
             return Session.getInstance(properties);
@@ -181,6 +211,14 @@ public class AccountMailService {
             return false;
         }
         return !smtpAuth || !isBlank(password);
+    }
+
+    private String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
     }
 
     private MimeMultipart buildContent(AppUser user, String temporaryPassword) throws MessagingException {

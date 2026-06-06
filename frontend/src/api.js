@@ -37,7 +37,7 @@ async function request(path, options = {}) {
     if (response.status === 401) {
       clearSession();
     }
-    throw new Error(`API error ${response.status}`);
+    throw new Error(await errorMessage(response));
   }
   if (response.status === 204) {
     return null;
@@ -57,9 +57,19 @@ async function multipartRequest(path, formData) {
     if (response.status === 401) {
       clearSession();
     }
-    throw new Error(`API error ${response.status}`);
+    throw new Error(await errorMessage(response));
   }
   return response.json();
+}
+
+async function errorMessage(response) {
+  const fallback = `API error ${response.status}`;
+  try {
+    const text = await response.text();
+    return text || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export function login(email, password) {
@@ -212,6 +222,30 @@ export function updateProductReference(id, payload) {
 
 export function deleteProductReference(id) {
   return request(`/preferentials/products/${id}`, {
+    method: "DELETE"
+  });
+}
+
+export function getRoleReferences() {
+  return request("/preferentials/roles");
+}
+
+export function createRoleReference(payload) {
+  return request("/preferentials/roles", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateRoleReference(id, payload) {
+  return request(`/preferentials/roles/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteRoleReference(id) {
+  return request(`/preferentials/roles/${id}`, {
     method: "DELETE"
   });
 }

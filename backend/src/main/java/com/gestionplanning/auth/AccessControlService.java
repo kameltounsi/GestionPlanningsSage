@@ -1,6 +1,7 @@
 package com.gestionplanning.auth;
 
 import com.gestionplanning.ecr.EcrRequest;
+import com.gestionplanning.action.EcrAction;
 import com.gestionplanning.project.ProjectReferenceRepository;
 import com.gestionplanning.user.AppUser;
 import com.gestionplanning.user.AppUserRepository;
@@ -26,11 +27,11 @@ public class AccessControlService {
     }
 
     public boolean isAdmin(AppUser user) {
-        return user != null && user.getRole() == UserRole.ADMIN;
+        return hasApplicationRole(user, UserRole.ADMIN);
     }
 
     public boolean isValidatorOrManager(AppUser user) {
-        return user != null && (user.getRole() == UserRole.VALIDATEUR || user.getRole() == UserRole.MANAGER);
+        return hasApplicationRole(user, UserRole.VALIDATEUR) || hasApplicationRole(user, UserRole.MANAGER);
     }
 
     public boolean canAccessRequest(AppUser user, EcrRequest request) {
@@ -42,6 +43,20 @@ public class AccessControlService {
 
     public boolean canValidateRequest(AppUser user, EcrRequest request) {
         return isAdmin(user) || isValidatorOrManager(user) && canAccessRequest(user, request);
+    }
+
+    public boolean canManageAction(AppUser user, EcrAction action) {
+        if (isAdmin(user)) {
+            return true;
+        }
+        if (user == null || action == null) {
+            return false;
+        }
+        String responsible = normalize(action.getResponsible());
+        if (responsible.isEmpty()) {
+            return canAccessRequest(user, action.getRequest());
+        }
+        return matchesUser(user, responsible) || normalize(user.getJobTitle()).equals(responsible) || normalize(user.getRole()).equals(responsible);
     }
 
     public List<AppUser> validatorsAndManagersFor(EcrRequest request) {
@@ -71,9 +86,25 @@ public class AccessControlService {
         }
         Set<String> team = projectTeamTokens(request);
         return userRepository.findAll().stream()
-                .filter(user -> user.isEnabled() && user.getRole() == UserRole.CHEF_DE_PROJET)
+                .filter(user -> user.isEnabled() && hasApplicationRole(user, UserRole.CHEF_DE_PROJET))
                 .filter(user -> team.stream().anyMatch(token -> matchesUser(user, token)))
                 .findFirst();
+    }
+
+    private boolean hasApplicationRole(AppUser user, UserRole role) {
+        if (user == null || role == null) {
+            return false;
+        }
+        String value = normalize(user.getRole());
+        return value.equals(normalize(role.name())) || value.equals(normalize(roleLabel(role)));
+    }
+
+    private String roleLabel(UserRole role) {
+        if (role == UserRole.ADMIN) return "Admin";
+        if (role == UserRole.CHEF_DE_PROJET) return "Chef de projet";
+        if (role == UserRole.VALIDATEUR) return "Validateur";
+        if (role == UserRole.MANAGER) return "Manager";
+        return role.name();
     }
 
     private Set<String> projectTeamTokens(EcrRequest request) {
@@ -99,6 +130,6 @@ public class AccessControlService {
     }
 
     private String normalize(String value) {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replace("_", " ");
     }
 }

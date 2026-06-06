@@ -2373,6 +2373,11 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   border-color: var(--blue);
 }
 
+.row-upload.disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
 .action-row-tools {
   align-items: center;
   display: grid;
@@ -2661,6 +2666,64 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   width: min(100%, 640px);
 }
 
+.user-photo-uploader {
+  align-items: center;
+  background: linear-gradient(135deg, #f8fbff, #eef7f1);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 82px minmax(0, 1fr) auto;
+  padding: 14px;
+}
+
+.user-photo-preview {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d8e2ee;
+  border-radius: 999px;
+  color: var(--muted);
+  display: flex;
+  height: 74px;
+  justify-content: center;
+  overflow: hidden;
+  width: 74px;
+}
+
+.user-photo-preview img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.user-photo-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.user-photo-copy strong {
+  color: var(--text);
+}
+
+.user-photo-copy span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-photo-action {
+  cursor: pointer;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.user-photo-action input {
+  display: none;
+}
+
 .user-enabled-field {
   align-self: end;
   min-height: 44px;
@@ -2924,6 +2987,16 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   .project-table-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .user-photo-uploader {
+    grid-template-columns: 74px minmax(0, 1fr);
+  }
+
+  .user-photo-action {
+    grid-column: 1 / -1;
+    justify-content: center;
+    width: 100%;
   }
 
   .project-type-toggle {

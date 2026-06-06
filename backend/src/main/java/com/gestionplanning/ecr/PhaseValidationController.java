@@ -7,6 +7,7 @@ import com.gestionplanning.auth.AccessControlService;
 import com.gestionplanning.user.AccountMailService;
 import com.gestionplanning.user.AppUser;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -43,6 +44,7 @@ public class PhaseValidationController {
     }
 
     @PostMapping
+    @Transactional
     public ResponseEntity<PhaseValidationRequest> requestValidation(@PathVariable Long requestId,
                                                                     @RequestBody ValidationCreateRequest payload,
                                                                     @RequestAttribute("authenticatedUser") AppUser user) {
@@ -88,6 +90,7 @@ public class PhaseValidationController {
     }
 
     @PostMapping("/{validationId}/reject")
+    @Transactional
     public ResponseEntity<PhaseValidationRequest> reject(@PathVariable Long requestId,
                                                          @PathVariable Long validationId,
                                                          @RequestBody ValidationDecisionRequest payload,

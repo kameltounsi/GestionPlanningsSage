@@ -51,8 +51,13 @@ public class ActionAssigneeResolver {
                 .map(this::findUserByTeamName)
                 .filter(Optional::isPresent)
                 .map(Optional::get)
-                .filter(user -> user.getRole() == role)
+                .filter(user -> hasRole(user, role))
                 .findFirst();
+    }
+
+    private boolean hasRole(AppUser user, UserRole role) {
+        String value = normalize(user.getRole());
+        return value.equals(normalize(role.name())) || value.equals(normalize(roleLabel(role)));
     }
 
     private Optional<AppUser> findUserByTeamName(String memberName) {

@@ -15,6 +15,7 @@ import com.gestionplanning.user.AppUser;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -118,11 +119,15 @@ public class EcrActionController {
     }
 
     @PutMapping("/actions/{id}")
+    @Transactional
     public ResponseEntity<EcrAction> update(@PathVariable Long id, @Valid @RequestBody EcrAction updatedAction,
                                             @RequestAttribute("authenticatedUser") AppUser user) {
         return actionRepository.findById(id)
-                .filter(action -> accessControlService.canAccessRequest(user, action.getRequest()))
+                .filter(action -> accessControlService.canManageAction(user, action))
                 .map(action -> {
+                    if (!accessControlService.isAdmin(user)) {
+                        return updateActionProgress(action, updatedAction, user);
+                    }
                     action.setTitle(updatedAction.getTitle());
                     action.setDescription(updatedAction.getDescription());
                     action.setTopicRisk(updatedAction.getTopicRisk());
@@ -165,6 +170,23 @@ public class EcrActionController {
                 .orElse(ResponseEntity.status(403).build());
     }
 
+    private ResponseEntity<EcrAction> updateActionProgress(EcrAction action, EcrAction updatedAction, AppUser user) {
+        if (isDone(updatedAction) && requiresEvidence(action) && !hasEvidence(action)) {
+            return ResponseEntity.badRequest().build();
+        }
+        if (isDone(updatedAction) && !isDependencyCompleted(action)) {
+            return ResponseEntity.badRequest().build();
+        }
+        action.setChecked(updatedAction.isChecked());
+        action.setStatus(updatedAction.getStatus());
+        action.setComment(updatedAction.getComment());
+        syncFinalizationDate(action, updatedAction);
+        EcrAction saved = actionRepository.save(action);
+        planningService.recalculateRequest(saved.getRequest());
+        notifyIfPhaseReady(saved.getRequest(), saved.getStage(), user);
+        return ResponseEntity.ok(saved);
+    }
+
     @PostMapping(value = "/actions/{id}/evidence", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<EcrAction> uploadEvidence(@PathVariable Long id, @RequestParam("file") MultipartFile file,
                                                     @RequestAttribute("authenticatedUser") AppUser user) {
@@ -172,7 +194,7 @@ public class EcrActionController {
             return ResponseEntity.badRequest().build();
         }
         return actionRepository.findById(id)
-                .filter(action -> accessControlService.canAccessRequest(user, action.getRequest()))
+                .filter(action -> accessControlService.canManageAction(user, action))
                 .map(action -> {
                     StoredAsset asset = storageService.upload(file, "gestion-planning/actions/" + id);
                     EcrActionAsset actionAsset = new EcrActionAsset();

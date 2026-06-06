@@ -2,12 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { EmptyState } from "../../components/common/EmptyState";
 import { emptyPlanningRuleForm } from "../../constants/forms";
-import { userRoleOptions } from "../../constants/roles";
 import { stageColors, stageDefinitions } from "../../constants/stages";
 import { criticalityClass } from "../../utils/status";
 import { stageColorClass, stageLabel } from "../../utils/stages";
 
-export function PlanningRulesAdmin({ form, rules, saving, onCancelEdit, onDelete, onEdit, onSubmit, setForm }) {
+export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving, onCancelEdit, onDelete, onEdit, onSubmit, setForm }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [showNewProjectStages, setShowNewProjectStages] = useState(false);
   const visibleStages = useMemo(
@@ -113,6 +112,7 @@ export function PlanningRulesAdmin({ form, rules, saving, onCancelEdit, onDelete
       </div>
       {dialogOpen && (
         <ActionRuleDialog
+          actionRoleOptions={actionRoleOptions}
           form={form}
           rules={rules}
           saving={saving}
@@ -196,7 +196,7 @@ function previousDependencyOptions(rules, form) {
   return candidates;
 }
 
-function ActionRuleDialog({ form, rules, saving, stageNewProject, onClose, onSubmit, setForm }) {
+function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNewProject, onClose, onSubmit, setForm }) {
   const phaseActions = rules
     .filter((rule) => rule.stage === form.stage)
     .filter((rule) => (
@@ -263,8 +263,8 @@ function ActionRuleDialog({ form, rules, saving, stageNewProject, onClose, onSub
             Responsable
             <select value={form.responsible} onChange={(event) => setForm((current) => ({ ...current, responsible: event.target.value }))}>
               <option value="">Selectionner un role</option>
-              {userRoleOptions.map(([value, label]) => (
-                <option key={value} value={label}>{label}</option>
+              {(form.responsible && !actionRoleOptions.includes(form.responsible) ? [form.responsible, ...actionRoleOptions] : actionRoleOptions).map((role) => (
+                <option key={role} value={role}>{role}</option>
               ))}
             </select>
           </label>

@@ -42,9 +42,8 @@ public class AppUser {
     private String profilePhotoPublicId;
     private String profilePhotoResourceType;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private UserRole role = UserRole.CHEF_DE_PROJET;
+    @Column(nullable = false, length = 160)
+    private String role = UserRole.CHEF_DE_PROJET.name();
 
     @Column(nullable = false)
     private boolean enabled = true;
@@ -155,11 +154,11 @@ public class AppUser {
         this.profilePhotoResourceType = profilePhotoResourceType;
     }
 
-    public UserRole getRole() {
+    public String getRole() {
         return role;
     }
 
-    public void setRole(UserRole role) {
+    public void setRole(String role) {
         this.role = role;
     }
 

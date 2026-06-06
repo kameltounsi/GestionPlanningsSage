@@ -1,14 +1,15 @@
-import React, { useState } from "react";
-import { Pencil, Plus, Save, Trash2, UserCircle, X } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Camera, Pencil, Plus, Save, Trash2, UserCircle, X } from "lucide-react";
 import { EmptyState } from "../../components/common/EmptyState";
 import { PageHeader } from "../../components/common/PageHeader";
 import { emptyUserForm } from "../../constants/forms";
 import { userRoleOptions } from "../../constants/roles";
 import { userRoleLabel } from "../../utils/users";
 
-export function UsersPage({ currentUser, editingUser, saving, userForm, users, onCancelEdit, onDelete, onEdit, onSubmit, setUserForm }) {
+export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, saving, userForm, users, onCancelEdit, onDelete, onEdit, onSubmit, setUserForm }) {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const canAdmin = currentUser?.username === "fchelbi" || currentUser?.role === "ADMIN";
+  const currentRole = String(currentUser?.role || "").trim().toLowerCase().replaceAll("_", " ");
+  const canAdmin = currentUser?.username === "fchelbi" || currentRole === "admin";
 
   function openCreateDialog() {
     setUserForm(emptyUserForm);
@@ -77,6 +78,7 @@ export function UsersPage({ currentUser, editingUser, saving, userForm, users, o
           canAdmin={canAdmin}
           editingUser={editingUser}
           form={userForm}
+          actionRoleOptions={actionRoleOptions}
           saving={saving}
           onClose={closeDialog}
           onSubmit={submitDialog}
@@ -87,7 +89,38 @@ export function UsersPage({ currentUser, editingUser, saving, userForm, users, o
   );
 }
 
-function UserDialog({ canAdmin, editingUser, form, saving, onClose, onSubmit, setForm }) {
+function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, saving, onClose, onSubmit, setForm }) {
+  const [localPhotoPreviewUrl, setLocalPhotoPreviewUrl] = useState("");
+  const historicalRoleLabels = userRoleOptions.map(([, label]) => label);
+  const roleOptions = [
+    ...userRoleOptions.map(([value, label]) => ({ value, label })),
+    ...actionRoleOptions
+      .filter((role) => !historicalRoleLabels.includes(role))
+      .map((role) => ({ value: role, label: role }))
+  ];
+  const displayedRoleOptions = form.role && !roleOptions.some((role) => role.value === form.role)
+    ? [{ value: form.role, label: userRoleLabel(form.role) }, ...roleOptions]
+    : roleOptions;
+  const previewPhotoUrl = localPhotoPreviewUrl || form.profilePhotoUrl || "";
+
+  useEffect(() => {
+    if (!form.profilePhotoFile) {
+      setLocalPhotoPreviewUrl("");
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(form.profilePhotoFile);
+    setLocalPhotoPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [form.profilePhotoFile]);
+
+  function updateUsername(value) {
+    setForm((current) => ({
+      ...current,
+      username: value,
+      password: editingUser ? current.password : value
+    }));
+  }
+
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <form
@@ -107,6 +140,20 @@ function UserDialog({ canAdmin, editingUser, form, saving, onClose, onSubmit, se
             <X size={18} />
           </button>
         </div>
+        <section className="user-photo-uploader">
+          <div className="user-photo-preview">
+            {previewPhotoUrl ? <img alt="" src={previewPhotoUrl} /> : <UserCircle size={54} />}
+          </div>
+          <div className="user-photo-copy">
+            <strong>Photo de profil</strong>
+            <span>{form.profilePhotoFile ? form.profilePhotoFile.name : "Aucune photo sélectionnée"}</span>
+          </div>
+          <label className="secondary-action compact-action user-photo-action">
+            <Camera size={15} />
+            {previewPhotoUrl ? "Remplacer" : "Ajouter"}
+            <input accept="image/*" disabled={!canAdmin} type="file" onChange={(event) => setForm((current) => ({ ...current, profilePhotoFile: event.target.files?.[0] || null }))} />
+          </label>
+        </section>
         <div className="field-grid">
           <label>
             Nom complet
@@ -114,7 +161,7 @@ function UserDialog({ canAdmin, editingUser, form, saving, onClose, onSubmit, se
           </label>
           <label>
             Username
-            <input required disabled={!canAdmin} value={form.username} onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))} />
+            <input required disabled={!canAdmin} value={form.username} onChange={(event) => updateUsername(event.target.value)} />
           </label>
           <label>
             Poste
@@ -122,7 +169,7 @@ function UserDialog({ canAdmin, editingUser, form, saving, onClose, onSubmit, se
           </label>
           <label>
             Email
-            <input required disabled={!canAdmin} type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
+            <input autoComplete="email" required disabled={!canAdmin} type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
           </label>
           <label>
             Mot de passe
@@ -130,12 +177,12 @@ function UserDialog({ canAdmin, editingUser, form, saving, onClose, onSubmit, se
           </label>
           <label>
             Telephone
-            <input disabled={!canAdmin} value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
+            <input autoComplete="tel" disabled={!canAdmin} inputMode="tel" pattern="\\+?[0-9\\s().-]{8,20}" value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
           </label>
           <label>
-            Role
+            Rôle applicatif
             <select disabled={!canAdmin} value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}>
-              {userRoleOptions.map(([value, label]) => (
+              {displayedRoleOptions.map(({ value, label }) => (
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>

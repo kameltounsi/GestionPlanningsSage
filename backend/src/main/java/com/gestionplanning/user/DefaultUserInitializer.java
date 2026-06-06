@@ -33,7 +33,7 @@ public class DefaultUserInitializer implements CommandLineRunner {
         if (created[0] || user.getPassword() == null || user.getPassword().trim().isEmpty()) {
             user.setPassword(passwordService.encode("fchelbi"));
         }
-        user.setRole(UserRole.ADMIN);
+        user.setRole(UserRole.ADMIN.name());
         user.setEnabled(true);
         userRepository.save(user);
     }

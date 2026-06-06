@@ -66,5 +66,7 @@ export const emptyUserForm = {
   password: "",
   phone: "",
   role: "CHEF_DE_PROJET",
+  profilePhotoUrl: "",
+  profilePhotoFile: null,
   enabled: true
 };

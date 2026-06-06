@@ -26,6 +26,7 @@ import {
   createEcrRequest,
   createProductReference,
   createProject,
+  createRoleReference,
   createUser,
   clearSession,
   deleteActionPlanningRule,
@@ -34,6 +35,7 @@ import {
   deleteEcrRequest,
   deleteProductReference,
   deleteProject,
+  deleteRoleReference,
   deleteUser,
   getActionPlanningRules,
   getActions,
@@ -44,6 +46,7 @@ import {
   getPilots,
   getProductReferences,
   getProjects,
+  getRoleReferences,
   getStoredSession,
   getUsers,
   login,
@@ -56,6 +59,7 @@ import {
   updateEcrStage,
   updateProductReference,
   updateProject,
+  updateRoleReference,
   updateUser,
   updateUserProfile,
   uploadActionEvidence,
@@ -169,9 +173,22 @@ function previewText(value, maxLength = 80) {
   return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
 }
 
+function requestDisplayName(request) {
+  return request?.modificationNumber || request?.client || request?.product || "Modification sans reference";
+}
+
+function fileNameToken(value) {
+  return String(value || "modification")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase() || "modification";
+}
+
 function dossierReviewMetaLine(request) {
   return [
-    `Demande #${request.accessInternalNumber || request.id}`,
+    "Demande ECR",
     request.modificationNumber,
     request.client,
     request.product
@@ -200,11 +217,38 @@ function downloadTextFile(fileName, content) {
 }
 
 function isAdminUser(user) {
-  return user?.role === "ADMIN";
+  return hasApplicationRole(user, "ADMIN", "Admin");
 }
 
 function canValidatePhases(user) {
-  return isAdminUser(user) || user?.role === "VALIDATEUR" || user?.role === "MANAGER";
+  return isAdminUser(user) || hasApplicationRole(user, "VALIDATEUR", "Validateur") || hasApplicationRole(user, "MANAGER", "Manager");
+}
+
+function normalizeRoleToken(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function hasApplicationRole(user, code, label) {
+  const value = normalizeRoleToken(user?.role).replaceAll("_", " ");
+  return value === normalizeRoleToken(code).replaceAll("_", " ") || value === normalizeRoleToken(label);
+}
+
+function canManageActionForUser(user, action) {
+  if (isAdminUser(user)) return true;
+  const responsible = normalizeRoleToken(action?.responsible);
+  if (!responsible) return false;
+  return [user?.jobTitle, user?.fullName, user?.username, user?.email]
+    .filter(Boolean)
+    .some((value) => normalizeRoleToken(value) === responsible);
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(value || "").trim());
+}
+
+function isValidPhone(value) {
+  const text = String(value || "").trim();
+  return !text || /^\+?[0-9\s().-]{8,20}$/.test(text);
 }
 
 function App() {
@@ -217,6 +261,7 @@ function App() {
   const [projects, setProjects] = useState([]);
   const [clientReferences, setClientReferences] = useState([]);
   const [productReferences, setProductReferences] = useState([]);
+  const [roleReferences, setRoleReferences] = useState([]);
   const [planningRules, setPlanningRules] = useState([]);
   const [users, setUsers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
@@ -231,6 +276,7 @@ function App() {
   const [projectForm, setProjectForm] = useState({ name: "", projectTeam: "" });
   const [clientReferenceForm, setClientReferenceForm] = useState({ name: "" });
   const [productReferenceForm, setProductReferenceForm] = useState({ name: "" });
+  const [roleReferenceForm, setRoleReferenceForm] = useState({ name: "" });
   const [planningRuleForm, setPlanningRuleForm] = useState(emptyPlanningRuleForm);
   const [userForm, setUserForm] = useState(emptyUserForm);
   const [profileForm, setProfileForm] = useState(emptyUserForm);
@@ -240,6 +286,7 @@ function App() {
   const [editingEcrRequest, setEditingEcrRequest] = useState(null);
   const [editingClientReference, setEditingClientReference] = useState(null);
   const [editingProductReference, setEditingProductReference] = useState(null);
+  const [editingRoleReference, setEditingRoleReference] = useState(null);
   const [editingUser, setEditingUser] = useState(null);
   const [query, setQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
@@ -286,6 +333,13 @@ function App() {
     () => uniqueSorted(productReferences.map((product) => product.name)),
     [productReferences]
   );
+  const actionRoleOptions = useMemo(
+    () => uniqueSorted([
+      ...userRoleOptions.map(([, label]) => label),
+      ...roleReferences.map((role) => role.name)
+    ]),
+    [roleReferences]
+  );
 
   const dashboardStats = useMemo(() => {
     const active = requests.filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED").length;
@@ -294,13 +348,14 @@ function App() {
   }, [requests, projects]);
 
   function loadInitialData() {
-    return Promise.all([getEcrRequests(), getPilots(), getProjects(), getClientReferences(), getProductReferences(), getActionPlanningRules(), getUsers(), getCurrentUser()])
-      .then(([requestData, pilotData, projectData, clientReferenceData, productReferenceData, planningRuleData, userData, currentUserData]) => {
+    return Promise.all([getEcrRequests(), getPilots(), getProjects(), getClientReferences(), getProductReferences(), getRoleReferences(), getActionPlanningRules(), getUsers(), getCurrentUser()])
+      .then(([requestData, pilotData, projectData, clientReferenceData, productReferenceData, roleReferenceData, planningRuleData, userData, currentUserData]) => {
         setRequests(requestData);
         setPilots(pilotData);
         setProjects(projectData);
         setClientReferences(clientReferenceData);
         setProductReferences(productReferenceData);
+        setRoleReferences(roleReferenceData);
         setPlanningRules(planningRuleData);
         setUsers(userData);
         setCurrentUser(currentUserData);
@@ -551,7 +606,7 @@ function App() {
   }
 
   function handleDeleteEcr(request) {
-    const label = request.modificationNumber || request.client || `#${request.id}`;
+    const label = requestDisplayName(request);
     confirmDelete("Supprimer la modification ?", `La modification ${label} sera supprimee definitivement.`).then((result) => {
       if (!result.isConfirmed) return;
       setSaving(true);
@@ -808,7 +863,7 @@ function App() {
         successToast("Demande envoyee");
         return refreshPhaseValidations(selectedRequest.id);
       })
-      .catch(() => errorAlert("Demande de validation impossible. Verifiez que vous etes sur la phase courante et que toutes ses actions sont terminees."))
+      .catch((exception) => errorAlert(exception?.message || "Demande de validation impossible. Verifiez que vous etes sur la phase courante et que toutes ses actions sont terminees."))
       .finally(() => setSaving(false));
   }
 
@@ -822,7 +877,7 @@ function App() {
         successToast("Phase validee");
         return refreshPhaseValidations(selectedRequest.id);
       })
-      .catch(() => errorAlert("Validation de phase impossible."))
+      .catch((exception) => errorAlert(exception?.message || "Validation de phase impossible."))
       .finally(() => setSaving(false));
   }
 
@@ -864,7 +919,7 @@ function App() {
           successToast("Phase refusee");
           return refreshPhaseValidations(selectedRequest.id);
         })
-        .catch(() => errorAlert("Refus de phase impossible."))
+        .catch((exception) => errorAlert(exception?.message || "Refus de phase impossible."))
         .finally(() => setSaving(false));
     });
   }
@@ -1030,6 +1085,58 @@ function App() {
     });
   }
 
+  function handleSaveRoleReference(event) {
+    event.preventDefault();
+    const name = roleReferenceForm.name.trim();
+    if (!name) return;
+    setSaving(true);
+    setError("");
+    const isEdit = Boolean(editingRoleReference);
+    const request = isEdit
+      ? updateRoleReference(editingRoleReference, { name })
+      : createRoleReference({ name });
+    request
+      .then((savedRole) => {
+        setRoleReferences((items) => [...items.filter((item) => item.id !== savedRole.id), savedRole].sort((a, b) => a.name.localeCompare(b.name)));
+        setRoleReferenceForm({ name: "" });
+        setEditingRoleReference(null);
+        successToast(isEdit ? "Rôle modifié" : "Rôle ajouté");
+      })
+      .catch(() => {
+        const message = "Sauvegarde rôle impossible. Vérifiez le nom.";
+        setError(message);
+        errorAlert(message);
+      })
+      .finally(() => setSaving(false));
+  }
+
+  function startRoleReferenceEdit(role) {
+    setEditingRoleReference(role.id);
+    setRoleReferenceForm({ name: role.name || "" });
+  }
+
+  function handleDeleteRoleReference(id) {
+    const role = roleReferences.find((item) => item.id === id);
+    setError("");
+    confirmDelete("Supprimer le rôle ?", `Le rôle ${role?.name || "sélectionné"} sera supprimé définitivement.`).then((result) => {
+      if (!result.isConfirmed) return;
+      deleteRoleReference(id)
+        .then(() => {
+          setRoleReferences((items) => items.filter((item) => item.id !== id));
+          if (editingRoleReference === id) {
+            setEditingRoleReference(null);
+            setRoleReferenceForm({ name: "" });
+          }
+          successToast("Rôle supprimé");
+        })
+        .catch(() => {
+          const message = "Suppression rôle impossible.";
+          setError(message);
+          errorAlert(message);
+        });
+    });
+  }
+
   function handleSavePlanningRule(event) {
     event.preventDefault();
     if (!planningRuleForm.actionTitle.trim()) return;
@@ -1109,19 +1216,37 @@ function App() {
 
   function handleSaveUser(event) {
     event.preventDefault();
-    setSaving(true);
-    setError("");
+    const { profilePhotoFile, profilePhotoUrl, ...userPayload } = userForm;
     const payload = {
-      ...userForm,
+      ...userPayload,
       fullName: userForm.fullName.trim(),
       username: userForm.username.trim(),
       email: userForm.email.trim(),
       jobTitle: userForm.jobTitle.trim(),
       phone: userForm.phone.trim()
     };
+    if (!isValidEmail(payload.email)) {
+      const message = "Saisissez une adresse email valide, par exemple nom@sagetunisia.com.";
+      setError(message);
+      warningAlert("Email invalide", message);
+      return;
+    }
+    if (!isValidPhone(payload.phone)) {
+      const message = "Saisissez un numéro de téléphone valide: 8 à 20 caractères, chiffres, espaces, +, -, points ou parenthèses.";
+      setError(message);
+      warningAlert("Téléphone invalide", message);
+      return;
+    }
+    setSaving(true);
+    setError("");
     const isEdit = Boolean(editingUser);
     const request = isEdit ? updateUser(editingUser, payload) : createUser(payload);
     request
+      .then((savedUser) => (
+        profilePhotoFile
+          ? uploadUserPhoto(savedUser.id, profilePhotoFile)
+          : savedUser
+      ))
       .then((savedUser) => {
         setUsers((items) => [...items.filter((item) => item.id !== savedUser.id), savedUser].sort((a, b) => String(a.fullName).localeCompare(String(b.fullName))));
         if (currentUser?.id === savedUser.id) {
@@ -1132,8 +1257,11 @@ function App() {
         setEditingUser(null);
         successToast(isEdit ? "Utilisateur modifie" : "Utilisateur ajoute");
       })
-      .catch(() => {
-        const message = "Sauvegarde utilisateur impossible. Verifiez username/email uniques et les champs obligatoires.";
+      .catch((exception) => {
+        const detail = exception?.message || "";
+        const message = detail && !detail.startsWith("API error")
+          ? detail
+          : "Sauvegarde utilisateur impossible. Verifiez username/email uniques, les champs obligatoires et la configuration SMTP.";
         setError(message);
         errorAlert(message);
       })
@@ -1332,6 +1460,7 @@ function App() {
 
         {page === "projects" && (
           <ProjectsPage
+            actionRoleOptions={actionRoleOptions}
             planningRuleForm={planningRuleForm}
             planningRules={planningRules}
             saving={saving}
@@ -1353,10 +1482,13 @@ function App() {
             editingClient={editingClientReference}
             editingProduct={editingProductReference}
             editingProject={editingProject}
+            editingRole={editingRoleReference}
             productForm={productReferenceForm}
             products={productReferences}
             projectForm={projectForm}
             projects={projects}
+            roleForm={roleReferenceForm}
+            roles={roleReferences}
             saving={saving}
             users={users}
             onCancelClientEdit={() => {
@@ -1367,6 +1499,10 @@ function App() {
               setEditingProductReference(null);
               setProductReferenceForm({ name: "" });
             }}
+            onCancelRoleEdit={() => {
+              setEditingRoleReference(null);
+              setRoleReferenceForm({ name: "" });
+            }}
             onCancelProjectEdit={() => {
               setEditingProject(null);
               setProjectForm({ name: "", projectTeam: "" });
@@ -1374,21 +1510,26 @@ function App() {
             onDeleteClient={handleDeleteClientReference}
             onDeleteProduct={handleDeleteProductReference}
             onDeleteProject={handleDeleteProject}
+            onDeleteRole={handleDeleteRoleReference}
             onEditClient={startClientReferenceEdit}
             onEditProduct={startProductReferenceEdit}
             onEditProject={startProjectEdit}
+            onEditRole={startRoleReferenceEdit}
             onSubmitClient={handleSaveClientReference}
             onSubmitProduct={handleSaveProductReference}
             onSubmitProject={handleSaveProject}
+            onSubmitRole={handleSaveRoleReference}
             setClientForm={setClientReferenceForm}
             setProductForm={setProductReferenceForm}
             setProjectForm={setProjectForm}
+            setRoleForm={setRoleReferenceForm}
           />
         )}
 
         {page === "modifications" && (
           <ModificationsPage
             actionForm={actionForm}
+            actionRoleOptions={actionRoleOptions}
             actions={actions}
             checklist={checklist}
             completion={completion}
@@ -1430,6 +1571,7 @@ function App() {
 
         {page === "users" && (
           <UsersPage
+            actionRoleOptions={actionRoleOptions}
             currentUser={currentUser}
             editingUser={editingUser}
             saving={saving}
@@ -1613,7 +1755,8 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
   const availableStages = getStages(ecrForm.newVersion);
   const selectedProject = projects.find((project) => project.name === ecrForm.modificationProject);
   const projectTeamMembers = parseProjectTeam(selectedProject?.projectTeam);
-  const canCreateModification = projects.length > 0 && projectTeamMembers.length > 0 && Boolean(ecrForm.pilot);
+  const projectPilotOptions = projectLeadTeamMembers(selectedProject?.projectTeam, users);
+  const canCreateModification = projects.length > 0 && projectPilotOptions.includes(ecrForm.pilot);
   const displayedClientOptions = includeCurrentOption(clientOptions, ecrForm.client);
   const selectedProducts = parseSelectedProducts(ecrForm.product);
   const displayedProductOptions = includeCurrentOptions(productOptions, selectedProducts);
@@ -1646,10 +1789,6 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
         </label>
         <PhasePreview stages={availableStages} />
         <div className="field-grid">
-          <label>
-            Numéro automatique système
-            <input disabled placeholder="Généré après création" value={ecrForm.accessInternalNumber || ""} onChange={(event) => updateEcrForm("accessInternalNumber", event.target.value)} />
-          </label>
           <label>
             Numéro client externe
             <input value={ecrForm.modificationNumber} onChange={(event) => updateEcrForm("modificationNumber", event.target.value)} />
@@ -1692,9 +1831,9 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
           </fieldset>
           <label>
             Pilote
-            <select required disabled={!ecrForm.modificationProject || projectTeamMembers.length === 0} value={ecrForm.pilot} onChange={(event) => updateEcrForm("pilot", event.target.value)}>
-              <option value="">{ecrForm.modificationProject ? "Sélectionner dans l'équipe projet" : "Sélectionner d'abord un projet"}</option>
-              {projectTeamMembers.map((member) => (
+            <select required disabled={!ecrForm.modificationProject || projectPilotOptions.length === 0} value={ecrForm.pilot} onChange={(event) => updateEcrForm("pilot", event.target.value)}>
+              <option value="">{ecrForm.modificationProject ? "Sélectionner un chef de projet" : "Sélectionner d'abord un projet"}</option>
+              {projectPilotOptions.map((member) => (
                 <option key={member} value={member}>{formatUserWithRole(member, users)}</option>
               ))}
             </select>
@@ -1780,7 +1919,8 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
         </div>
         {projects.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un projet dans le référentiel projets.</p>}
         {ecrForm.modificationProject && projectTeamMembers.length === 0 && <p className="form-hint project-team-warning">Ce projet n'a pas encore d'Équipe projet.</p>}
-        {projectTeamMembers.length > 0 && !ecrForm.pilot && <p className="form-hint project-team-warning">Sélectionnez un pilote dans l'équipe du projet.</p>}
+        {projectTeamMembers.length > 0 && projectPilotOptions.length === 0 && <p className="form-hint project-team-warning">Ajoutez un chef de projet dans l'équipe projet pour choisir le pilote.</p>}
+        {projectPilotOptions.length > 0 && !ecrForm.pilot && <p className="form-hint project-team-warning">Sélectionnez un chef de projet comme pilote.</p>}
         <p className="form-hint">Les actions standard de chaque phase sont générées automatiquement depuis la page Actions.</p>
       </form>
     </section>
@@ -1812,31 +1952,39 @@ function PreferentialsPage({
   editingClient,
   editingProduct,
   editingProject,
+  editingRole,
   productForm,
   products,
   projectForm,
   projects,
+  roleForm,
+  roles,
   saving,
   users,
   onCancelClientEdit,
   onCancelProductEdit,
   onCancelProjectEdit,
+  onCancelRoleEdit,
   onDeleteClient,
   onDeleteProduct,
   onDeleteProject,
+  onDeleteRole,
   onEditClient,
   onEditProduct,
   onEditProject,
+  onEditRole,
   onSubmitClient,
   onSubmitProduct,
   onSubmitProject,
+  onSubmitRole,
   setClientForm,
   setProductForm,
-  setProjectForm
+  setProjectForm,
+  setRoleForm
 }) {
   return (
     <section className="page-content">
-      <PageHeader eyebrow="Référentiel" title="Préférentiels" subtitle="Gérez les projets, clients et produits utilisés dans les modifications." />
+      <PageHeader eyebrow="Référentiel" title="Préférentiels" subtitle="Gérez les projets, clients, produits et rôles d'action utilisés dans les modifications." />
       <ProjectPreferentialPanel
         editingProject={editingProject}
         projectForm={projectForm}
@@ -1880,6 +2028,21 @@ function PreferentialsPage({
           references={products}
           setForm={setProductForm}
         />
+        <PreferentialPanel
+          count={roles.length}
+          editing={editingRole}
+          emptyText="Ajoutez les rôles disponibles uniquement comme pilotes d'action."
+          emptyTitle="Aucun rôle"
+          form={roleForm}
+          saving={saving}
+          title="Rôles d'action"
+          onCancelEdit={onCancelRoleEdit}
+          onDelete={onDeleteRole}
+          onEdit={onEditRole}
+          onSubmit={onSubmitRole}
+          references={roles}
+          setForm={setRoleForm}
+        />
       </div>
     </section>
   );
@@ -1914,7 +2077,6 @@ function PreferentialPanel({ count, editing, emptyText, emptyTitle, form, refere
           <article className="project-table-row" key={reference.id}>
             <div>
               <strong>{reference.name}</strong>
-              <span>ID #{reference.id}</span>
             </div>
             <div className="row-actions">
               <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(reference)} aria-label={`Modifier ${reference.name}`} title="Modifier">
@@ -1985,6 +2147,7 @@ function ProjectPreferentialPanel({ editingProject, projectForm, projects, savin
 }
 
 function ProjectsPage({
+  actionRoleOptions,
   planningRuleForm,
   planningRules,
   saving,
@@ -1998,6 +2161,7 @@ function ProjectsPage({
     <section className="page-content">
       <PageHeader eyebrow="Administration" title="Actions standard" subtitle="Gérez les actions standard par phase et leurs durées de planning." />
       <PlanningRulesAdmin
+        actionRoleOptions={actionRoleOptions}
         form={planningRuleForm}
         rules={planningRules}
         saving={saving}
@@ -2022,7 +2186,7 @@ function ProjectTeamSelector({ projectTeam, users, onChange }) {
   );
   const filteredUsers = sortedUsers.filter((user) => {
     if (!normalizedQuery) return true;
-    return [user.fullName, user.username, user.email, userRoleLabel(user.role)]
+    return [user.fullName, user.username, user.email, user.jobTitle, userRoleLabel(user.role)]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(normalizedQuery));
   });
@@ -2062,7 +2226,7 @@ function ProjectTeamSelector({ projectTeam, users, onChange }) {
                 />
                 <span>
                   <strong>{userName}</strong>
-                  <small>{userRoleLabel(user.role)}</small>
+                  <small>{userDisplayRole(user)}</small>
                 </span>
               </label>
             );
@@ -2224,11 +2388,22 @@ function formatProjectTeamWithRoles(projectTeam, users) {
 
 function formatUserWithRole(userName, users) {
   const user = findUserByTeamName(userName, users);
-  return user ? `${userName} (${userRoleLabel(user.role)})` : userName;
+  return user ? `${userName} (${userDisplayRole(user)})` : userName;
+}
+
+function userDisplayRole(user) {
+  return user?.jobTitle || userRoleLabel(user?.role);
 }
 
 function findUserByTeamName(userName, users) {
   return users.find((user) => [user.fullName, user.username, user.email].filter(Boolean).includes(userName));
+}
+
+function projectLeadTeamMembers(projectTeam, users) {
+  return parseProjectTeam(projectTeam).filter((member) => {
+    const user = findUserByTeamName(member, users);
+    return isProjectLead(user);
+  });
 }
 
 function selectedProjectLeadNames(users) {
@@ -2244,7 +2419,7 @@ function countSelectedProjectLeads(projectTeam, users) {
 }
 
 function isProjectLead(user) {
-  return user?.role === "CHEF_DE_PROJET";
+  return hasApplicationRole(user, "CHEF_DE_PROJET", "Chef de projet");
 }
 
 function ModificationsPage(props) {
@@ -2253,6 +2428,7 @@ function ModificationsPage(props) {
   const [dossierDialogOpen, setDossierDialogOpen] = useState(false);
   const {
     actionForm,
+    actionRoleOptions,
     actions,
     checklist,
     completion,
@@ -2338,8 +2514,8 @@ function ModificationsPage(props) {
             <>
               <header className="details-header">
                 <div>
-                  <p className="eyebrow">Demande #{selectedRequest.accessInternalNumber || selectedRequest.id}</p>
-                  <h2>{selectedRequest.modificationNumber || selectedRequest.client}</h2>
+                  <p className="eyebrow">Demande ECR</p>
+                  <h2>{requestDisplayName(selectedRequest)}</h2>
                   <p>{selectedRequest.modificationReason || "Aucune description renseignée pour le moment."}</p>
                   {selectedRequest.modificationDetail && <p>{selectedRequest.modificationDetail}</p>}
                 </div>
@@ -2430,7 +2606,9 @@ function ModificationsPage(props) {
                 />
                 <ActionsPanel
                   actionForm={actionForm}
+                  actionRoleOptions={actionRoleOptions}
                   actions={actions}
+                  currentUser={currentUser}
                   doneCount={doneCount}
                   handleCreateAction={handleCreateAction}
                   handleDeleteAction={handleDeleteAction}
@@ -2529,7 +2707,7 @@ function ModificationsPage(props) {
 
 function DossierReviewDialog({ request, saving, onClose, onSubmit }) {
   const [value, setValue] = useState(request.dossierReview || "");
-  const fileBaseName = `revue-dossier-${request.accessInternalNumber || request.id}`;
+  const fileBaseName = `revue-dossier-${fileNameToken(requestDisplayName(request))}`;
 
   function submit(event) {
     event.preventDefault();
@@ -2541,7 +2719,7 @@ function DossierReviewDialog({ request, saving, onClose, onSubmit }) {
   }
 
   function exportPdf() {
-    const title = `Revue dossier - ${request.modificationNumber || `Demande #${request.id}`}`;
+    const title = `Revue dossier - ${requestDisplayName(request)}`;
     const win = window.open("", "_blank");
     if (!win) return;
     win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
@@ -2638,7 +2816,7 @@ function PhaseValidationPanel({ canValidate, isCurrentStage, latestValidation, s
   );
 }
 
-function ActionsPanel({ actionForm, actions, canAdmin, doneCount, handleCreateAction, handleDeleteAction, handleToggleAction, handleUpdateAction, handleUploadEvidence, isCriticalAction, lateActions, requiresEvidence, saving, selectedStage, stageNewProject, updateActionForm }) {
+function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleDeleteAction, handleToggleAction, handleUpdateAction, handleUploadEvidence, isCriticalAction, lateActions, requiresEvidence, saving, selectedStage, stageNewProject, updateActionForm }) {
   const [expanded, setExpanded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const stageTitle = stageLabel(selectedStage, stageNewProject);
@@ -2666,7 +2844,9 @@ function ActionsPanel({ actionForm, actions, canAdmin, doneCount, handleCreateAc
         </div>
       </div>
       <ActionList
+        actionRoleOptions={actionRoleOptions}
         actions={actions}
+        currentUser={currentUser}
         handleDeleteAction={handleDeleteAction}
         handleToggleAction={handleToggleAction}
         handleUpdateAction={handleUpdateAction}
@@ -2696,7 +2876,9 @@ function ActionsPanel({ actionForm, actions, canAdmin, doneCount, handleCreateAc
               </button>
             </header>
             <ActionList
+              actionRoleOptions={actionRoleOptions}
               actions={actions}
+              currentUser={currentUser}
               expanded
               handleDeleteAction={handleDeleteAction}
               handleToggleAction={handleToggleAction}
@@ -2713,6 +2895,7 @@ function ActionsPanel({ actionForm, actions, canAdmin, doneCount, handleCreateAc
       {createOpen && (
         <ActionCreateDialog
           actionForm={actionForm}
+          actionRoleOptions={actionRoleOptions}
           isCriticalAction={isCriticalAction}
           saving={saving}
           onClose={() => setCreateOpen(false)}
@@ -2724,7 +2907,7 @@ function ActionsPanel({ actionForm, actions, canAdmin, doneCount, handleCreateAc
   );
 }
 
-function ActionList({ actions, canAdmin, expanded = false, handleDeleteAction, handleToggleAction, handleUpdateAction, handleUploadEvidence, isCriticalAction, requiresEvidence, saving }) {
+function ActionList({ actionRoleOptions, actions, canAdmin, currentUser, expanded = false, handleDeleteAction, handleToggleAction, handleUpdateAction, handleUploadEvidence, isCriticalAction, requiresEvidence, saving }) {
   const [editingAction, setEditingAction] = useState(null);
 
   return (
@@ -2736,7 +2919,7 @@ function ActionList({ actions, canAdmin, expanded = false, handleDeleteAction, h
           actions.map((action) => (
             <article className={action.late ? "action-row late" : "action-row"} key={action.id}>
               <label className="action-check" title={isActionDone(action) ? "Marquer non terminee" : "Marquer terminee"}>
-                <input checked={isActionDone(action)} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
+                <input checked={isActionDone(action)} disabled={saving || !canManageActionForUser(currentUser, action)} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
               </label>
               <div className="action-main">
                 <h3>{action.title}</h3>
@@ -2767,9 +2950,9 @@ function ActionList({ actions, canAdmin, expanded = false, handleDeleteAction, h
                 <span><em>Status</em><small className={`status ${statusClass(action.status)}`}>{readableStatus(action.status)}</small></span>
               </div>
               <div className="action-row-tools">
-                <label className="row-upload" title="Ajouter evidence">
+                <label className={canManageActionForUser(currentUser, action) ? "row-upload" : "row-upload disabled"} title="Ajouter evidence">
                   <Upload size={15} />
-                  <input multiple type="file" onChange={(event) => handleUploadEvidence(action, event.target.files)} />
+                  <input disabled={saving || !canManageActionForUser(currentUser, action)} multiple type="file" onChange={(event) => handleUploadEvidence(action, event.target.files)} />
                 </label>
                 <button className="ghost-icon" disabled={saving || !canAdmin} type="button" onClick={() => setEditingAction(action)} title="Ouvrir la revue dossier" aria-label="Ouvrir la revue dossier">
                   <FileText size={15} />
@@ -2788,6 +2971,7 @@ function ActionList({ actions, canAdmin, expanded = false, handleDeleteAction, h
       {editingAction && (
         <ActionEditDialog
           action={editingAction}
+          actionRoleOptions={actionRoleOptions}
           isCriticalAction={isCriticalAction}
           saving={saving}
           onClose={() => setEditingAction(null)}
@@ -2822,7 +3006,19 @@ function actionToForm(action) {
   };
 }
 
-function ActionCreateDialog({ actionForm, isCriticalAction, saving, onClose, onSubmit, updateActionForm }) {
+function ActionRoleSelect({ options = [], value, onChange }) {
+  const availableOptions = value && !options.includes(value) ? [value, ...options] : options;
+  return (
+    <select value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value="">Selectionner un role</option>
+      {availableOptions.map((role) => (
+        <option key={role} value={role}>{role}</option>
+      ))}
+    </select>
+  );
+}
+
+function ActionCreateDialog({ actionForm, actionRoleOptions, isCriticalAction, saving, onClose, onSubmit, updateActionForm }) {
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <form
@@ -2845,12 +3041,7 @@ function ActionCreateDialog({ actionForm, isCriticalAction, saving, onClose, onS
         <div className="action-edit-grid">
           <input value={actionForm.topicRisk} onChange={(event) => updateActionForm("topicRisk", event.target.value)} placeholder="Topic_Risk" />
           <input className="action-title-input" required value={actionForm.title} onChange={(event) => updateActionForm("title", event.target.value)} placeholder="Point_verif" />
-          <select value={actionForm.responsible} onChange={(event) => updateActionForm("responsible", event.target.value)}>
-            <option value="">Selectionner un role</option>
-            {userRoleOptions.map(([value, label]) => (
-              <option key={value} value={label}>{label}</option>
-            ))}
-          </select>
+          <ActionRoleSelect options={actionRoleOptions} value={actionForm.responsible} onChange={(value) => updateActionForm("responsible", value)} />
           <select value={actionForm.criticality} onChange={(event) => updateActionForm("criticality", event.target.value)}>
             <option value="1-critique">1-critique</option>
             <option value="2-moyenne">2-moyenne</option>
@@ -2896,7 +3087,7 @@ function ActionCreateDialog({ actionForm, isCriticalAction, saving, onClose, onS
   );
 }
 
-function ActionEditDialog({ action, isCriticalAction, saving, onClose, onSubmit }) {
+function ActionEditDialog({ action, actionRoleOptions, isCriticalAction, saving, onClose, onSubmit }) {
   const [form, setForm] = useState(() => actionToForm(action));
 
   function updateForm(field, value) {
@@ -2931,12 +3122,7 @@ function ActionEditDialog({ action, isCriticalAction, saving, onClose, onSubmit 
         <div className="action-edit-grid">
           <input value={form.topicRisk} onChange={(event) => updateForm("topicRisk", event.target.value)} placeholder="Topic_Risk" />
           <input className="action-title-input" required value={form.title} onChange={(event) => updateForm("title", event.target.value)} placeholder="Point_verif" />
-          <select value={form.responsible} onChange={(event) => updateForm("responsible", event.target.value)}>
-            <option value="">Selectionner un role</option>
-            {userRoleOptions.map(([value, label]) => (
-              <option key={value} value={label}>{label}</option>
-            ))}
-          </select>
+          <ActionRoleSelect options={actionRoleOptions} value={form.responsible} onChange={(value) => updateForm("responsible", value)} />
           <select value={form.criticality} onChange={(event) => updateForm("criticality", event.target.value)}>
             <option value="1-critique">1-critique</option>
             <option value="2-moyenne">2-moyenne</option>

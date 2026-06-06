@@ -13,6 +13,8 @@ export function userToForm(user) {
     password: "",
     phone: user?.phone || "",
     role: user?.role || "CHEF_DE_PROJET",
+    profilePhotoUrl: user?.profilePhotoUrl || "",
+    profilePhotoFile: null,
     enabled: user?.enabled ?? true
   };
 }

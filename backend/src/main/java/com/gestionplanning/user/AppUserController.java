@@ -4,6 +4,7 @@ import com.gestionplanning.auth.PasswordService;
 import com.gestionplanning.storage.CloudinaryStorageService;
 import com.gestionplanning.storage.StoredAsset;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -33,9 +34,10 @@ public class AppUserController {
     }
 
     @PostMapping
+    @Transactional
     public ResponseEntity<AppUser> create(@Valid @RequestBody AppUser user) {
         normalize(user);
-        if (user.getUsername() == null || user.getUsername().trim().isEmpty() || userRepository.existsByUsername(user.getUsername()) || userRepository.existsByEmail(user.getEmail())) {
+        if (user.getUsername() == null || user.getUsername().trim().isEmpty() || invalidPhone(user.getPhone()) || userRepository.existsByUsername(user.getUsername()) || userRepository.existsByEmail(user.getEmail())) {
             return ResponseEntity.badRequest().build();
         }
         String initialPassword = user.getPassword();
@@ -53,6 +55,7 @@ public class AppUserController {
                     if (updatedUser.getFullName() == null || updatedUser.getFullName().trim().isEmpty()
                             || updatedUser.getUsername() == null || updatedUser.getUsername().trim().isEmpty()
                             || updatedUser.getEmail() == null || updatedUser.getEmail().trim().isEmpty()
+                            || invalidPhone(updatedUser.getPhone())
                             || hasDuplicateUsername(id, updatedUser.getUsername()) || hasDuplicateEmail(id, updatedUser.getEmail())) {
                         return ResponseEntity.badRequest().<AppUser>build();
                     }
@@ -82,7 +85,7 @@ public class AppUserController {
                 .map(user -> {
                     updatedUser.setUsername(updatedUser.getUsername() == null ? user.getUsername() : normalizedText(updatedUser.getUsername()));
                     updatedUser.setEmail(updatedUser.getEmail() == null ? user.getEmail() : normalizedText(updatedUser.getEmail()));
-                    if (hasDuplicateUsername(id, updatedUser.getUsername()) || hasDuplicateEmail(id, updatedUser.getEmail())) {
+                    if (invalidPhone(updatedUser.getPhone()) || hasDuplicateUsername(id, updatedUser.getUsername()) || hasDuplicateEmail(id, updatedUser.getEmail())) {
                         return ResponseEntity.badRequest().<AppUser>build();
                     }
                     user.setFullName(requiredOrExisting(updatedUser.getFullName(), user.getFullName()));
@@ -142,6 +145,7 @@ public class AppUserController {
     private void normalize(AppUser user) {
         user.setUsername(normalizedText(user.getUsername()));
         user.setEmail(normalizedText(user.getEmail()));
+        user.setRole(user.getRole() == null || user.getRole().trim().isEmpty() ? UserRole.CHEF_DE_PROJET.name() : user.getRole().trim());
     }
 
     private String normalizedText(String value) {
@@ -158,6 +162,10 @@ public class AppUserController {
 
     private boolean hasDuplicateEmail(Long id, String email) {
         return email != null && userRepository.findByEmail(email).map(user -> !user.getId().equals(id)).orElse(false);
+    }
+
+    private boolean invalidPhone(String phone) {
+        return phone != null && !phone.trim().isEmpty() && !phone.trim().matches("\\+?[0-9\\s().-]{8,20}");
     }
 
     public static class PasswordChangeRequest {

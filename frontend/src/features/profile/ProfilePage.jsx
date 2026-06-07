@@ -23,8 +23,7 @@ export function ProfilePage({ currentUser, passwordForm, profileForm, saving, on
             {currentUser.profilePhotoUrl ? <img alt="" src={currentUser.profilePhotoUrl} /> : <UserCircle size={72} />}
           </div>
           <h2>{currentUser.fullName}</h2>
-          <span>{currentUser.jobTitle || "Poste non renseigné"}</span>
-          <strong className="stage-pill teal">{userRoleLabel(currentUser.role)}</strong>
+          <span>{userRoleLabel(currentUser.role)}</span>
           <label className="secondary-action compact-action photo-upload">
             <Camera size={15} />
             Photo
@@ -93,3 +92,4 @@ export function ProfilePage({ currentUser, passwordForm, profileForm, saving, on
     </section>
   );
 }
+

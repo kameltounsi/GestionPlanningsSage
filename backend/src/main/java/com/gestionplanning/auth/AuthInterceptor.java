@@ -66,6 +66,9 @@ public class AuthInterceptor implements HandlerInterceptor {
         if (HttpMethod.GET.matches(method) && path.matches("/api/action-assets/\\d+/download")) {
             return true;
         }
+        if (HttpMethod.GET.matches(method) && path.matches("/api/ecr-requests/\\d+/files/(before|after)/download")) {
+            return true;
+        }
         return HttpMethod.GET.matches(method) && path.matches("/api/actions/\\d+/evidence");
     }
 

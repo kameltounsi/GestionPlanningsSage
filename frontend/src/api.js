@@ -109,6 +109,10 @@ export function uploadEcrRequestImage(requestId, type, file) {
   return multipartRequest(`/ecr-requests/${requestId}/images/${type}`, formData);
 }
 
+export function ecrRequestFileDownloadUrl(requestId, type) {
+  return `${API_BASE}/ecr-requests/${requestId}/files/${type}/download`;
+}
+
 export function deleteEcrRequest(requestId) {
   return request(`/ecr-requests/${requestId}`, {
     method: "DELETE"

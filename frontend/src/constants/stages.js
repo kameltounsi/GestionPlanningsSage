@@ -21,3 +21,19 @@ export const stageColors = [
   "slate",
   "red"
 ];
+
+export const stageColorByKey = {
+  FEASIBILITY_VALIDATION: "teal",
+  PROJECT_MANAGEMENT: "blue",
+  PRODUCT_DEVELOPMENT: "indigo",
+  PROCESS_DEVELOPMENT: "violet",
+  CUSTOMER_VALIDATION: "violet",
+  PPAP_SOP_PREPARATION: "amber",
+  LAUNCH: "green",
+  CLOSED: "green",
+  CANCELLED: "red"
+};
+
+export const newProjectStageColorByKey = {
+  ...stageColorByKey
+};

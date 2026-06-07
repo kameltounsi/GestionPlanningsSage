@@ -1,4 +1,4 @@
-import { stageColors, stageDefinitions } from "../constants/stages";
+import { newProjectStageColorByKey, stageColorByKey, stageDefinitions } from "../constants/stages";
 
 export function getStages(newProject) {
   return stageDefinitions
@@ -24,7 +24,7 @@ export function stageLabel(stage, newProject = false) {
   return newProject ? definition.newProjectLabel : definition.modificationLabel;
 }
 
-export function stageColorClass(stage) {
-  const index = stageDefinitions.findIndex((definition) => definition.key === stage);
-  return stageColors[index >= 0 ? index % stageColors.length : 0];
+export function stageColorClass(stage, newProject = false) {
+  const colors = newProject ? newProjectStageColorByKey : stageColorByKey;
+  return colors[stage] || "teal";
 }

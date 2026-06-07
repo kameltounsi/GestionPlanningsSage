@@ -5,6 +5,8 @@ import {
   CalendarDays,
   CheckCircle2,
   CircleAlert,
+  ChevronDown,
+  ChevronUp,
   ClipboardList,
   FileText,
   FolderKanban,
@@ -36,6 +38,7 @@ import {
   deleteProject,
   deleteRoleReference,
   deleteUser,
+  ecrRequestFileDownloadUrl,
   getActionPlanningRules,
   getActions,
   getChecklist,
@@ -77,7 +80,6 @@ import { PageHeader } from "./components/common/PageHeader";
 import { StatCard } from "./components/common/StatCard";
 import { emptyActionForm, emptyEcrForm, emptyPlanningRuleForm, emptyUserForm } from "./constants/forms";
 import { userRoleOptions } from "./constants/roles";
-import { stageColors } from "./constants/stages";
 import { PlanningRulesAdmin } from "./features/actionRules/PlanningRulesAdmin";
 import { LoginPage } from "./features/auth/LoginPage";
 import { ProfilePage } from "./features/profile/ProfilePage";
@@ -247,6 +249,12 @@ function isRequestPilot(user, request) {
   return [user?.fullName, user?.username, user?.email]
     .filter(Boolean)
     .some((value) => normalizeRoleToken(value) === pilot);
+}
+
+function isImageAsset(contentType, url) {
+  const type = String(contentType || "").toLowerCase();
+  if (type) return type.startsWith("image/");
+  return /\.(apng|avif|bmp|gif|jpe?g|png|svg|webp)(\?|#|$)/i.test(String(url || ""));
 }
 
 function isValidEmail(value) {
@@ -1512,6 +1520,7 @@ function App() {
             handleRejectPhase={handleRejectPhase}
             handleRequestPhaseValidation={handleRequestPhaseValidation}
             isCriticalAction={isCriticalAction}
+            onEditRequest={openEditEcr}
             onUpdateDossierReview={handleUpdateDossierReview}
             requiresEvidence={requiresEvidence}
             updateActionForm={updateActionForm}
@@ -1619,7 +1628,7 @@ function DashboardPage({ requests, saving, stats, onCreateRequest, onDeleteReque
                   <span>{request.modificationProject || "Projet non renseigné"}</span>
                 </button>
                 <div className="compact-row-actions">
-                  <small className={`stage-pill ${stageColorClass(request.currentStage)}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</small>
+                  <small className={`stage-pill ${stageColorClass(request.currentStage, Boolean(request.newVersion))}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</small>
                 </div>
               </article>
             ))
@@ -1702,6 +1711,10 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
   const titleId = mode === "edit" ? "edit-modification-title" : "create-modification-title";
   const currentBeforePhoto = existingRequest?.beforePhotoUrl;
   const currentAfterPhoto = existingRequest?.afterPhotoUrl;
+  const currentBeforeDownloadUrl = existingRequest?.id ? ecrRequestFileDownloadUrl(existingRequest.id, "before") : currentBeforePhoto;
+  const currentAfterDownloadUrl = existingRequest?.id ? ecrRequestFileDownloadUrl(existingRequest.id, "after") : currentAfterPhoto;
+  const currentBeforeIsImage = isImageAsset(existingRequest?.beforePhotoContentType, currentBeforePhoto);
+  const currentAfterIsImage = isImageAsset(existingRequest?.afterPhotoContentType, currentAfterPhoto);
 
   return (
     <section className="creation-panel">
@@ -1795,23 +1808,23 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
           </label>
           <label>
             Photo état
-            <input accept="image/*" type="file" onChange={(event) => updateEcrForm("beforePhotoFile", event.target.files?.[0] || null)} />
-            <span className="form-hint">{ecrForm.beforePhotoFile?.name || (currentBeforePhoto ? "Image actuelle conservée si aucun fichier n'est choisi" : "Image avant modification")}</span>
+            <input type="file" onChange={(event) => updateEcrForm("beforePhotoFile", event.target.files?.[0] || null)} />
+            <span className="form-hint">{ecrForm.beforePhotoFile?.name || (currentBeforePhoto ? "Document actuel conservé si aucun fichier n'est choisi" : "Document avant modification")}</span>
             {currentBeforePhoto && (
-              <a className="form-image-preview" href={currentBeforePhoto} target="_blank" rel="noreferrer">
-                <img alt="Photo état actuelle" src={currentBeforePhoto} />
-                Voir l'image actuelle
+              <a className="form-image-preview" href={currentBeforeDownloadUrl} target="_blank" rel="noreferrer">
+                {currentBeforeIsImage ? <img alt="Photo état actuelle" src={currentBeforeDownloadUrl} /> : <FileText size={28} />}
+                Voir le fichier actuel
               </a>
             )}
           </label>
           <label>
             Photo devient
-            <input accept="image/*" type="file" onChange={(event) => updateEcrForm("afterPhotoFile", event.target.files?.[0] || null)} />
-            <span className="form-hint">{ecrForm.afterPhotoFile?.name || (currentAfterPhoto ? "Image actuelle conservée si aucun fichier n'est choisi" : "Image après modification")}</span>
+            <input type="file" onChange={(event) => updateEcrForm("afterPhotoFile", event.target.files?.[0] || null)} />
+            <span className="form-hint">{ecrForm.afterPhotoFile?.name || (currentAfterPhoto ? "Document actuel conservé si aucun fichier n'est choisi" : "Document après modification")}</span>
             {currentAfterPhoto && (
-              <a className="form-image-preview" href={currentAfterPhoto} target="_blank" rel="noreferrer">
-                <img alt="Photo devient actuelle" src={currentAfterPhoto} />
-                Voir l'image actuelle
+              <a className="form-image-preview" href={currentAfterDownloadUrl} target="_blank" rel="noreferrer">
+                {currentAfterIsImage ? <img alt="Photo devient actuelle" src={currentAfterDownloadUrl} /> : <FileText size={28} />}
+                Voir le fichier actuel
               </a>
             )}
           </label>
@@ -1875,7 +1888,7 @@ function PhasePreview({ stages }) {
       </div>
       <div className="phase-chip-grid">
         {stages.map(([key, label], index) => (
-          <span className={`phase-chip ${stageColors[index % stageColors.length]}`} key={key}>
+          <span className={`phase-chip ${stageColorClass(key, ecrForm.newVersion)}`} key={key}>
             <strong>{index + 1}</strong>
             {label}
           </span>
@@ -2331,7 +2344,7 @@ function formatUserWithRole(userName, users) {
 }
 
 function userDisplayRole(user) {
-  return user?.jobTitle || userRoleLabel(user?.role);
+  return userRoleLabel(user?.role);
 }
 
 function findUserByTeamName(userName, users) {
@@ -2361,10 +2374,34 @@ function isProjectLead(user) {
   return hasApplicationRole(user, "CHEF_DE_PROJET", "Chef de projet");
 }
 
+function RequestDocumentCard({ contentType, onPreview, sourceUrl, title, url }) {
+  const isImage = isImageAsset(contentType, sourceUrl || url);
+  if (isImage) {
+    return (
+      <button
+        type="button"
+        onClick={() => onPreview({ title, url })}
+        title={`Agrandir ${title.toLowerCase()}`}
+      >
+        <span>{title}</span>
+        <img alt={title} src={url} />
+      </button>
+    );
+  }
+  return (
+    <a className="request-document-card" href={url} target="_blank" rel="noreferrer" title={`Ouvrir ${title.toLowerCase()}`}>
+      <span>{title}</span>
+      <FileText size={34} />
+      <strong>Voir le document</strong>
+    </a>
+  );
+}
+
 function ModificationsPage(props) {
   const [listOpen, setListOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const [dossierDialogOpen, setDossierDialogOpen] = useState(false);
+  const [detailsCollapsed, setDetailsCollapsed] = useState(false);
   const {
     actionForm,
     actionRoleOptions,
@@ -2387,6 +2424,7 @@ function ModificationsPage(props) {
     projectFilter,
     projectOptions,
     query,
+    onEditRequest,
     onUpdateDossierReview,
     saving,
     selectedId,
@@ -2413,6 +2451,7 @@ function ModificationsPage(props) {
     setShowCreateForm(false);
     setSelectedId(request.id);
     setSelectedStage(safeStage(request.currentStage, Boolean(request.newVersion)));
+    setDetailsCollapsed(false);
     setListOpen(false);
   }
 
@@ -2448,6 +2487,36 @@ function ModificationsPage(props) {
         <section className="detail-panel">
           {selectedRequest ? (
             <>
+              <div className="details-toggle-row">
+                {detailsCollapsed && (
+                  <div className="details-collapsed-summary">
+                    <strong>{requestDisplayName(selectedRequest)}</strong>
+                    <span>Projet: {selectedRequest.modificationProject || "-"}</span>
+                    <span>Client: {selectedRequest.client || "-"}</span>
+                    <span>Pilote: {selectedRequest.pilot || "-"}</span>
+                  </div>
+                )}
+                <button
+                  className="ghost-icon details-edit-button"
+                  disabled={!canAdmin || saving}
+                  type="button"
+                  onClick={() => onEditRequest(selectedRequest)}
+                  title="Modifier la modification"
+                  aria-label="Modifier la modification"
+                >
+                  <Pencil size={18} />
+                </button>
+                <button
+                  className="ghost-icon details-toggle-button"
+                  type="button"
+                  onClick={() => setDetailsCollapsed((value) => !value)}
+                  title={detailsCollapsed ? "Afficher les details" : "Masquer les details"}
+                  aria-label={detailsCollapsed ? "Afficher les details" : "Masquer les details"}
+                >
+                  {detailsCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+                </button>
+              </div>
+              {!detailsCollapsed && (
               <header className="details-header">
                 <div>
                   <p className="eyebrow">Demande ECR</p>
@@ -2456,10 +2525,10 @@ function ModificationsPage(props) {
                   {selectedRequest.modificationDetail && <p>{selectedRequest.modificationDetail}</p>}
                 </div>
                 <div className="meta-grid">
-                  <div><ClipboardList size={16} /><span>Projet</span><strong>{selectedRequest.modificationProject || "À définir"}</strong></div>
+                  <div><ClipboardList size={16} /><span>Projet</span><strong>{selectedRequest.modificationProject || "ì définir"}</strong></div>
                   <div><ClipboardList size={16} /><span>Client</span><strong>{selectedRequest.client || "-"}</strong></div>
                   <div><ClipboardList size={16} /><span>Produit</span><strong>{selectedRequest.product || "-"}</strong></div>
-                  <div><Gauge size={16} /><span>Pilote</span><strong>{selectedRequest.pilot || "À définir"}</strong></div>
+                  <div><Gauge size={16} /><span>Pilote</span><strong>{selectedRequest.pilot || "ì définir"}</strong></div>
                   <div><CalendarDays size={16} /><span>Réception</span><strong>{selectedRequest.receptionDate || "-"}</strong></div>
                   <div><CalendarDays size={16} /><span>SOP</span><strong>{selectedRequest.sopDate || "-"}</strong></div>
                   <div><ClipboardList size={16} /><span>Mixabilité</span><strong>{mixabilityLabel(selectedRequest.mixability)}</strong></div>
@@ -2469,35 +2538,34 @@ function ModificationsPage(props) {
                   <FileText size={24} />
                   <span>Revue dossier</span>
                 </button>
-                {(selectedRequest.beforePhotoUrl || selectedRequest.afterPhotoUrl || selectedRequest) && (
+                {(selectedRequest.beforePhotoUrl || selectedRequest.afterPhotoUrl) && (
                   <div className="request-image-grid">
                     {selectedRequest.beforePhotoUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setPreviewImage({ title: "Photo état", url: selectedRequest.beforePhotoUrl })}
-                        title="Agrandir la photo état"
-                      >
-                        <span>Photo état</span>
-                        <img alt="Photo état" src={selectedRequest.beforePhotoUrl} />
-                      </button>
+                      <RequestDocumentCard
+                        contentType={selectedRequest.beforePhotoContentType}
+                        onPreview={setPreviewImage}
+                        sourceUrl={selectedRequest.beforePhotoUrl}
+                        title="Photo état"
+                        url={ecrRequestFileDownloadUrl(selectedRequest.id, "before")}
+                      />
                     )}
                     {selectedRequest.afterPhotoUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setPreviewImage({ title: "Photo devient", url: selectedRequest.afterPhotoUrl })}
-                        title="Agrandir la photo devient"
-                      >
-                        <span>Photo devient</span>
-                        <img alt="Photo devient" src={selectedRequest.afterPhotoUrl} />
-                      </button>
+                      <RequestDocumentCard
+                        contentType={selectedRequest.afterPhotoContentType}
+                        onPreview={setPreviewImage}
+                        sourceUrl={selectedRequest.afterPhotoUrl}
+                        title="Photo devient"
+                        url={ecrRequestFileDownloadUrl(selectedRequest.id, "after")}
+                      />
                     )}
                   </div>
                 )}
               </header>
+              )}
               <section className="request-workspace">
                 <nav className="stage-tabs">
                   {selectedStages.map(([key, label]) => (
-                    <button key={key} className={`tab ${stageColorClass(key)}${selectedStage === key ? " active" : ""}`} onClick={() => (canAdmin ? handleStageChange(key) : setSelectedStage(key))}>
+                    <button key={key} className={`tab ${stageColorClass(key, Boolean(selectedRequest.newVersion))}${selectedStage === key ? " active" : ""}`} onClick={() => (canAdmin ? handleStageChange(key) : setSelectedStage(key))}>
                       {label}
                     </button>
                   ))}
@@ -2574,7 +2642,7 @@ function ModificationsPage(props) {
                 >
                   <span className="request-title">{request.modificationNumber || request.client}</span>
                   <span>{request.modificationProject || request.product || "Projet non renseigné"}</span>
-                  <strong className={`stage-pill ${stageColorClass(request.currentStage)}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</strong>
+                  <strong className={`stage-pill ${stageColorClass(request.currentStage, Boolean(request.newVersion))}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</strong>
                 </button>
               ))}
             </div>
@@ -2837,7 +2905,7 @@ function ActionList({ actions, currentUser, expanded = false, handleToggleAction
                 <p>{action.topicRisk || "-"} / {action.expectedEvidence || "élément preuve non renseigné"}</p>
               </div>
               <div className="action-meta">
-                <span><em>Pilote</em><strong>{action.responsible || "À définir"}</strong></span>
+                <span><em>Pilote</em><strong>{action.responsible || "ì définir"}</strong></span>
                 <span><em>Criticite</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>
                 <span><em>Debut</em><strong>{action.startDate || "-"}</strong></span>
                 <span><em>Fin</em><strong>{action.endDate || "-"}</strong></span>
@@ -2969,3 +3037,4 @@ function ChecklistPanel({ checklist }) {
 }
 
 export default App;
+

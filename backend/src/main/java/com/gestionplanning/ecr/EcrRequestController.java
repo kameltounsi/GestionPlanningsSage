@@ -9,9 +9,11 @@ import com.gestionplanning.auth.AccessControlService;
 import com.gestionplanning.document.EcrDocument;
 import com.gestionplanning.document.EcrDocumentRepository;
 import com.gestionplanning.penalty.PenaltyRepository;
+import com.gestionplanning.storage.CloudinaryStorageService.DownloadedAsset;
 import com.gestionplanning.storage.CloudinaryStorageService;
 import com.gestionplanning.storage.StoredAsset;
 import com.gestionplanning.user.AppUser;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
 import org.springframework.transaction.annotation.Transactional;
@@ -135,7 +137,7 @@ public class EcrRequestController {
 
     @PostMapping(value = "/{id}/images/{type}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<EcrRequest> uploadImage(@PathVariable Long id, @PathVariable String type, @RequestParam("file") MultipartFile file) {
-        if (file.isEmpty() || file.getContentType() == null || !file.getContentType().startsWith("image/")) {
+        if (file.isEmpty() || file.getContentType() == null) {
             return ResponseEntity.badRequest().build();
         }
         return requestRepository.findById(id)
@@ -164,6 +166,23 @@ public class EcrRequestController {
                     return ResponseEntity.ok(requestRepository.save(request));
                 })
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/{id}/files/{type}/download")
+    public ResponseEntity<?> downloadRequestFile(@PathVariable Long id, @PathVariable String type) {
+        return requestRepository.findById(id)
+                .<ResponseEntity<?>>map(request -> {
+                    RequestFile file = requestFile(request, type);
+                    if (file == null || file.url() == null || file.url().trim().isEmpty()) {
+                        return ResponseEntity.notFound().build();
+                    }
+                    DownloadedAsset asset = storageService.download(file.publicId(), file.resourceType(), file.url(), file.contentType());
+                    return ResponseEntity.ok()
+                            .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(file.fileName(), asset.getContentType()))
+                            .contentType(MediaType.parseMediaType(asset.getContentType()))
+                            .body(asset.getData());
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/{id}")
@@ -234,6 +253,78 @@ public class EcrRequestController {
         return validationRepository.findFirstByRequest_IdAndStageOrderByRequestedAtDescIdDesc(request.getId(), stage)
                 .map(validation -> validation.getStatus() == PhaseValidationStatus.APPROVED)
                 .orElse(false);
+    }
+
+    private RequestFile requestFile(EcrRequest request, String type) {
+        if ("before".equalsIgnoreCase(type)) {
+            return new RequestFile(
+                    request.getBeforePhoto(),
+                    request.getBeforePhotoContentType(),
+                    request.getBeforePhotoUrl(),
+                    request.getBeforePhotoPublicId(),
+                    request.getBeforePhotoResourceType()
+            );
+        }
+        if ("after".equalsIgnoreCase(type)) {
+            return new RequestFile(
+                    request.getAfterPhoto(),
+                    request.getAfterPhotoContentType(),
+                    request.getAfterPhotoUrl(),
+                    request.getAfterPhotoPublicId(),
+                    request.getAfterPhotoResourceType()
+            );
+        }
+        return null;
+    }
+
+    private String safeFileName(String fileName) {
+        if (fileName == null || fileName.trim().isEmpty()) {
+            return "document";
+        }
+        return fileName.replace("\"", "");
+    }
+
+    private String contentDisposition(String fileName, String contentType) {
+        String disposition = contentType != null && (contentType.equalsIgnoreCase(MediaType.APPLICATION_PDF_VALUE) || contentType.startsWith("image/"))
+                ? "inline"
+                : "attachment";
+        return disposition + "; filename=\"" + safeFileName(fileName) + "\"";
+    }
+
+    private static class RequestFile {
+        private final String fileName;
+        private final String contentType;
+        private final String url;
+        private final String publicId;
+        private final String resourceType;
+
+        private RequestFile(String fileName, String contentType, String url, String publicId, String resourceType) {
+            this.fileName = fileName;
+            this.contentType = contentType;
+            this.url = url;
+            this.publicId = publicId;
+            this.resourceType = resourceType;
+        }
+
+        private String fileName() {
+            return fileName;
+        }
+
+        private String contentType() {
+            return contentType;
+        }
+
+        private String url() {
+            return url;
+        }
+
+        private String publicId() {
+            return publicId;
+        }
+
+        private String resourceType() {
+            return resourceType;
+        }
     }
 
 }

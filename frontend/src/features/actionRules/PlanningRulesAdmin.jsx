@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { EmptyState } from "../../components/common/EmptyState";
 import { emptyPlanningRuleForm } from "../../constants/forms";
-import { stageColors, stageDefinitions } from "../../constants/stages";
+import { stageDefinitions } from "../../constants/stages";
 import { criticalityClass } from "../../utils/status";
 import { stageColorClass, stageLabel } from "../../utils/stages";
 
@@ -99,7 +99,7 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
           filteredRules.map((rule) => (
             <article className="planning-rule-row" key={rule.id}>
               <div className="planning-rule-main">
-                <span className={`stage-pill ${stageColorClass(rule.stage)}`}>{stageLabel(rule.stage, showNewProjectStages)}</span>
+                <span className={`stage-pill ${stageColorClass(rule.stage, showNewProjectStages)}`}>{stageLabel(rule.stage, showNewProjectStages)}</span>
                 <strong>{rule.actionTitle}</strong>
                 <span>{rule.topicRisk || "Topic non renseigne"}</span>
               </div>
@@ -112,7 +112,7 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
                 <span><em>Asset</em><strong>{rule.evidenceRequired ? "Obligatoire" : "Optionnel"}</strong></span>
                 <span className="planning-rule-evidence"><em>Preuve attendue</em><strong>{rule.expectedEvidence || "Element preuve non renseigne"}</strong></span>
               </div>
-              <span className={`stage-pill ${stageColorClass(rule.stage)}`}>{stageLabel(rule.stage, showNewProjectStages)}</span>
+              <span className={`stage-pill ${stageColorClass(rule.stage, showNewProjectStages)}`}>{stageLabel(rule.stage, showNewProjectStages)}</span>
               <div>
                 <strong>{rule.actionTitle}</strong>
                 <span>{rule.topicRisk || "Topic non renseigné"}</span>
@@ -159,12 +159,12 @@ function PhaseActionGrid({ label, newProject = false, rules, selectedStage, type
         <span>{stages.length} phases</span>
       </div>
       <div className="admin-phase-grid">
-        {stages.map((stage, index) => {
+        {stages.map((stage) => {
           const count = rules.filter((rule) => (
             rule.stage === stage.key && (newProject ? rule.appliesToNewProject : rule.appliesToModification)
           )).length;
           return (
-            <article className={`admin-phase-card ${stageColors[index % stageColors.length]} ${selectedStage === stage.key ? "selected" : ""}`} key={`${type}-${stage.key}`}>
+            <article className={`admin-phase-card ${stageColorClass(stage.key, newProject)} ${selectedStage === stage.key ? "selected" : ""}`} key={`${type}-${stage.key}`}>
               <button className="phase-select-action" type="button" onClick={() => onSelect(stage.key)}>
                 <strong>{newProject ? stage.newProjectLabel : stage.modificationLabel}</strong>
                 <span>{count} action{count > 1 ? "s" : ""}</span>

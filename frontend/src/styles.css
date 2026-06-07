@@ -1415,34 +1415,6 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   object-fit: contain;
 }
 
-.dossier-review-dialog {
-  background: #ffffff;
-  border: 1px solid #dbe4ee;
-  border-radius: 8px;
-  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.28);
-  display: grid;
-  gap: 14px;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  height: calc(100vh - 36px);
-  max-height: none;
-  overflow: auto;
-  padding: 16px;
-  width: min(98vw, 1280px);
-}
-
-.dossier-review-editor {
-  font-family: inherit;
-  font-size: 14px;
-  line-height: 1.55;
-  height: 100%;
-  min-height: 0;
-  resize: vertical;
-}
-
-.dossier-review-actions {
-  justify-content: flex-end;
-}
-
 .request-list,
 .compact-list,
 .table-list,
@@ -1923,41 +1895,6 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   overflow: hidden;
 }
 
-.detail-delete-action {
-  align-self: start;
-  background: #fff5f5;
-  border: 1px solid #f0c6c6;
-  color: #b42318;
-  height: 40px;
-  width: 40px;
-}
-
-.detail-delete-action:hover {
-  background: #ffecec;
-  border-color: #e3a5a5;
-  color: #8f1d14;
-}
-
-.detail-header-actions {
-  align-self: start;
-  display: grid;
-  gap: 8px;
-}
-
-.detail-edit-action {
-  background: #f4f8ff;
-  border: 1px solid #bfd2f3;
-  color: #244a86;
-  height: 40px;
-  width: 40px;
-}
-
-.detail-edit-action:hover {
-  background: #eaf2ff;
-  border-color: #94b5e8;
-  color: #183a70;
-}
-
 .meta-grid {
   display: grid;
   gap: 6px;
@@ -1971,33 +1908,6 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   display: grid;
   gap: 3px;
   padding: 8px;
-}
-
-.meta-grid .dossier-review-card {
-  background: #f3faf6;
-  border: 1px solid #9fc9b3;
-  border-left: 4px solid var(--accent);
-  border-radius: 8px;
-  color: var(--ink);
-  cursor: pointer;
-  display: grid;
-  gap: 4px;
-  min-height: 68px;
-  padding: 9px 10px;
-  text-align: left;
-}
-
-.meta-grid .dossier-review-card:hover {
-  background: #eaf7f0;
-  border-color: var(--accent);
-  box-shadow: 0 10px 22px rgba(61, 111, 92, 0.14);
-  transform: translateY(-1px);
-}
-
-.meta-grid .dossier-review-card strong {
-  color: var(--accent-dark);
-  line-height: 1.25;
-  white-space: normal;
 }
 
 .meta-grid svg {
@@ -2020,8 +1930,7 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   white-space: nowrap;
 }
 
-.meta-grid div:last-child strong,
-.meta-grid .dossier-review-card strong {
+.meta-grid div:last-child strong {
   white-space: normal;
 }
 
@@ -2381,8 +2290,8 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   height: 34px;
   justify-content: center;
   margin-top: 6px;
-  padding: 0 10px;
-  width: fit-content;
+  padding: 0;
+  width: 38px;
 }
 
 .asset-upload-action:hover {
@@ -2392,14 +2301,6 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 .action-meta .evidence-meta strong {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.action-meta .dossier-review-meta {
-  border-color: #d8e7df;
-}
-
-.action-meta .dossier-review-meta strong {
-  color: var(--accent-dark);
 }
 
 .criticality.critical {
@@ -2449,9 +2350,8 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 }
 
 .row-upload.asset-upload-action {
-  gap: 6px;
-  padding: 0 10px;
-  width: fit-content;
+  padding: 0;
+  width: 38px;
 }
 
 .row-upload:hover {
@@ -2461,22 +2361,6 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 .row-upload.disabled {
   cursor: not-allowed;
   opacity: .45;
-}
-
-.action-row-tools {
-  align-items: center;
-  display: grid;
-  gap: 6px;
-  grid-column: auto;
-  grid-row: auto;
-  justify-items: center;
-}
-
-.action-row-tools .ghost-icon,
-.action-row-tools .row-upload {
-  height: 34px;
-  min-height: 34px;
-  width: 38px;
 }
 
 .danger-icon {
@@ -2628,8 +2512,7 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   word-break: break-word;
 }
 
-.actions-dialog .row-upload,
-.actions-dialog .action-row-tools .ghost-icon {
+.actions-dialog .row-upload {
   grid-column: auto;
   grid-row: auto;
   height: 38px;
@@ -2638,14 +2521,7 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 
 .actions-dialog .row-upload.asset-upload-action {
   height: 38px;
-  width: fit-content;
-}
-
-.actions-dialog .action-row-tools {
-  align-self: start;
-  gap: 6px;
-  grid-template-columns: repeat(2, 40px);
-  padding-top: 0;
+  width: 40px;
 }
 
 .check-row {
@@ -3180,8 +3056,7 @@ body:has(.dialog-backdrop) .modifications-toolbar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .actions-dialog .action-check,
-  .actions-dialog .action-row-tools {
+  .actions-dialog .action-check {
     grid-row: 1 / span 2;
   }
 

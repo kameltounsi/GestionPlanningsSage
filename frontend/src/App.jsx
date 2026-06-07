@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   CircleAlert,
   ClipboardList,
-  FileText,
   FolderKanban,
   Gauge,
   Maximize2,
@@ -30,7 +29,6 @@ import {
   createUser,
   clearSession,
   deleteActionPlanningRule,
-  deleteAction,
   deleteClientReference,
   deleteEcrRequest,
   deleteProductReference,
@@ -559,30 +557,6 @@ function App() {
       .finally(() => setSaving(false));
   }
 
-  function handleUpdateDossierReview(request, dossierReview) {
-    if (!request) return Promise.resolve();
-    const payload = {
-      ...buildEcrPayload(requestToEcrForm(request)),
-      dossierReview
-    };
-    setSaving(true);
-    setError("");
-    return updateEcrRequest(request.id, payload)
-      .then((savedRequest) => {
-        setRequests((items) => items.map((item) => (item.id === savedRequest.id ? savedRequest : item)));
-        setSelectedId(savedRequest.id);
-        successToast("Revue dossier enregistree");
-        return savedRequest;
-      })
-      .catch((error) => {
-        const message = "Enregistrement de la revue dossier impossible.";
-        setError(message);
-        errorAlert(message);
-        throw error;
-      })
-      .finally(() => setSaving(false));
-  }
-
   function handleStageChange(stage) {
     if (!selectedRequest) return;
     setSelectedStage(stage);
@@ -718,68 +692,6 @@ function App() {
         throw error;
       })
       .finally(() => setSaving(false));
-  }
-
-  function handleUpdateAction(action, form) {
-    if (!selectedRequest) return Promise.resolve();
-    if (isActionDone(form) && dependencyBlocksCompletion(action)) {
-      const dependency = dependencyFor(action);
-      const message = `Terminez d'abord: ${dependency.title || "action precedente"}.`;
-      setError("Terminez d'abord l'action precedente avant de valider cette action.");
-      warningAlert("Action bloquee", message);
-      return Promise.reject(new Error("Dependency incomplete"));
-    }
-    const evidenceFiles = filesFromValue(form.evidenceFile);
-    if (requiresEvidence(form) && isActionDone(form) && !hasActionAsset(action) && evidenceFiles.length === 0) {
-      const message = "Ajoutez un asset avant de terminer cette action.";
-      setError(message);
-      warningAlert("Asset requis", message);
-      return Promise.reject(new Error("Evidence required"));
-    }
-    setSaving(true);
-    setError("");
-    const payload = {
-      ...actionFormPayload(form, selectedStage),
-      dependsOnActionId: action.dependsOnActionId ?? null,
-      dependencyAnchor: action.dependencyAnchor || "OUTPUT"
-    };
-    const saveRequest = evidenceFiles.length > 0
-      ? uploadActionEvidenceFiles(action.id, evidenceFiles).then(() => updateAction(action.id, payload))
-      : updateAction(action.id, payload);
-    return saveRequest
-      .then(() => refreshCurrentActionsAndRequests())
-      .then((actionData) => {
-        setActions(actionData);
-        successToast("Action modifiee");
-      })
-      .catch((error) => {
-        const message = "Modification action impossible.";
-        setError(message);
-        errorAlert(message);
-        throw error;
-      })
-      .finally(() => setSaving(false));
-  }
-
-  function handleDeleteAction(action) {
-    if (!selectedRequest) return;
-    confirmDelete("Supprimer l'action ?", action.title || "Cette action sera supprimee definitivement.").then((result) => {
-      if (!result.isConfirmed) return;
-      setSaving(true);
-      setError("");
-      deleteAction(action.id)
-        .then(() => refreshCurrentActionsAndRequests())
-        .then((actionData) => {
-          setActions(actionData);
-          successToast("Action supprimee");
-        })
-        .catch(() => {
-          const message = "Suppression action impossible.";
-          setError(message);
-          errorAlert(message);
-        })
-        .finally(() => setSaving(false));
-    });
   }
 
   function handleToggleAction(action, completed) {
@@ -1551,19 +1463,14 @@ function App() {
             setSelectedId={setSelectedId}
             setSelectedStage={setSelectedStage}
             setShowCreateForm={setShowCreateForm}
-            onEditRequest={openEditEcr}
             handleCreateAction={handleCreateAction}
-            handleDeleteAction={handleDeleteAction}
-            handleDeleteRequest={handleDeleteEcr}
             handleStageChange={handleStageChange}
             handleToggleAction={handleToggleAction}
-            handleUpdateAction={handleUpdateAction}
             handleUploadEvidence={handleUploadEvidence}
             handleApprovePhase={handleApprovePhase}
             handleRejectPhase={handleRejectPhase}
             handleRequestPhaseValidation={handleRequestPhaseValidation}
             isCriticalAction={isCriticalAction}
-            onUpdateDossierReview={handleUpdateDossierReview}
             requiresEvidence={requiresEvidence}
             updateActionForm={updateActionForm}
           />
@@ -1671,16 +1578,6 @@ function DashboardPage({ requests, saving, stats, onCreateRequest, onDeleteReque
                 </button>
                 <div className="compact-row-actions">
                   <small className={`stage-pill ${stageColorClass(request.currentStage)}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</small>
-                  <button
-                    className="ghost-icon"
-                    disabled={saving}
-                    type="button"
-                    onClick={() => onDeleteRequest(request)}
-                    title="Supprimer la modification"
-                    aria-label="Supprimer la modification"
-                  >
-                    <Trash2 size={15} />
-                  </button>
                 </div>
               </article>
             ))
@@ -2425,7 +2322,6 @@ function isProjectLead(user) {
 function ModificationsPage(props) {
   const [listOpen, setListOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
-  const [dossierDialogOpen, setDossierDialogOpen] = useState(false);
   const {
     actionForm,
     actionRoleOptions,
@@ -2436,11 +2332,8 @@ function ModificationsPage(props) {
     doneCount,
     filteredRequests,
     handleCreateAction,
-    handleDeleteAction,
-    handleDeleteRequest,
     handleStageChange,
     handleToggleAction,
-    handleUpdateAction,
     handleUploadEvidence,
     handleApprovePhase,
     handleRejectPhase,
@@ -2451,8 +2344,6 @@ function ModificationsPage(props) {
     projectFilter,
     projectOptions,
     query,
-    onEditRequest,
-    onUpdateDossierReview,
     saving,
     selectedId,
     selectedRequest,
@@ -2519,28 +2410,6 @@ function ModificationsPage(props) {
                   <p>{selectedRequest.modificationReason || "Aucune description renseignée pour le moment."}</p>
                   {selectedRequest.modificationDetail && <p>{selectedRequest.modificationDetail}</p>}
                 </div>
-                <div className="detail-header-actions">
-                  <button
-                    className="ghost-icon detail-edit-action"
-                    disabled={saving || !canAdmin}
-                    type="button"
-                    onClick={() => onEditRequest(selectedRequest)}
-                    title="Modifier la modification"
-                    aria-label="Modifier la modification"
-                  >
-                    <Pencil size={16} />
-                  </button>
-                  <button
-                    className="ghost-icon detail-delete-action"
-                    disabled={saving || !canAdmin}
-                    type="button"
-                    onClick={() => handleDeleteRequest(selectedRequest)}
-                    title="Supprimer la modification"
-                    aria-label="Supprimer la modification"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
                 <div className="meta-grid">
                   <div><ClipboardList size={16} /><span>Projet</span><strong>{selectedRequest.modificationProject || "À définir"}</strong></div>
                   <div><ClipboardList size={16} /><span>Client</span><strong>{selectedRequest.client || "-"}</strong></div>
@@ -2550,11 +2419,6 @@ function ModificationsPage(props) {
                   <div><CalendarDays size={16} /><span>SOP</span><strong>{selectedRequest.sopDate || "-"}</strong></div>
                   <div><ClipboardList size={16} /><span>Mixabilité</span><strong>{mixabilityLabel(selectedRequest.mixability)}</strong></div>
                   <div><ClipboardList size={16} /><span>Type</span><strong>{modificationTypesLabel(selectedRequest)}</strong></div>
-                  <button className="dossier-review-card" type="button" onClick={() => setDossierDialogOpen(true)} title="Ouvrir la revue dossier">
-                    <FileText size={16} />
-                    <span>Revue dossier</span>
-                    <strong>{selectedRequest.dossierReview ? "Revue renseignee" : "Cliquer pour ajouter une revue"}</strong>
-                  </button>
                 </div>
                 {(selectedRequest.beforePhotoUrl || selectedRequest.afterPhotoUrl) && (
                   <div className="request-image-grid">
@@ -2611,9 +2475,7 @@ function ModificationsPage(props) {
                   currentUser={currentUser}
                   doneCount={doneCount}
                   handleCreateAction={handleCreateAction}
-                  handleDeleteAction={handleDeleteAction}
                   handleToggleAction={handleToggleAction}
-                  handleUpdateAction={handleUpdateAction}
                   handleUploadEvidence={handleUploadEvidence}
                   isCriticalAction={isCriticalAction}
                   canAdmin={canAdmin}
@@ -2693,83 +2555,7 @@ function ModificationsPage(props) {
           </section>
         </div>
       )}
-      {dossierDialogOpen && selectedRequest && (
-        <DossierReviewDialog
-          request={selectedRequest}
-          saving={saving}
-          onClose={() => setDossierDialogOpen(false)}
-          onSubmit={(value) => onUpdateDossierReview(selectedRequest, value)}
-        />
-      )}
     </section>
-  );
-}
-
-function DossierReviewDialog({ request, saving, onClose, onSubmit }) {
-  const [value, setValue] = useState(request.dossierReview || "");
-  const fileBaseName = `revue-dossier-${fileNameToken(requestDisplayName(request))}`;
-
-  function submit(event) {
-    event.preventDefault();
-    onSubmit(value).then(() => onClose()).catch(() => {});
-  }
-
-  function exportTxt() {
-    downloadTextFile(`${fileBaseName}.txt`, dossierReviewExportText(request, value));
-  }
-
-  function exportPdf() {
-    const title = `Revue dossier - ${requestDisplayName(request)}`;
-    const win = window.open("", "_blank");
-    if (!win) return;
-    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
-      body{font-family:Arial,sans-serif;color:#111827;margin:32px;line-height:1.5}
-      h1{font-size:22px;margin:0 0 8px}
-      .meta{color:#475569;font-size:13px;margin-bottom:20px}
-      pre{white-space:pre-wrap;border:1px solid #d7dee8;border-radius:8px;padding:16px;font-family:Arial,sans-serif;min-height:360px}
-      @media print{body{margin:18mm}}
-    </style></head><body><h1>${escapeHtml(title)}</h1><div class="meta">${escapeHtml(dossierReviewMetaLine(request))}</div><pre>${escapeHtml(value || "Revue dossier vide.")}</pre><script>window.onload=function(){window.print();};</script></body></html>`);
-    win.document.close();
-  }
-
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <form
-        aria-labelledby="dossier-review-title"
-        aria-modal="true"
-        className="dossier-review-dialog panel form-page"
-        onMouseDown={(event) => event.stopPropagation()}
-        onSubmit={submit}
-        role="dialog"
-      >
-        <header className="actions-dialog-header">
-          <div>
-            <p className="eyebrow">Document modifiable</p>
-            <h2 id="dossier-review-title">Revue dossier</h2>
-            <span>{dossierReviewMetaLine(request)}</span>
-          </div>
-          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
-            <X size={18} />
-          </button>
-        </header>
-        <textarea className="dossier-review-editor" value={value} onChange={(event) => setValue(event.target.value)} placeholder="Ajouter les notes de revue, decisions, points ouverts, actions a suivre..." />
-        <div className="button-row dossier-review-actions">
-          <button className="primary-action" disabled={saving} type="submit">
-            <Save size={16} />
-            Enregistrer
-          </button>
-          <button className="secondary-action" type="button" onClick={exportTxt}>
-            <FileText size={16} />
-            Export TXT
-          </button>
-          <button className="secondary-action" type="button" onClick={exportPdf}>
-            <FileText size={16} />
-            Export PDF
-          </button>
-          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
-        </div>
-      </form>
-    </div>
   );
 }
 
@@ -2816,7 +2602,7 @@ function PhaseValidationPanel({ canValidate, isCurrentStage, latestValidation, s
   );
 }
 
-function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleDeleteAction, handleToggleAction, handleUpdateAction, handleUploadEvidence, isCriticalAction, lateActions, requiresEvidence, saving, selectedStage, stageNewProject, updateActionForm }) {
+function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleToggleAction, handleUploadEvidence, isCriticalAction, lateActions, requiresEvidence, saving, selectedStage, stageNewProject, updateActionForm }) {
   const [expanded, setExpanded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const stageTitle = stageLabel(selectedStage, stageNewProject);
@@ -2847,9 +2633,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
         actionRoleOptions={actionRoleOptions}
         actions={actions}
         currentUser={currentUser}
-        handleDeleteAction={handleDeleteAction}
         handleToggleAction={handleToggleAction}
-        handleUpdateAction={handleUpdateAction}
         handleUploadEvidence={handleUploadEvidence}
         canAdmin={canAdmin}
         isCriticalAction={isCriticalAction}
@@ -2880,9 +2664,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
               actions={actions}
               currentUser={currentUser}
               expanded
-              handleDeleteAction={handleDeleteAction}
               handleToggleAction={handleToggleAction}
-              handleUpdateAction={handleUpdateAction}
               handleUploadEvidence={handleUploadEvidence}
               canAdmin={canAdmin}
               isCriticalAction={isCriticalAction}
@@ -2942,7 +2724,6 @@ function ActionList({ actions, currentUser, expanded = false, handleToggleAction
                   </strong>
                   <label className={canManageActionForUser(currentUser, action) ? "row-upload asset-upload-action" : "row-upload asset-upload-action disabled"} title="Affecter un asset">
                     <Upload size={15} />
-                    <span>Affecter</span>
                     <input disabled={saving || !canManageActionForUser(currentUser, action)} multiple type="file" onChange={(event) => handleUploadEvidence(action, event.target.files)} />
                   </label>
                 </span>
@@ -3024,88 +2805,6 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, isCriticalAction, s
             <option value="CANCELLED">CANCELLED</option>
           </select>
           <textarea className="action-review-field" value={actionForm.dossierReview} onChange={(event) => updateActionForm("dossierReview", event.target.value)} placeholder="Revue dossier: notes, points ouverts, decisions, prochaines actions..." />
-        </div>
-        <div className="button-row">
-          <button className="primary-action" disabled={saving} type="submit">
-            <Save size={16} />
-            Enregistrer
-          </button>
-          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function ActionEditDialog({ action, actionRoleOptions, isCriticalAction, saving, onClose, onSubmit }) {
-  const [form, setForm] = useState(() => actionToForm(action));
-
-  function updateForm(field, value) {
-    setForm((current) => ({ ...current, [field]: value }));
-  }
-
-  function submit(event) {
-    event.preventDefault();
-    onSubmit(form);
-  }
-
-  return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <form
-        aria-labelledby="edit-action-title"
-        aria-modal="true"
-        className="dialog-card action-edit-dialog panel form-page"
-        onMouseDown={(event) => event.stopPropagation()}
-        onSubmit={submit}
-        role="dialog"
-      >
-        <div className="form-intro">
-          <div>
-            <p className="eyebrow">Action</p>
-            <h2 id="edit-action-title">Modifier l'action</h2>
-            <p>{action.title}</p>
-          </div>
-          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
-            <X size={18} />
-          </button>
-        </div>
-        <div className="action-edit-grid">
-          <input value={form.topicRisk} onChange={(event) => updateForm("topicRisk", event.target.value)} placeholder="Topic_Risk" />
-          <input className="action-title-input" required value={form.title} onChange={(event) => updateForm("title", event.target.value)} placeholder="Point_verif" />
-          <ActionRoleSelect options={actionRoleOptions} value={form.responsible} onChange={(value) => updateForm("responsible", value)} />
-          <select value={form.criticality} onChange={(event) => updateForm("criticality", event.target.value)}>
-            <option value="1-critique">1-critique</option>
-            <option value="2-moyenne">2-moyenne</option>
-            <option value="3-faible">3-faible</option>
-          </select>
-          <input value={form.expectedEvidence} onChange={(event) => updateForm("expectedEvidence", event.target.value)} placeholder="élément preuve" />
-          <input type="date" value={form.startDate} onChange={(event) => updateForm("startDate", event.target.value)} title="Date debut" />
-          <input type="date" value={form.endDate} onChange={(event) => updateForm("endDate", event.target.value)} title="Date fin" />
-          <input min="0" type="number" value={form.workDurationDays} onChange={(event) => updateForm("workDurationDays", event.target.value)} title="Jours de travail" />
-          <label className="file-picker">
-            <Paperclip size={15} />
-            <span>{fileNamesLabel(form.evidenceFile, actionAssets(action).length ? `${actionAssets(action).length} asset(s)` : "Assets")}</span>
-            <input multiple type="file" onChange={(event) => updateForm("evidenceFile", event.target.files)} />
-          </label>
-          <label className="action-asset-toggle">
-            <input
-              checked={form.evidenceRequired || isCriticalAction(form)}
-              disabled={isCriticalAction(form)}
-              type="checkbox"
-              onChange={(event) => updateForm("evidenceRequired", event.target.checked)}
-            />
-            Asset requis
-          </label>
-          <select value={form.status} onChange={(event) => updateForm("status", event.target.value)}>
-            <option value="TODO">TODO</option>
-            <option value="IN_PROGRESS">IN_PROGRESS</option>
-            <option value="DONE">DONE</option>
-            <option value="DONE_LATE">DONE_LATE</option>
-            <option value="LATE">LATE</option>
-            <option value="CANCELLED">CANCELLED</option>
-          </select>
-          <textarea className="action-review-field" value={form.dossierReview} onChange={(event) => updateForm("dossierReview", event.target.value)} placeholder="Revue dossier: notes, points ouverts, decisions, prochaines actions..." />
-          <textarea value={form.comment} onChange={(event) => updateForm("comment", event.target.value)} placeholder="Commentaire" />
         </div>
         <div className="button-row">
           <button className="primary-action" disabled={saving} type="submit">

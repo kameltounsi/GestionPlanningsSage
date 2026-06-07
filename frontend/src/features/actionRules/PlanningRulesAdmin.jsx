@@ -53,6 +53,15 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
     setDialogOpen(false);
   }
 
+  function ruleTypes(rule) {
+    return [rule.appliesToModification ? "Modification" : "", rule.appliesToNewProject ? "Nouveau projet" : ""].filter(Boolean).join(" + ") || "-";
+  }
+
+  function ruleDependency(rule) {
+    if (!rule.dependencyActionTitle) return "Depart reception ECR";
+    return `Apres ${rule.dependencyAnchor === "INPUT" ? "entree" : "sortie"}: ${rule.dependencyActionTitle}`;
+  }
+
   return (
     <section className="panel planning-admin">
       <div className="section-title">
@@ -89,6 +98,20 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
         ) : (
           filteredRules.map((rule) => (
             <article className="planning-rule-row" key={rule.id}>
+              <div className="planning-rule-main">
+                <span className={`stage-pill ${stageColorClass(rule.stage)}`}>{stageLabel(rule.stage, showNewProjectStages)}</span>
+                <strong>{rule.actionTitle}</strong>
+                <span>{rule.topicRisk || "Topic non renseigne"}</span>
+              </div>
+              <div className="planning-rule-details">
+                <span><em>Pilote</em><strong>{rule.responsible || "A definir"}</strong></span>
+                <span><em>Criticite</em><strong className={`criticality ${criticalityClass(rule.criticality)}`}>{rule.criticality || "3-faible"}</strong></span>
+                <span><em>Type</em><strong>{ruleTypes(rule)}</strong></span>
+                <span><em>Duree</em><strong className="duration-pill">{rule.durationDays ?? 0} j</strong></span>
+                <span><em>Depart</em><strong>{ruleDependency(rule)}</strong></span>
+                <span><em>Asset</em><strong>{rule.evidenceRequired ? "Obligatoire" : "Optionnel"}</strong></span>
+                <span className="planning-rule-evidence"><em>Preuve attendue</em><strong>{rule.expectedEvidence || "Element preuve non renseigne"}</strong></span>
+              </div>
               <span className={`stage-pill ${stageColorClass(rule.stage)}`}>{stageLabel(rule.stage, showNewProjectStages)}</span>
               <div>
                 <strong>{rule.actionTitle}</strong>

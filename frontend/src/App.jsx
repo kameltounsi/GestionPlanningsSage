@@ -2907,9 +2907,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
   );
 }
 
-function ActionList({ actionRoleOptions, actions, canAdmin, currentUser, expanded = false, handleDeleteAction, handleToggleAction, handleUpdateAction, handleUploadEvidence, isCriticalAction, requiresEvidence, saving }) {
-  const [editingAction, setEditingAction] = useState(null);
-
+function ActionList({ actions, currentUser, expanded = false, handleToggleAction, handleUploadEvidence, requiresEvidence, saving }) {
   return (
     <>
       <div className={expanded ? "action-list expanded" : "action-list"}>
@@ -2942,68 +2940,20 @@ function ActionList({ actionRoleOptions, actions, canAdmin, currentUser, expande
                       </a>
                     )) : "-"}
                   </strong>
-                </span>
-                <span className="dossier-review-meta" title={action.dossierReview || "Revue dossier vide"}>
-                  <em>Revue dossier</em>
-                  <strong>{action.dossierReview ? "Renseignee" : "Vide"}</strong>
+                  <label className={canManageActionForUser(currentUser, action) ? "row-upload asset-upload-action" : "row-upload asset-upload-action disabled"} title="Affecter un asset">
+                    <Upload size={15} />
+                    <span>Affecter</span>
+                    <input disabled={saving || !canManageActionForUser(currentUser, action)} multiple type="file" onChange={(event) => handleUploadEvidence(action, event.target.files)} />
+                  </label>
                 </span>
                 <span><em>Status</em><small className={`status ${statusClass(action.status)}`}>{readableStatus(action.status)}</small></span>
-              </div>
-              <div className="action-row-tools">
-                <label className={canManageActionForUser(currentUser, action) ? "row-upload" : "row-upload disabled"} title="Ajouter evidence">
-                  <Upload size={15} />
-                  <input disabled={saving || !canManageActionForUser(currentUser, action)} multiple type="file" onChange={(event) => handleUploadEvidence(action, event.target.files)} />
-                </label>
-                <button className="ghost-icon" disabled={saving || !canAdmin} type="button" onClick={() => setEditingAction(action)} title="Ouvrir la revue dossier" aria-label="Ouvrir la revue dossier">
-                  <FileText size={15} />
-                </button>
-                <button className="ghost-icon" disabled={saving || !canAdmin} type="button" onClick={() => setEditingAction(action)} title="Modifier l'action" aria-label="Modifier l'action">
-                  <Pencil size={15} />
-                </button>
-                <button className="ghost-icon danger-icon" disabled={saving || !canAdmin} type="button" onClick={() => handleDeleteAction(action)} title="Supprimer l'action" aria-label="Supprimer l'action">
-                  <Trash2 size={15} />
-                </button>
               </div>
             </article>
           ))
         )}
       </div>
-      {editingAction && (
-        <ActionEditDialog
-          action={editingAction}
-          actionRoleOptions={actionRoleOptions}
-          isCriticalAction={isCriticalAction}
-          saving={saving}
-          onClose={() => setEditingAction(null)}
-          onSubmit={(form) => handleUpdateAction(editingAction, form).then(() => setEditingAction(null)).catch(() => {})}
-        />
-      )}
     </>
   );
-}
-
-function actionToForm(action) {
-  return {
-    topicRisk: action.topicRisk || "",
-    title: action.title || "",
-    responsible: action.responsible || "",
-    criticality: action.criticality || "3-faible",
-    expectedEvidence: action.expectedEvidence || "",
-    evidence: action.evidence || "",
-    evidenceFile: null,
-    deadline: action.deadline || "",
-    date1: action.date1 || "",
-    date2: action.date2 || "",
-    date3: action.date3 || "",
-    startDate: action.startDate || "",
-    endDate: action.endDate || "",
-    finalizationDate: action.finalizationDate || "",
-    workDurationDays: action.workDurationDays ?? 1,
-    status: action.status || "TODO",
-    evidenceRequired: Boolean(action.evidenceRequired),
-    comment: action.comment || "",
-    dossierReview: action.dossierReview || ""
-  };
 }
 
 function ActionRoleSelect({ options = [], value, onChange }) {

@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   CircleAlert,
   ClipboardList,
+  FileText,
   FolderKanban,
   Gauge,
   Maximize2,
@@ -238,6 +239,14 @@ function canManageActionForUser(user, action) {
   return [user?.jobTitle, user?.fullName, user?.username, user?.email]
     .filter(Boolean)
     .some((value) => normalizeRoleToken(value) === responsible);
+}
+
+function isRequestPilot(user, request) {
+  const pilot = normalizeRoleToken(request?.pilot);
+  if (!pilot) return false;
+  return [user?.fullName, user?.username, user?.email]
+    .filter(Boolean)
+    .some((value) => normalizeRoleToken(value) === pilot);
 }
 
 function isValidEmail(value) {
@@ -557,8 +566,36 @@ function App() {
       .finally(() => setSaving(false));
   }
 
+  function handleUpdateDossierReview(request, dossierReview) {
+    if (!request) return Promise.resolve();
+    const payload = {
+      ...buildEcrPayload(requestToEcrForm(request)),
+      dossierReview
+    };
+    setSaving(true);
+    setError("");
+    return updateEcrRequest(request.id, payload)
+      .then((savedRequest) => {
+        setRequests((items) => items.map((item) => (item.id === savedRequest.id ? savedRequest : item)));
+        setSelectedId(savedRequest.id);
+        successToast("Revue dossier enregistree");
+        return savedRequest;
+      })
+      .catch((error) => {
+        const message = "Enregistrement de la revue dossier impossible.";
+        setError(message);
+        errorAlert(message);
+        throw error;
+      })
+      .finally(() => setSaving(false));
+  }
+
   function handleStageChange(stage) {
     if (!selectedRequest) return;
+    if (!isAdminUser(currentUser)) {
+      warningAlert("Action reservee", "Seul l'admin peut rouvrir ou modifier la phase courante.");
+      return;
+    }
     setSelectedStage(stage);
     updateEcrStage(selectedRequest.id, stage)
       .then((updatedRequest) => {
@@ -760,6 +797,10 @@ function App() {
 
   function handleRequestPhaseValidation() {
     if (!selectedRequest) return;
+    if (!isRequestPilot(currentUser, selectedRequest)) {
+      warningAlert("Validation reservee", "Seul le pilote de la modification peut demander la validation de phase.");
+      return;
+    }
     if (selectedStage !== selectedRequest.currentStage) {
       warningAlert("Phase non courante", "La demande de validation concerne uniquement la phase courante de la modification.");
       setSelectedStage(safeStage(selectedRequest.currentStage, Boolean(selectedRequest.newVersion)));
@@ -1471,6 +1512,7 @@ function App() {
             handleRejectPhase={handleRejectPhase}
             handleRequestPhaseValidation={handleRequestPhaseValidation}
             isCriticalAction={isCriticalAction}
+            onUpdateDossierReview={handleUpdateDossierReview}
             requiresEvidence={requiresEvidence}
             updateActionForm={updateActionForm}
           />
@@ -2322,6 +2364,7 @@ function isProjectLead(user) {
 function ModificationsPage(props) {
   const [listOpen, setListOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
+  const [dossierDialogOpen, setDossierDialogOpen] = useState(false);
   const {
     actionForm,
     actionRoleOptions,
@@ -2344,6 +2387,7 @@ function ModificationsPage(props) {
     projectFilter,
     projectOptions,
     query,
+    onUpdateDossierReview,
     saving,
     selectedId,
     selectedRequest,
@@ -2359,6 +2403,7 @@ function ModificationsPage(props) {
   } = props;
   const canAdmin = isAdminUser(currentUser);
   const canValidate = canValidatePhases(currentUser);
+  const canRequestValidation = isRequestPilot(currentUser, selectedRequest);
   const currentValidation = phaseValidations.find((validation) => validation.stage === selectedStage && validation.status === "PENDING");
   const latestStageValidation = phaseValidations.find((validation) => validation.stage === selectedStage);
   const stageActionsDone = actions.length > 0 && actions.every(isActionDone);
@@ -2420,7 +2465,11 @@ function ModificationsPage(props) {
                   <div><ClipboardList size={16} /><span>Mixabilité</span><strong>{mixabilityLabel(selectedRequest.mixability)}</strong></div>
                   <div><ClipboardList size={16} /><span>Type</span><strong>{modificationTypesLabel(selectedRequest)}</strong></div>
                 </div>
-                {(selectedRequest.beforePhotoUrl || selectedRequest.afterPhotoUrl) && (
+                <button className="dossier-review-card" type="button" onClick={() => setDossierDialogOpen(true)} title="Ouvrir la revue dossier">
+                  <FileText size={24} />
+                  <span>Revue dossier</span>
+                </button>
+                {(selectedRequest.beforePhotoUrl || selectedRequest.afterPhotoUrl || selectedRequest) && (
                   <div className="request-image-grid">
                     {selectedRequest.beforePhotoUrl && (
                       <button
@@ -2458,6 +2507,7 @@ function ModificationsPage(props) {
                   <div className="progress-track"><span style={{ width: `${completion}%` }} /></div>
                 </section>
                 <PhaseValidationPanel
+                  canRequestValidation={canRequestValidation}
                   canValidate={canValidate}
                   isCurrentStage={isCurrentStage}
                   latestValidation={latestStageValidation}
@@ -2555,16 +2605,97 @@ function ModificationsPage(props) {
           </section>
         </div>
       )}
+      {dossierDialogOpen && selectedRequest && (
+        <DossierReviewDialog
+          request={selectedRequest}
+          saving={saving}
+          onClose={() => setDossierDialogOpen(false)}
+          onSubmit={(value) => onUpdateDossierReview(selectedRequest, value)}
+        />
+      )}
     </section>
   );
 }
 
-function PhaseValidationPanel({ canValidate, isCurrentStage, latestValidation, saving, stageActionsDone, validation, onApprove, onReject, onRequest }) {
+function DossierReviewDialog({ request, saving, onClose, onSubmit }) {
+  const [value, setValue] = useState(request.dossierReview || "");
+  const fileBaseName = `revue-dossier-${fileNameToken(requestDisplayName(request))}`;
+
+  function submit(event) {
+    event.preventDefault();
+    onSubmit(value).then(() => onClose()).catch(() => {});
+  }
+
+  function exportTxt() {
+    downloadTextFile(`${fileBaseName}.txt`, dossierReviewExportText(request, value));
+  }
+
+  function exportPdf() {
+    const title = `Revue dossier - ${requestDisplayName(request)}`;
+    const win = window.open("", "_blank");
+    if (!win) return;
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
+      body{font-family:Arial,sans-serif;color:#111827;margin:32px;line-height:1.5}
+      h1{font-size:22px;margin:0 0 8px}
+      .meta{color:#475569;font-size:13px;margin-bottom:20px}
+      pre{white-space:pre-wrap;border:1px solid #d7dee8;border-radius:8px;padding:16px;font-family:Arial,sans-serif;min-height:360px}
+      @media print{body{margin:18mm}}
+    </style></head><body><h1>${escapeHtml(title)}</h1><div class="meta">${escapeHtml(dossierReviewMetaLine(request))}</div><pre>${escapeHtml(value || "Revue dossier vide.")}</pre><script>window.onload=function(){window.print();};</script></body></html>`);
+    win.document.close();
+  }
+
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <form
+        aria-labelledby="dossier-review-title"
+        aria-modal="true"
+        className="dossier-review-dialog panel form-page"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={submit}
+        role="dialog"
+      >
+        <header className="actions-dialog-header">
+          <div>
+            <p className="eyebrow">Document modifiable</p>
+            <h2 id="dossier-review-title">Revue dossier</h2>
+            <span>{dossierReviewMetaLine(request)}</span>
+          </div>
+          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
+            <X size={18} />
+          </button>
+        </header>
+        <textarea className="dossier-review-editor" value={value} onChange={(event) => setValue(event.target.value)} placeholder="Ajouter les notes de revue, decisions, points ouverts, actions a suivre..." />
+        <div className="button-row dossier-review-actions">
+          <button className="primary-action" disabled={saving} type="submit">
+            <Save size={16} />
+            Enregistrer
+          </button>
+          <button className="secondary-action" type="button" onClick={exportTxt}>
+            <FileText size={16} />
+            Export TXT
+          </button>
+          <button className="secondary-action" type="button" onClick={exportPdf}>
+            <FileText size={16} />
+            Export PDF
+          </button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function PhaseValidationPanel({ canRequestValidation, canValidate, isCurrentStage, latestValidation, saving, stageActionsDone, validation, onApprove, onReject, onRequest }) {
+  const phaseApproved = latestValidation?.status === "APPROVED";
   const statusText = !isCurrentStage
     ? "Cette phase est consultable, mais seule la phase courante peut etre envoyee en validation"
+    : phaseApproved
+      ? "Phase deja validee"
     : validation
       ? "Demande en attente de validation"
-      : stageActionsDone
+      : !canRequestValidation
+        ? "Seul le pilote de la modification peut demander la validation"
+        : stageActionsDone
         ? "Phase prete a envoyer en validation"
         : "Toutes les actions doivent etre terminees";
   return (
@@ -2582,8 +2713,8 @@ function PhaseValidationPanel({ canValidate, isCurrentStage, latestValidation, s
         )}
       </div>
       <div className="row-actions">
-        {!validation && (
-          <button className="secondary-action compact-action" disabled={!isCurrentStage || !stageActionsDone || saving} type="button" onClick={onRequest}>
+        {!validation && !phaseApproved && (
+          <button className="secondary-action compact-action" disabled={!canRequestValidation || !isCurrentStage || !stageActionsDone || saving} type="button" onClick={onRequest}>
             Demander validation
           </button>
         )}

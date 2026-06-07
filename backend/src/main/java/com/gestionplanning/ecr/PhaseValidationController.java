@@ -51,8 +51,11 @@ public class PhaseValidationController {
         return requestRepository.findById(requestId)
                 .filter(request -> accessControlService.canAccessRequest(user, request))
                 .map(request -> {
+                    if (!accessControlService.canRequestPhaseValidation(user, request)) {
+                        return ResponseEntity.status(403).<PhaseValidationRequest>build();
+                    }
                     EcrStage stage = payload == null || payload.getStage() == null ? request.getCurrentStage() : payload.getStage();
-                    if (stage != request.getCurrentStage() || !allStageActionsDone(requestId, stage)) {
+                    if (stage != request.getCurrentStage() || isApprovedStage(requestId, stage) || !allStageActionsDone(requestId, stage)) {
                         return ResponseEntity.badRequest().<PhaseValidationRequest>build();
                     }
                     PhaseValidationRequest validation = validationRepository.findFirstByRequest_IdAndStageOrderByRequestedAtDescIdDesc(requestId, stage)
@@ -121,6 +124,12 @@ public class PhaseValidationController {
     private boolean allStageActionsDone(Long requestId, EcrStage stage) {
         List<EcrAction> actions = actionRepository.findByRequest_IdAndStageOrderByDeadlineAscIdAsc(requestId, stage);
         return !actions.isEmpty() && actions.stream().allMatch(this::isDone);
+    }
+
+    private boolean isApprovedStage(Long requestId, EcrStage stage) {
+        return validationRepository.findFirstByRequest_IdAndStageOrderByRequestedAtDescIdDesc(requestId, stage)
+                .map(validation -> validation.getStatus() == PhaseValidationStatus.APPROVED)
+                .orElse(false);
     }
 
     private boolean isDone(EcrAction action) {

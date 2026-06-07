@@ -45,6 +45,14 @@ public class AccessControlService {
         return isAdmin(user) || isValidatorOrManager(user) && canAccessRequest(user, request);
     }
 
+    public boolean canRequestPhaseValidation(AppUser user, EcrRequest request) {
+        if (user == null || request == null) {
+            return false;
+        }
+        String pilot = normalize(request.getPilot());
+        return !pilot.isEmpty() && matchesUser(user, pilot);
+    }
+
     public boolean canManageAction(AppUser user, EcrAction action) {
         if (isAdmin(user)) {
             return true;

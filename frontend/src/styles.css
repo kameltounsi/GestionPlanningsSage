@@ -1348,11 +1348,11 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 
 .request-image-grid {
   display: grid;
-  gap: 10px;
+  gap: 14px;
   grid-column: 1 / -1;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 230px));
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   justify-content: start;
-  margin-top: 6px;
+  margin-top: 10px;
 }
 
 .request-image-grid button {
@@ -1362,8 +1362,9 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   color: var(--ink);
   cursor: zoom-in;
   display: grid;
-  gap: 7px;
-  padding: 8px;
+  gap: 10px;
+  min-height: 230px;
+  padding: 10px;
   text-align: left;
 }
 
@@ -1374,13 +1375,14 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 
 .request-image-grid span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
 }
 
 .request-image-grid img {
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 16 / 9;
   border-radius: 6px;
+  min-height: 190px;
   object-fit: cover;
   width: 100%;
 }
@@ -1413,6 +1415,34 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   max-height: calc(90vh - 130px);
   max-width: 100%;
   object-fit: contain;
+}
+
+.dossier-review-dialog {
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.28);
+  display: grid;
+  gap: 14px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: calc(100vh - 36px);
+  max-height: none;
+  overflow: auto;
+  padding: 16px;
+  width: min(98vw, 1280px);
+}
+
+.dossier-review-editor {
+  font-family: inherit;
+  font-size: 14px;
+  height: 100%;
+  line-height: 1.55;
+  min-height: 0;
+  resize: vertical;
+}
+
+.dossier-review-actions {
+  justify-content: flex-end;
 }
 
 .request-list,
@@ -1861,7 +1891,7 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   align-items: start;
   display: grid;
   gap: 10px 12px;
-  grid-template-columns: minmax(300px, 1.2fr) auto minmax(360px, 1fr);
+  grid-template-columns: minmax(300px, 1.1fr) minmax(560px, 1.7fr) minmax(260px, .9fr);
   min-height: 0;
   overflow: visible;
   padding-right: 4px;
@@ -1898,7 +1928,7 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 .meta-grid {
   display: grid;
   gap: 6px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .meta-grid div {
@@ -1908,6 +1938,41 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   display: grid;
   gap: 3px;
   padding: 8px;
+}
+
+.details-header > .dossier-review-card {
+  background: #eef8f3;
+  border: 1px solid #9fc9b3;
+  border-left: 5px solid var(--accent);
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  justify-content: center;
+  min-height: 198px;
+  padding: 18px;
+  text-align: center;
+}
+
+.details-header > .dossier-review-card svg {
+  color: var(--accent);
+  height: 40px;
+  justify-self: center;
+  width: 40px;
+}
+
+.details-header > .dossier-review-card span {
+  color: var(--accent-dark);
+  font-size: 19px;
+  font-weight: 820;
+}
+
+.details-header > .dossier-review-card:hover {
+  background: #e3f4eb;
+  border-color: var(--accent);
+  box-shadow: 0 10px 22px rgba(61, 111, 92, 0.14);
+  transform: translateY(-1px);
 }
 
 .meta-grid svg {

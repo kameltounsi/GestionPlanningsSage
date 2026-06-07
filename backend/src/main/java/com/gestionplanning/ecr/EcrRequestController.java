@@ -36,13 +36,15 @@ public class EcrRequestController {
     private final EcrTemplateService templateService;
     private final ActionPlanningService planningService;
     private final AccessControlService accessControlService;
+    private final PhaseValidationRequestRepository validationRepository;
 
     public EcrRequestController(EcrRequestRepository requestRepository, ChecklistItemRepository checklistItemRepository,
                                 EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
                                 EcrActionAssetRepository assetRepository,
                                 EcrDocumentRepository documentRepository, PenaltyRepository penaltyRepository,
                                 CloudinaryStorageService storageService, EcrTemplateService templateService,
-                                ActionPlanningService planningService, AccessControlService accessControlService) {
+                                ActionPlanningService planningService, AccessControlService accessControlService,
+                                PhaseValidationRequestRepository validationRepository) {
         this.requestRepository = requestRepository;
         this.checklistItemRepository = checklistItemRepository;
         this.actionRepository = actionRepository;
@@ -54,6 +56,7 @@ public class EcrRequestController {
         this.templateService = templateService;
         this.planningService = planningService;
         this.accessControlService = accessControlService;
+        this.validationRepository = validationRepository;
     }
 
     @GetMapping
@@ -116,9 +119,13 @@ public class EcrRequestController {
                     request.setProcessChange(updatedRequest.isProcessChange());
                     request.setSupplierChange(updatedRequest.isSupplierChange());
                     request.setNewVersion(updatedRequest.isNewVersion());
-                    request.setCurrentStage(EcrStage.isAllowed(updatedRequest.getCurrentStage(), updatedRequest.isNewVersion())
+                    EcrStage nextStage = EcrStage.isAllowed(updatedRequest.getCurrentStage(), updatedRequest.isNewVersion())
                             ? updatedRequest.getCurrentStage()
-                            : EcrStage.firstAllowed(updatedRequest.isNewVersion()));
+                            : EcrStage.firstAllowed(updatedRequest.isNewVersion());
+                    if (isApprovedStage(request, nextStage) && nextStage != request.getCurrentStage() && !accessControlService.isAdmin(user)) {
+                        return ResponseEntity.status(403).<EcrRequest>build();
+                    }
+                    request.setCurrentStage(nextStage);
                     EcrRequest saved = requestRepository.save(request);
                     planningService.recalculateRequest(saved);
                     return ResponseEntity.ok(saved);
@@ -200,6 +207,9 @@ public class EcrRequestController {
                     if (!EcrStage.isAllowed(stage, request.isNewVersion())) {
                         return ResponseEntity.badRequest().<EcrRequest>build();
                     }
+                    if (isApprovedStage(request, stage) && stage != request.getCurrentStage() && !accessControlService.isAdmin(user)) {
+                        return ResponseEntity.status(403).<EcrRequest>build();
+                    }
                     request.setCurrentStage(stage);
                     return ResponseEntity.ok(requestRepository.save(request));
                 })
@@ -218,6 +228,12 @@ public class EcrRequestController {
                     return ResponseEntity.ok(checklistItemRepository.findByRequestIdAndStageOrderById(id, stage));
                 })
                 .orElse(ResponseEntity.status(403).build());
+    }
+
+    private boolean isApprovedStage(EcrRequest request, EcrStage stage) {
+        return validationRepository.findFirstByRequest_IdAndStageOrderByRequestedAtDescIdDesc(request.getId(), stage)
+                .map(validation -> validation.getStatus() == PhaseValidationStatus.APPROVED)
+                .orElse(false);
     }
 
 }

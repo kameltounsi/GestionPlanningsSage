@@ -2475,7 +2475,25 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   gap: 2px;
 }
 
+.asset-link-item,
+.proof-document-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: flex-start;
+  min-width: 0;
+  width: fit-content;
+}
+
+.asset-delete-action {
+  flex-shrink: 0;
+  height: 24px;
+  min-height: 24px;
+  width: 24px;
+}
+
 .asset-link-list .file-link {
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

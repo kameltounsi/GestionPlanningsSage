@@ -43,6 +43,9 @@ public class EcrTemplateService {
                     action.setRequest(request);
                     action.setStatus(action.getStatus() == null ? ActionStatus.TODO : action.getStatus());
                     action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
+                    action.setValidator(assigneeResolver.resolve(request, action.getValidator()));
+                    action.setEvidenceRequired(action.isEvidenceRequired()
+                            || String.valueOf(action.getCriticality()).startsWith("1"));
                     action.setChecked(false);
                     return action;
                 })
@@ -104,6 +107,7 @@ public class EcrTemplateService {
             action.setTitle("Revue et validation - " + stage.getLabel(request.isNewVersion()));
             action.setTopicRisk("Suivi ECR");
             action.setResponsible(assigneeResolver.resolve(request, request.getPilot()));
+            action.setValidator(assigneeResolver.resolve(request, "Validateur"));
             action.setCriticality("3-faible");
             action.setExpectedEvidence("Compte rendu, preuve ou document de validation");
             action.setEvidenceRequired(false);
@@ -123,9 +127,13 @@ public class EcrTemplateService {
         action.setTitle(rule.getActionTitle());
         action.setTopicRisk(rule.getTopicRisk());
         action.setResponsible(assigneeResolver.resolve(request, rule.getResponsible()));
+        action.setValidator(assigneeResolver.resolve(request, rule.getValidator()));
         action.setCriticality(rule.getCriticality());
         action.setExpectedEvidence(rule.getExpectedEvidence());
-        action.setEvidenceRequired(rule.isEvidenceRequired());
+        copyProofDocument(action, rule);
+        action.setEvidenceRequired(rule.isEvidenceRequired()
+                || hasProofDocument(rule)
+                || String.valueOf(rule.getCriticality()).startsWith("1"));
         action.setWorkDurationDays(rule.getDurationDays());
         action.setDependencyAnchor(rule.getDependencyAnchor());
         action.setStatus(ActionStatus.TODO);
@@ -151,6 +159,24 @@ public class EcrTemplateService {
 
     private String normalize(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private void copyProofDocument(EcrAction action, ActionPlanningRule rule) {
+        action.setProofDocument(rule.getProofDocument());
+        action.setProofDocumentFileName(rule.getProofDocumentFileName());
+        action.setProofDocumentContentType(rule.getProofDocumentContentType());
+        action.setProofDocumentFileSize(rule.getProofDocumentFileSize());
+        action.setProofDocumentFileUrl(rule.getProofDocumentFileUrl());
+        action.setProofDocumentPublicId(null);
+        action.setProofDocumentResourceType(rule.getProofDocumentResourceType());
+    }
+
+    private boolean hasProofDocument(ActionPlanningRule rule) {
+        return rule != null && (hasText(rule.getProofDocumentFileName()) || hasText(rule.getProofDocumentFileUrl()));
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     private void createDefaultChecklistForAllStages(EcrRequest request) {

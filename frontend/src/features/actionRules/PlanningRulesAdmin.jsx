@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
+import { FileText, Pencil, Plus, Save, Trash2, X } from "lucide-react";
+import { actionPlanningRuleProofDocumentUrl } from "../../api";
 import { EmptyState } from "../../components/common/EmptyState";
 import { emptyPlanningRuleForm } from "../../constants/forms";
 import { stageDefinitions } from "../../constants/stages";
 import { criticalityClass } from "../../utils/status";
 import { stageColorClass, stageLabel } from "../../utils/stages";
 
-export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving, onCancelEdit, onDelete, onEdit, onSubmit, setForm }) {
+export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving, onCancelEdit, onDelete, onDeleteProofDocument, onEdit, onSubmit, setForm }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [showNewProjectStages, setShowNewProjectStages] = useState(false);
   const visibleStages = useMemo(
@@ -105,12 +106,22 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
               </div>
               <div className="planning-rule-details">
                 <span><em>Pilote</em><strong>{rule.responsible || "A definir"}</strong></span>
+                <span><em>Validateur</em><strong>{rule.validator || "A definir"}</strong></span>
                 <span><em>Criticite</em><strong className={`criticality ${criticalityClass(rule.criticality)}`}>{rule.criticality || "3-faible"}</strong></span>
                 <span><em>Type</em><strong>{ruleTypes(rule)}</strong></span>
                 <span><em>Duree</em><strong className="duration-pill">{rule.durationDays ?? 0} j</strong></span>
                 <span><em>Depart</em><strong>{ruleDependency(rule)}</strong></span>
                 <span><em>Asset</em><strong>{rule.evidenceRequired ? "Obligatoire" : "Optionnel"}</strong></span>
-                <span className="planning-rule-evidence"><em>Preuve attendue</em><strong>{rule.expectedEvidence || "Element preuve non renseigne"}</strong></span>
+                <span className="planning-rule-evidence">
+                  <em>Element preuve</em>
+                  <strong>
+                    {rule.proofDocumentFileName ? (
+                      <a className="file-link" href={actionPlanningRuleProofDocumentUrl(rule.id)} target="_blank" rel="noreferrer">
+                        {rule.proofDocumentFileName}
+                      </a>
+                    ) : "Non uploade"}
+                  </strong>
+                </span>
               </div>
               <span className={`stage-pill ${stageColorClass(rule.stage, showNewProjectStages)}`}>{stageLabel(rule.stage, showNewProjectStages)}</span>
               <div>
@@ -141,6 +152,7 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
           saving={saving}
           stageNewProject={showNewProjectStages}
           onClose={closeDialog}
+          onDeleteProofDocument={onDeleteProofDocument}
           onSubmit={submitDialog}
           setForm={setForm}
         />
@@ -219,7 +231,7 @@ function previousDependencyOptions(rules, form) {
   return candidates;
 }
 
-function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNewProject, onClose, onSubmit, setForm }) {
+function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNewProject, onClose, onDeleteProofDocument, onSubmit, setForm }) {
   const phaseActions = rules
     .filter((rule) => rule.stage === form.stage)
     .filter((rule) => (
@@ -292,6 +304,15 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
             </select>
           </label>
           <label>
+            Validateur
+            <select value={form.validator} onChange={(event) => setForm((current) => ({ ...current, validator: event.target.value }))}>
+              <option value="">Selectionner un role</option>
+              {(form.validator && !actionRoleOptions.includes(form.validator) ? [form.validator, ...actionRoleOptions] : actionRoleOptions).map((role) => (
+                <option key={role} value={role}>{role}</option>
+              ))}
+            </select>
+          </label>
+          <label>
             Criticite
             <select value={form.criticality} onChange={(event) => setForm((current) => ({ ...current, criticality: event.target.value }))}>
               <option value="1-critique">1-critique</option>
@@ -312,8 +333,31 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
             Jours de travail
             <input min="0" type="number" value={form.durationDays} onChange={(event) => setForm((current) => ({ ...current, durationDays: event.target.value }))} />
           </label>
+          <label className="file-picker">
+            <FileText size={15} />
+            <span>{fileNamesLabel(form.proofDocumentFile, form.proofDocumentFileName || "Element preuve")}</span>
+            <input type="file" onChange={(event) => setForm((current) => ({ ...current, proofDocumentFile: event.target.files?.[0] || null }))} />
+          </label>
+          {(form.proofDocumentFileName || form.proofDocumentFile) && (
+            <div className="proof-document-actions">
+              {form.id && form.proofDocumentFileName && (
+                <a className="file-link" href={actionPlanningRuleProofDocumentUrl(form.id)} target="_blank" rel="noreferrer">
+                  {form.proofDocumentFileName}
+                </a>
+              )}
+              <button
+                className="ghost-icon"
+                disabled={saving}
+                type="button"
+                onClick={() => (form.proofDocumentFile ? setForm((current) => ({ ...current, proofDocumentFile: null })) : onDeleteProofDocument(form.id))}
+                title="Supprimer l'element preuve"
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+          )}
           <label className="asset-required-field user-enabled-field">
-            <input checked={form.evidenceRequired} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, evidenceRequired: event.target.checked }))} />
+            <input checked={form.evidenceRequired || Boolean(form.proofDocumentFile || form.proofDocumentFileName)} disabled={Boolean(form.proofDocumentFile || form.proofDocumentFileName)} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, evidenceRequired: event.target.checked }))} />
             Asset obligatoire
           </label>
         </div>
@@ -327,4 +371,17 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
       </form>
     </div>
   );
+}
+
+function filesFromValue(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof FileList !== "undefined" && value instanceof FileList) return Array.from(value);
+  return [value].filter(Boolean);
+}
+
+function fileNamesLabel(value, fallback) {
+  const files = filesFromValue(value);
+  if (files.length === 0) return fallback;
+  return files[0].name;
 }

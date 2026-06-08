@@ -303,6 +303,18 @@ export function deleteAction(actionId) {
   });
 }
 
+export function deleteActionAsset(assetId) {
+  return request(`/action-assets/${assetId}`, {
+    method: "DELETE"
+  });
+}
+
+export function deleteActionProofDocument(actionId) {
+  return request(`/actions/${actionId}/proof-document`, {
+    method: "DELETE"
+  });
+}
+
 export function uploadActionEvidence(actionId, file) {
   const formData = new FormData();
   formData.append("file", file);
@@ -311,6 +323,32 @@ export function uploadActionEvidence(actionId, file) {
 
 export function actionEvidenceUrl(actionId) {
   return `${API_BASE}/actions/${actionId}/evidence`;
+}
+
+export function uploadActionProofDocument(actionId, file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return multipartRequest(`/actions/${actionId}/proof-document`, formData);
+}
+
+export function actionProofDocumentUrl(actionId) {
+  return `${API_BASE}/actions/${actionId}/proof-document`;
+}
+
+export function uploadActionPlanningRuleProofDocument(ruleId, file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return multipartRequest(`/action-planning-rules/${ruleId}/proof-document`, formData);
+}
+
+export function deleteActionPlanningRuleProofDocument(ruleId) {
+  return request(`/action-planning-rules/${ruleId}/proof-document`, {
+    method: "DELETE"
+  });
+}
+
+export function actionPlanningRuleProofDocumentUrl(ruleId) {
+  return `${API_BASE}/action-planning-rules/${ruleId}/proof-document`;
 }
 
 export function actionAssetDownloadUrl(assetId) {

@@ -110,6 +110,7 @@ public class EcrActionController {
                     }
                     action.setRequest(request);
                     action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
+                    action.setValidator(assigneeResolver.resolve(request, action.getValidator()));
                     syncFinalizationDate(action, action);
                     EcrAction saved = actionRepository.save(action);
                     planningService.recalculateRequest(request);
@@ -132,6 +133,7 @@ public class EcrActionController {
                     action.setDescription(updatedAction.getDescription());
                     action.setTopicRisk(updatedAction.getTopicRisk());
                     action.setResponsible(assigneeResolver.resolve(action.getRequest(), updatedAction.getResponsible()));
+                    action.setValidator(assigneeResolver.resolve(action.getRequest(), updatedAction.getValidator()));
                     action.setCriticality(updatedAction.getCriticality());
                     action.setExpectedEvidence(updatedAction.getExpectedEvidence());
                     action.setEvidenceRequired(updatedAction.isEvidenceRequired());
@@ -218,6 +220,30 @@ public class EcrActionController {
                 .orElse(ResponseEntity.status(403).build());
     }
 
+    @PostMapping(value = "/actions/{id}/proof-document", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<EcrAction> uploadProofDocument(@PathVariable Long id, @RequestParam("file") MultipartFile file,
+                                                         @RequestAttribute("authenticatedUser") AppUser user) {
+        if (file.isEmpty()) {
+            return ResponseEntity.badRequest().build();
+        }
+        return actionRepository.findById(id)
+                .filter(action -> accessControlService.canManageAction(user, action))
+                .map(action -> {
+                    storageService.deleteQuietly(action.getProofDocumentPublicId(), action.getProofDocumentResourceType());
+                    StoredAsset asset = storageService.upload(file, "gestion-planning/actions/" + id + "/proof-document");
+                    action.setProofDocument(asset.getFileName());
+                    action.setProofDocumentFileName(asset.getFileName());
+                    action.setProofDocumentContentType(asset.getContentType());
+                    action.setProofDocumentFileSize(asset.getSize());
+                    action.setProofDocumentFileUrl(asset.getUrl());
+                    action.setProofDocumentPublicId(asset.getPublicId());
+                    action.setProofDocumentResourceType(asset.getResourceType());
+                    action.setEvidenceRequired(true);
+                    return ResponseEntity.ok(actionRepository.save(action));
+                })
+                .orElse(ResponseEntity.status(403).build());
+    }
+
     @GetMapping("/actions/{id}/evidence")
     public ResponseEntity<?> downloadEvidence(@PathVariable Long id) {
         return actionRepository.findById(id).<ResponseEntity<?>>map(action -> {
@@ -237,6 +263,33 @@ public class EcrActionController {
         }).orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    @GetMapping("/actions/{id}/proof-document")
+    public ResponseEntity<?> downloadProofDocument(@PathVariable Long id) {
+        return actionRepository.findById(id).<ResponseEntity<?>>map(action -> {
+            if (action.getProofDocumentFileUrl() == null || action.getProofDocumentFileUrl().trim().isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+            DownloadedAsset asset = storageService.download(action.getProofDocumentPublicId(), action.getProofDocumentResourceType(), action.getProofDocumentFileUrl(), action.getProofDocumentContentType());
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(action.getProofDocumentFileName(), asset.getContentType()))
+                    .contentType(MediaType.parseMediaType(asset.getContentType()))
+                    .body(asset.getData());
+        }).orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @DeleteMapping("/actions/{id}/proof-document")
+    public ResponseEntity<EcrAction> deleteProofDocument(@PathVariable Long id,
+                                                         @RequestAttribute("authenticatedUser") AppUser user) {
+        return actionRepository.findById(id)
+                .filter(action -> accessControlService.canManageAction(user, action))
+                .map(action -> {
+                    storageService.deleteQuietly(action.getProofDocumentPublicId(), action.getProofDocumentResourceType());
+                    clearProofDocument(action);
+                    return ResponseEntity.ok(actionRepository.save(action));
+                })
+                .orElse(ResponseEntity.status(403).build());
+    }
+
     @GetMapping("/action-assets/{assetId}/download")
     public ResponseEntity<?> downloadActionAsset(@PathVariable Long assetId) {
         return assetRepository.findById(assetId)
@@ -250,6 +303,23 @@ public class EcrActionController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    @DeleteMapping("/action-assets/{assetId}")
+    @Transactional
+    public ResponseEntity<EcrAction> deleteActionAsset(@PathVariable Long assetId,
+                                                       @RequestAttribute("authenticatedUser") AppUser user) {
+        return assetRepository.findById(assetId)
+                .filter(asset -> accessControlService.canManageAction(user, asset.getAction()))
+                .map(asset -> {
+                    EcrAction action = asset.getAction();
+                    storageService.deleteQuietly(asset.getPublicId(), asset.getResourceType());
+                    assetRepository.delete(asset);
+                    assetRepository.flush();
+                    syncLatestEvidenceMetadata(action);
+                    return ResponseEntity.ok(actionRepository.save(action));
+                })
+                .orElse(ResponseEntity.status(403).build());
+    }
+
     @DeleteMapping("/actions/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id, @RequestAttribute("authenticatedUser") AppUser user) {
         if (!accessControlService.isAdmin(user)) {
@@ -260,6 +330,7 @@ public class EcrActionController {
             assetRepository.findByAction_IdOrderByUploadedAtDescIdDesc(id)
                     .forEach(asset -> storageService.deleteQuietly(asset.getPublicId(), asset.getResourceType()));
             storageService.deleteQuietly(action.getEvidencePublicId(), action.getEvidenceResourceType());
+            storageService.deleteQuietly(action.getProofDocumentPublicId(), action.getProofDocumentResourceType());
             assetRepository.deleteByAction_Id(id);
             deleteLocalEvidenceIfPresent(id);
             actionRepository.deleteById(id);
@@ -279,8 +350,53 @@ public class EcrActionController {
                 || action.getId() != null && !assetRepository.findByAction_IdOrderByUploadedAtDescIdDesc(action.getId()).isEmpty();
     }
 
+    private void syncLatestEvidenceMetadata(EcrAction action) {
+        if (action == null || action.getId() == null) {
+            return;
+        }
+        List<EcrActionAsset> remainingAssets = assetRepository.findByAction_IdOrderByUploadedAtDescIdDesc(action.getId());
+        if (remainingAssets.isEmpty()) {
+            action.setEvidenceFileName(null);
+            action.setEvidenceContentType(null);
+            action.setEvidenceFileSize(null);
+            action.setEvidenceFileUrl(null);
+            action.setEvidencePublicId(null);
+            action.setEvidenceResourceType(null);
+            action.setEvidence(null);
+            return;
+        }
+        EcrActionAsset latest = remainingAssets.get(0);
+        action.setEvidenceFileName(latest.getFileName());
+        action.setEvidenceContentType(latest.getContentType());
+        action.setEvidenceFileSize(latest.getFileSize());
+        action.setEvidenceFileUrl(latest.getFileUrl());
+        action.setEvidencePublicId(latest.getPublicId());
+        action.setEvidenceResourceType(latest.getResourceType());
+        action.setEvidence(latest.getFileName());
+    }
+
     private boolean requiresEvidence(EcrAction action) {
-        return action != null && (action.isEvidenceRequired() || String.valueOf(action.getCriticality()).startsWith("1"));
+        return action != null && (action.isEvidenceRequired()
+                || hasProofDocument(action)
+                || String.valueOf(action.getCriticality()).startsWith("1"));
+    }
+
+    private boolean hasProofDocument(EcrAction action) {
+        return action != null && (hasText(action.getProofDocumentFileName()) || hasText(action.getProofDocumentFileUrl()));
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private void clearProofDocument(EcrAction action) {
+        action.setProofDocument(null);
+        action.setProofDocumentFileName(null);
+        action.setProofDocumentContentType(null);
+        action.setProofDocumentFileSize(null);
+        action.setProofDocumentFileUrl(null);
+        action.setProofDocumentPublicId(null);
+        action.setProofDocumentResourceType(null);
     }
 
     private boolean isDone(EcrAction action) {

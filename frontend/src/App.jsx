@@ -32,6 +32,8 @@ import {
   createUser,
   clearSession,
   deleteActionPlanningRule,
+  deleteActionAsset,
+  deleteActionPlanningRuleProofDocument,
   deleteClientReference,
   deleteEcrRequest,
   deleteProductReference,
@@ -65,9 +67,12 @@ import {
   updateUser,
   updateUserProfile,
   uploadActionEvidence,
+  uploadActionPlanningRuleProofDocument,
+  uploadActionProofDocument,
   uploadEcrRequestImage,
   actionAssetDownloadUrl,
   actionEvidenceUrl,
+  actionProofDocumentUrl,
   approvePhaseValidation,
   changeUserPassword,
   getPhaseValidations,
@@ -467,6 +472,7 @@ function App() {
         .filter((action) => action.title.trim())
         .map(({ clientId, ...action }) => ({
           ...action,
+          evidenceRequired: action.evidenceRequired || isCriticalAction(action),
           workDurationDays: Number(action.workDurationDays) || 1
         }))
     };
@@ -651,11 +657,12 @@ function App() {
   }
 
   function actionFormPayload(form, stage) {
-    const evidenceRequired = form.evidenceRequired || isCriticalAction(form);
+    const evidenceRequired = form.evidenceRequired || hasActionProofDocument(form) || isCriticalAction(form);
     const done = isActionDone(form);
     return {
       ...form,
       evidenceFile: undefined,
+      proofDocumentFile: undefined,
       evidenceRequired,
       checked: done,
       closedDate: done ? new Date().toISOString().slice(0, 10) : null,
@@ -685,7 +692,11 @@ function App() {
   }
 
   function requiresEvidence(action) {
-    return Boolean(action?.evidenceRequired) || isCriticalAction(action);
+    return Boolean(action?.evidenceRequired) || hasActionProofDocument(action) || isCriticalAction(action);
+  }
+
+  function hasActionProofDocument(action) {
+    return Boolean(action?.proofDocumentFile) || Boolean(String(action?.proofDocumentFileName || action?.proofDocumentFileUrl || "").trim());
   }
 
   function refreshCurrentActionsAndRequests() {
@@ -703,6 +714,7 @@ function App() {
     event.preventDefault();
     if (!selectedRequest) return Promise.resolve();
     const evidenceFiles = filesFromValue(actionForm.evidenceFile);
+    const proofDocumentFile = firstFileFromValue(actionForm.proofDocumentFile);
     if (requiresEvidence(actionForm) && isActionDone(actionForm) && evidenceFiles.length === 0) {
       const message = "Ajoutez un asset avant de creer cette action comme terminee.";
       setError(message);
@@ -712,16 +724,22 @@ function App() {
     setSaving(true);
     setError("");
     const payload = actionFormPayload(actionForm, selectedStage);
-    const createPayload = evidenceFiles.length > 0 && isActionDone(payload)
-      ? { ...payload, checked: false, status: "TODO", closedDate: null, finalizationDate: null }
-      : payload;
+    const finalPayload = proofDocumentFile ? { ...payload, evidenceRequired: true } : payload;
+    const createBasePayload = proofDocumentFile ? { ...payload, evidenceRequired: actionForm.evidenceRequired || isCriticalAction(actionForm) } : payload;
+    const hasUploads = Boolean(proofDocumentFile) || evidenceFiles.length > 0;
+    const createPayload = hasUploads && isActionDone(finalPayload)
+      ? { ...createBasePayload, checked: false, status: "TODO", closedDate: null, finalizationDate: null }
+      : createBasePayload;
     return createAction(selectedRequest.id, createPayload)
       .then((savedAction) => {
-        if (evidenceFiles.length > 0) {
-          return uploadActionEvidenceFiles(savedAction.id, evidenceFiles)
-            .then((actionWithEvidence) => (isActionDone(payload) ? updateAction(actionWithEvidence.id, payload) : actionWithEvidence));
-        }
-        return savedAction;
+        const proofUpload = proofDocumentFile ? uploadActionProofDocument(savedAction.id, proofDocumentFile) : Promise.resolve(savedAction);
+        return proofUpload.then((actionWithProof) => {
+          if (evidenceFiles.length > 0) {
+            return uploadActionEvidenceFiles(actionWithProof.id, evidenceFiles)
+              .then((actionWithEvidence) => (isActionDone(finalPayload) ? updateAction(actionWithEvidence.id, finalPayload) : actionWithEvidence));
+          }
+          return isActionDone(finalPayload) ? updateAction(actionWithProof.id, finalPayload) : actionWithProof;
+        });
       })
       .then(() => refreshCurrentActionsAndRequests())
       .then((actionData) => {
@@ -800,6 +818,27 @@ function App() {
     return getPhaseValidations(requestId).then((items) => {
       setPhaseValidations(items);
       return items;
+    });
+  }
+
+  function handleDeleteActionAsset(action, asset) {
+    if (!asset || asset.legacy) {
+      warningAlert("Suppression indisponible", "Cet ancien fichier ne peut pas etre supprime depuis la liste des assets.");
+      return;
+    }
+    confirmDelete("Supprimer l'asset ?", `L'asset ${asset.fileName || "selectionne"} sera supprime de l'action et de Cloudinary.`).then((result) => {
+      if (!result.isConfirmed) return;
+      setError("");
+      deleteActionAsset(asset.id)
+        .then((savedAction) => {
+          setActions((items) => items.map((item) => (item.id === savedAction.id ? savedAction : item)));
+          successToast("Asset supprime");
+        })
+        .catch(() => {
+          const message = "Suppression de l'asset impossible.";
+          setError(message);
+          errorAlert(message);
+        });
     });
   }
 
@@ -1101,14 +1140,18 @@ function App() {
   function handleSavePlanningRule(event) {
     event.preventDefault();
     if (!planningRuleForm.actionTitle.trim()) return;
+    const proofDocumentFile = firstFileFromValue(planningRuleForm.proofDocumentFile);
     setSaving(true);
     setError("");
     const payload = {
       ...planningRuleForm,
+      proofDocumentFile: undefined,
       actionTitle: planningRuleForm.actionTitle.trim(),
       topicRisk: planningRuleForm.topicRisk.trim() || null,
       responsible: planningRuleForm.responsible.trim() || null,
-      expectedEvidence: null,
+      validator: planningRuleForm.validator.trim() || null,
+      expectedEvidence: planningRuleForm.expectedEvidence.trim() || null,
+      evidenceRequired: planningRuleForm.evidenceRequired || Boolean(proofDocumentFile) || Boolean(planningRuleForm.proofDocumentFileName),
       dependencyActionTitle: planningRuleForm.dependencyActionTitle.trim() || null,
       dependencyAnchor: "OUTPUT",
       durationDays: Number(planningRuleForm.durationDays) || 0
@@ -1116,6 +1159,10 @@ function App() {
     const isEdit = Boolean(editingPlanningRule);
     const request = isEdit ? updateActionPlanningRule(editingPlanningRule, payload) : createActionPlanningRule(payload);
     request
+      .then((savedRule) => {
+        if (!proofDocumentFile) return savedRule;
+        return uploadActionPlanningRuleProofDocument(savedRule.id, proofDocumentFile);
+      })
       .then((savedRule) => {
         setPlanningRules((items) => [...items.filter((item) => item.id !== savedRule.id), savedRule].sort(comparePlanningRules));
         setPlanningRuleForm(emptyPlanningRuleForm);
@@ -1135,17 +1182,61 @@ function App() {
       .finally(() => setSaving(false));
   }
 
+  function handleDeletePlanningRuleProofDocument(ruleId) {
+    if (!ruleId) {
+      setPlanningRuleForm((form) => ({ ...form, proofDocumentFile: null }));
+      return;
+    }
+    confirmDelete("Supprimer l'element preuve ?", "Le document sera supprime de cette action standard et de Cloudinary.").then((result) => {
+      if (!result.isConfirmed) return;
+      setSaving(true);
+      setError("");
+      deleteActionPlanningRuleProofDocument(ruleId)
+        .then((savedRule) => {
+          setPlanningRules((items) => [...items.filter((item) => item.id !== savedRule.id), savedRule].sort(comparePlanningRules));
+          setPlanningRuleForm((form) => ({
+            ...form,
+            proofDocument: "",
+            proofDocumentFile: null,
+            proofDocumentFileName: "",
+            proofDocumentFileUrl: "",
+            proofDocumentContentType: "",
+            proofDocumentFileSize: null,
+            proofDocumentPublicId: "",
+            proofDocumentResourceType: ""
+          }));
+          successToast("Element preuve supprime");
+        })
+        .catch(() => {
+          const message = "Suppression de l'element preuve impossible.";
+          setError(message);
+          errorAlert(message);
+        })
+        .finally(() => setSaving(false));
+    });
+  }
+
   function startPlanningRuleEdit(rule) {
     setEditingPlanningRule(rule.id);
     setPlanningRuleForm({
       stage: rule.stage,
+      id: rule.id,
       appliesToModification: rule.appliesToModification ?? true,
       appliesToNewProject: rule.appliesToNewProject ?? true,
       actionTitle: rule.actionTitle || "",
       topicRisk: rule.topicRisk || "",
       responsible: rule.responsible || "",
+      validator: rule.validator || "",
       criticality: rule.criticality || "3-faible",
       expectedEvidence: rule.expectedEvidence || "",
+      proofDocument: rule.proofDocument || "",
+      proofDocumentFile: null,
+      proofDocumentFileName: rule.proofDocumentFileName || "",
+      proofDocumentFileUrl: rule.proofDocumentFileUrl || "",
+      proofDocumentContentType: rule.proofDocumentContentType || "",
+      proofDocumentFileSize: rule.proofDocumentFileSize || null,
+      proofDocumentPublicId: rule.proofDocumentPublicId || "",
+      proofDocumentResourceType: rule.proofDocumentResourceType || "",
       evidenceRequired: Boolean(rule.evidenceRequired),
       dependencyActionTitle: rule.dependencyActionTitle || "",
       dependencyAnchor: rule.dependencyAnchor || "OUTPUT",
@@ -1430,6 +1521,7 @@ function App() {
               setPlanningRuleForm(emptyPlanningRuleForm);
             }}
             onDeletePlanningRule={handleDeletePlanningRule}
+            onDeletePlanningRuleProofDocument={handleDeletePlanningRuleProofDocument}
             onEditPlanningRule={startPlanningRuleEdit}
             onSubmitPlanningRule={handleSavePlanningRule}
             setPlanningRuleForm={setPlanningRuleForm}
@@ -1515,6 +1607,7 @@ function App() {
             handleCreateAction={handleCreateAction}
             handleStageChange={handleStageChange}
             handleToggleAction={handleToggleAction}
+            handleDeleteActionAsset={handleDeleteActionAsset}
             handleUploadEvidence={handleUploadEvidence}
             handleApprovePhase={handleApprovePhase}
             handleRejectPhase={handleRejectPhase}
@@ -1739,7 +1832,7 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
             <strong>Nouveau Projet</strong>
           </span>
         </label>
-        <PhasePreview stages={availableStages} />
+        <PhasePreview newVersion={ecrForm.newVersion} stages={availableStages} />
         <div className="field-grid">
           <label>
             Numéro client externe
@@ -1879,7 +1972,7 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
   );
 }
 
-function PhasePreview({ stages }) {
+function PhasePreview({ newVersion, stages }) {
   return (
     <section className="phase-preview" aria-label="Aperçu des phases">
       <div className="phase-preview-title">
@@ -1888,7 +1981,7 @@ function PhasePreview({ stages }) {
       </div>
       <div className="phase-chip-grid">
         {stages.map(([key, label], index) => (
-          <span className={`phase-chip ${stageColorClass(key, ecrForm.newVersion)}`} key={key}>
+          <span className={`phase-chip ${stageColorClass(key, newVersion)}`} key={key}>
             <strong>{index + 1}</strong>
             {label}
           </span>
@@ -2105,6 +2198,7 @@ function ProjectsPage({
   saving,
   onCancelPlanningRuleEdit,
   onDeletePlanningRule,
+  onDeletePlanningRuleProofDocument,
   onEditPlanningRule,
   onSubmitPlanningRule,
   setPlanningRuleForm
@@ -2119,6 +2213,7 @@ function ProjectsPage({
         saving={saving}
         onCancelEdit={onCancelPlanningRuleEdit}
         onDelete={onDeletePlanningRule}
+        onDeleteProofDocument={onDeletePlanningRuleProofDocument}
         onEdit={onEditPlanningRule}
         onSubmit={onSubmitPlanningRule}
         setForm={setPlanningRuleForm}
@@ -2287,6 +2382,10 @@ function filesFromValue(value) {
   return [value].filter(Boolean);
 }
 
+function firstFileFromValue(value) {
+  return filesFromValue(value)[0] || null;
+}
+
 function fileNamesLabel(value, fallback) {
   const files = filesFromValue(value);
   if (files.length === 0) return fallback;
@@ -2315,6 +2414,10 @@ function actionAssets(action) {
 
 function hasActionAsset(action) {
   return actionAssets(action).length > 0;
+}
+
+function hasActionProofDocument(action) {
+  return Boolean(action?.proofDocumentFile) || Boolean(String(action?.proofDocumentFileName || action?.proofDocumentFileUrl || "").trim());
 }
 
 function actionAssetUrl(action, asset) {
@@ -2414,6 +2517,7 @@ function ModificationsPage(props) {
     handleCreateAction,
     handleStageChange,
     handleToggleAction,
+    handleDeleteActionAsset,
     handleUploadEvidence,
     handleApprovePhase,
     handleRejectPhase,
@@ -2594,6 +2698,7 @@ function ModificationsPage(props) {
                   doneCount={doneCount}
                   handleCreateAction={handleCreateAction}
                   handleToggleAction={handleToggleAction}
+                  handleDeleteActionAsset={handleDeleteActionAsset}
                   handleUploadEvidence={handleUploadEvidence}
                   isCriticalAction={isCriticalAction}
                   canAdmin={canAdmin}
@@ -2801,7 +2906,7 @@ function PhaseValidationPanel({ canRequestValidation, canValidate, isCurrentStag
   );
 }
 
-function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleToggleAction, handleUploadEvidence, isCriticalAction, lateActions, requiresEvidence, saving, selectedStage, stageNewProject, updateActionForm }) {
+function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleToggleAction, handleDeleteActionAsset, handleUploadEvidence, isCriticalAction, lateActions, requiresEvidence, saving, selectedStage, stageNewProject, updateActionForm }) {
   const [expanded, setExpanded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const stageTitle = stageLabel(selectedStage, stageNewProject);
@@ -2833,6 +2938,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
         actions={actions}
         currentUser={currentUser}
         handleToggleAction={handleToggleAction}
+        handleDeleteActionAsset={handleDeleteActionAsset}
         handleUploadEvidence={handleUploadEvidence}
         canAdmin={canAdmin}
         isCriticalAction={isCriticalAction}
@@ -2864,6 +2970,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
               currentUser={currentUser}
               expanded
               handleToggleAction={handleToggleAction}
+              handleDeleteActionAsset={handleDeleteActionAsset}
               handleUploadEvidence={handleUploadEvidence}
               canAdmin={canAdmin}
               isCriticalAction={isCriticalAction}
@@ -2888,7 +2995,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
   );
 }
 
-function ActionList({ actions, currentUser, expanded = false, handleToggleAction, handleUploadEvidence, requiresEvidence, saving }) {
+function ActionList({ actions, currentUser, expanded = false, handleToggleAction, handleDeleteActionAsset, handleUploadEvidence, requiresEvidence, saving }) {
   return (
     <>
       <div className={expanded ? "action-list expanded" : "action-list"}>
@@ -2902,10 +3009,11 @@ function ActionList({ actions, currentUser, expanded = false, handleToggleAction
               </label>
               <div className="action-main">
                 <h3>{action.title}</h3>
-                <p>{action.topicRisk || "-"} / {action.expectedEvidence || "élément preuve non renseigné"}</p>
+                <p>{action.topicRisk || "-"}</p>
               </div>
               <div className="action-meta">
                 <span><em>Pilote</em><strong>{action.responsible || "ì définir"}</strong></span>
+                <span><em>Validateur</em><strong>{action.validator || "a definir"}</strong></span>
                 <span><em>Criticite</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>
                 <span><em>Debut</em><strong>{action.startDate || "-"}</strong></span>
                 <span><em>Fin</em><strong>{action.endDate || "-"}</strong></span>
@@ -2913,12 +3021,29 @@ function ActionList({ actions, currentUser, expanded = false, handleToggleAction
                 <span><em>Jours</em><strong>{action.workDurationDays ?? "-"}</strong></span>
                 <span><em>Asset</em><strong>{requiresEvidence(action) ? "Obligatoire" : "Optionnel"}</strong></span>
                 <span className="evidence-meta">
+                  <em>Element preuve</em>
+                  <strong className="asset-link-list">
+                    {hasActionProofDocument(action) ? (
+                      <a className="file-link" href={actionProofDocumentUrl(action.id)} target="_blank" rel="noreferrer">
+                        {action.proofDocumentFileName || action.proofDocument || "Element preuve"}
+                      </a>
+                    ) : "-"}
+                  </strong>
+                </span>
+                <span className="evidence-meta">
                   <em>Assets</em>
                   <strong className="asset-link-list">
                     {actionAssets(action).length > 0 ? actionAssets(action).map((asset) => (
-                      <a className="file-link" href={actionAssetUrl(action, asset)} key={asset.id || asset.fileName} target="_blank" rel="noreferrer">
-                        {asset.fileName || "Asset"}
-                      </a>
+                      <span className="asset-link-item" key={asset.id || asset.fileName}>
+                        <a className="file-link" href={actionAssetUrl(action, asset)} target="_blank" rel="noreferrer">
+                          {asset.fileName || "Asset"}
+                        </a>
+                        {!asset.legacy && (
+                          <button className="ghost-icon asset-delete-action" disabled={saving || !canManageActionForUser(currentUser, action)} type="button" onClick={() => handleDeleteActionAsset(action, asset)} title="Supprimer l'asset">
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </span>
                     )) : "-"}
                   </strong>
                   <label className={canManageActionForUser(currentUser, action) ? "row-upload asset-upload-action" : "row-upload asset-upload-action disabled"} title="Affecter un asset">
@@ -2936,11 +3061,11 @@ function ActionList({ actions, currentUser, expanded = false, handleToggleAction
   );
 }
 
-function ActionRoleSelect({ options = [], value, onChange }) {
+function ActionRoleSelect({ options = [], placeholder = "Selectionner un role", value, onChange }) {
   const availableOptions = value && !options.includes(value) ? [value, ...options] : options;
   return (
     <select value={value} onChange={(event) => onChange(event.target.value)}>
-      <option value="">Selectionner un role</option>
+      <option value="">{placeholder}</option>
       {availableOptions.map((role) => (
         <option key={role} value={role}>{role}</option>
       ))}
@@ -2972,24 +3097,29 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, isCriticalAction, s
           <input value={actionForm.topicRisk} onChange={(event) => updateActionForm("topicRisk", event.target.value)} placeholder="Topic_Risk" />
           <input className="action-title-input" required value={actionForm.title} onChange={(event) => updateActionForm("title", event.target.value)} placeholder="Point_verif" />
           <ActionRoleSelect options={actionRoleOptions} value={actionForm.responsible} onChange={(value) => updateActionForm("responsible", value)} />
+          <ActionRoleSelect options={actionRoleOptions} value={actionForm.validator} onChange={(value) => updateActionForm("validator", value)} placeholder="Selectionner un validateur" />
           <select value={actionForm.criticality} onChange={(event) => updateActionForm("criticality", event.target.value)}>
             <option value="1-critique">1-critique</option>
             <option value="2-moyenne">2-moyenne</option>
             <option value="3-faible">3-faible</option>
           </select>
-          <input value={actionForm.expectedEvidence} onChange={(event) => updateActionForm("expectedEvidence", event.target.value)} placeholder="élément preuve" />
+          <label className="file-picker">
+            <FileText size={15} />
+            <span>{fileNamesLabel(actionForm.proofDocumentFile, "Element preuve")}</span>
+            <input type="file" onChange={(event) => updateActionForm("proofDocumentFile", event.target.files?.[0] || null)} />
+          </label>
           <input type="date" value={actionForm.startDate} onChange={(event) => updateActionForm("startDate", event.target.value)} title="Date debut" />
           <input type="date" value={actionForm.endDate} onChange={(event) => updateActionForm("endDate", event.target.value)} title="Date fin" />
           <input min="0" type="number" value={actionForm.workDurationDays} onChange={(event) => updateActionForm("workDurationDays", event.target.value)} title="Jours de travail" />
           <label className="file-picker">
             <Paperclip size={15} />
-            <span>{fileNamesLabel(actionForm.evidenceFile, "Assets")}</span>
+            <span>{fileNamesLabel(actionForm.evidenceFile, "Assets validation")}</span>
             <input multiple type="file" onChange={(event) => updateActionForm("evidenceFile", event.target.files)} />
           </label>
           <label className="action-asset-toggle">
             <input
-              checked={actionForm.evidenceRequired || isCriticalAction(actionForm)}
-              disabled={isCriticalAction(actionForm)}
+              checked={actionForm.evidenceRequired || Boolean(actionForm.proofDocumentFile) || isCriticalAction(actionForm)}
+              disabled={Boolean(actionForm.proofDocumentFile) || isCriticalAction(actionForm)}
               type="checkbox"
               onChange={(event) => updateActionForm("evidenceRequired", event.target.checked)}
             />
@@ -3037,4 +3167,3 @@ function ChecklistPanel({ checklist }) {
 }
 
 export default App;
-

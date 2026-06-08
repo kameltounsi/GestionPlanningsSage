@@ -36,6 +36,9 @@ public class EcrAction {
     @Column(length = 1000)
     private String responsible;
 
+    @Column(length = 1000)
+    private String validator;
+
     private String criticality;
 
     @Column(length = 3000)
@@ -59,6 +62,13 @@ public class EcrAction {
 
     @Column(length = 3000)
     private String proofDocument;
+    private String proofDocumentFileName;
+    private String proofDocumentContentType;
+    private Long proofDocumentFileSize;
+    @Column(length = 2000)
+    private String proofDocumentFileUrl;
+    private String proofDocumentPublicId;
+    private String proofDocumentResourceType;
     private boolean checked;
     private LocalDate deadline;
     private LocalDate date1;
@@ -132,6 +142,14 @@ public class EcrAction {
 
     public void setResponsible(String responsible) {
         this.responsible = responsible;
+    }
+
+    public String getValidator() {
+        return validator;
+    }
+
+    public void setValidator(String validator) {
+        this.validator = validator;
     }
 
     public String getCriticality() {
@@ -228,6 +246,54 @@ public class EcrAction {
 
     public void setProofDocument(String proofDocument) {
         this.proofDocument = proofDocument;
+    }
+
+    public String getProofDocumentFileName() {
+        return proofDocumentFileName;
+    }
+
+    public void setProofDocumentFileName(String proofDocumentFileName) {
+        this.proofDocumentFileName = proofDocumentFileName;
+    }
+
+    public String getProofDocumentContentType() {
+        return proofDocumentContentType;
+    }
+
+    public void setProofDocumentContentType(String proofDocumentContentType) {
+        this.proofDocumentContentType = proofDocumentContentType;
+    }
+
+    public Long getProofDocumentFileSize() {
+        return proofDocumentFileSize;
+    }
+
+    public void setProofDocumentFileSize(Long proofDocumentFileSize) {
+        this.proofDocumentFileSize = proofDocumentFileSize;
+    }
+
+    public String getProofDocumentFileUrl() {
+        return proofDocumentFileUrl;
+    }
+
+    public void setProofDocumentFileUrl(String proofDocumentFileUrl) {
+        this.proofDocumentFileUrl = proofDocumentFileUrl;
+    }
+
+    public String getProofDocumentPublicId() {
+        return proofDocumentPublicId;
+    }
+
+    public void setProofDocumentPublicId(String proofDocumentPublicId) {
+        this.proofDocumentPublicId = proofDocumentPublicId;
+    }
+
+    public String getProofDocumentResourceType() {
+        return proofDocumentResourceType;
+    }
+
+    public void setProofDocumentResourceType(String proofDocumentResourceType) {
+        this.proofDocumentResourceType = proofDocumentResourceType;
     }
 
     public boolean isChecked() {

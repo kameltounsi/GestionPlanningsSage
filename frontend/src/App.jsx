@@ -2545,7 +2545,7 @@ function ModificationsPage(props) {
                         contentType={selectedRequest.beforePhotoContentType}
                         onPreview={setPreviewImage}
                         sourceUrl={selectedRequest.beforePhotoUrl}
-                        title="Photo état"
+                        title="Photo était"
                         url={ecrRequestFileDownloadUrl(selectedRequest.id, "before")}
                       />
                     )}

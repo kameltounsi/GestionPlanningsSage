@@ -51,6 +51,7 @@ public class ActionPlanningRuleController {
     public ResponseEntity<ActionPlanningRule> update(@PathVariable Long id, @Valid @RequestBody ActionPlanningRule updatedRule) {
         return ruleRepository.findById(id)
                 .map(rule -> {
+                    ActionPlanningRule previousRule = snapshotRule(rule);
                     rule.setStage(updatedRule.getStage());
                     rule.setAppliesToModification(updatedRule.isAppliesToModification());
                     rule.setAppliesToNewProject(updatedRule.isAppliesToNewProject());
@@ -74,7 +75,7 @@ public class ActionPlanningRuleController {
                     rule.setDependencyAnchor(updatedRule.getDependencyAnchor());
                     rule.setDurationDays(updatedRule.getDurationDays());
                     ActionPlanningRule savedRule = ruleRepository.save(normalize(rule));
-                    recalculateAllRequests();
+                    recalculateAllRequests(previousRule, savedRule);
                     return ResponseEntity.ok(savedRule);
                 })
                 .orElse(ResponseEntity.notFound().build());
@@ -160,12 +161,44 @@ public class ActionPlanningRuleController {
     }
 
     private void recalculateAllRequests() {
+        recalculateAllRequests(null, null);
+    }
+
+    private void recalculateAllRequests(ActionPlanningRule previousRule, ActionPlanningRule updatedRule) {
         requestRepository.findAll().stream()
                 .filter(request -> request.getCurrentStage() != EcrStage.CLOSED && request.getCurrentStage() != EcrStage.CANCELLED)
                 .forEach(request -> {
+                    if (updatedRule != null) {
+                        templateService.syncActionRuleFor(request, previousRule, updatedRule);
+                    }
                     templateService.ensureMissingActionsFor(request);
                     planningService.recalculateRequest(request);
                 });
+    }
+
+    private ActionPlanningRule snapshotRule(ActionPlanningRule source) {
+        ActionPlanningRule snapshot = new ActionPlanningRule();
+        snapshot.setStage(source.getStage());
+        snapshot.setAppliesToModification(source.isAppliesToModification());
+        snapshot.setAppliesToNewProject(source.isAppliesToNewProject());
+        snapshot.setActionTitle(source.getActionTitle());
+        snapshot.setTopicRisk(source.getTopicRisk());
+        snapshot.setResponsible(source.getResponsible());
+        snapshot.setValidator(source.getValidator());
+        snapshot.setCriticality(source.getCriticality());
+        snapshot.setExpectedEvidence(source.getExpectedEvidence());
+        snapshot.setEvidenceRequired(source.isEvidenceRequired());
+        snapshot.setDependencyActionTitle(source.getDependencyActionTitle());
+        snapshot.setDependencyAnchor(source.getDependencyAnchor());
+        snapshot.setDurationDays(source.getDurationDays());
+        snapshot.setProofDocument(source.getProofDocument());
+        snapshot.setProofDocumentFileName(source.getProofDocumentFileName());
+        snapshot.setProofDocumentContentType(source.getProofDocumentContentType());
+        snapshot.setProofDocumentFileSize(source.getProofDocumentFileSize());
+        snapshot.setProofDocumentFileUrl(source.getProofDocumentFileUrl());
+        snapshot.setProofDocumentPublicId(source.getProofDocumentPublicId());
+        snapshot.setProofDocumentResourceType(source.getProofDocumentResourceType());
+        return snapshot;
     }
 
     private void clearProofDocument(ActionPlanningRule rule) {

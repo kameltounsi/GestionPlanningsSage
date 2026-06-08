@@ -66,13 +66,13 @@ public class EcrActionController {
         if (Boolean.TRUE.equals(late)) {
             List<EcrAction> actions = actionRepository.findByDeadlineBeforeAndStatusNotInOrderByDeadlineAsc(LocalDate.now(), Arrays.asList(ActionStatus.DONE, ActionStatus.DONE_LATE));
             planningService.refreshActionStatuses(actions);
-            return actionRepository.saveAll(actions).stream()
+            return enrichActions(actionRepository.saveAll(actions).stream()
                     .filter(action -> action.getStatus() != ActionStatus.DONE && action.getStatus() != ActionStatus.DONE_LATE)
-                    .collect(Collectors.toList());
+                    .collect(Collectors.toList()));
         }
         List<EcrAction> actions = actionRepository.findAll();
         planningService.refreshActionStatuses(actions);
-        return actionRepository.saveAll(actions);
+        return enrichActions(actionRepository.saveAll(actions));
     }
 
     @GetMapping("/ecr-requests/{requestId}/actions")
@@ -93,7 +93,7 @@ public class EcrActionController {
                         .filter(action -> action.getStage() == stage)
                         .collect(Collectors.toList());
             }
-            return ResponseEntity.ok(actions);
+            return ResponseEntity.ok(enrichActions(actions));
         }).orElse(ResponseEntity.notFound().build());
     }
 
@@ -110,11 +110,12 @@ public class EcrActionController {
                     }
                     action.setRequest(request);
                     action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
-                    action.setValidator(assigneeResolver.resolve(request, action.getValidator()));
+                    action.setValidatorRole(action.getValidator());
+                    action.setValidator(action.getValidator());
                     syncFinalizationDate(action, action);
                     EcrAction saved = actionRepository.save(action);
                     planningService.recalculateRequest(request);
-                    return ResponseEntity.created(URI.create("/api/actions/" + saved.getId())).body(saved);
+                    return ResponseEntity.created(URI.create("/api/actions/" + saved.getId())).body(enrichAction(saved));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -133,7 +134,8 @@ public class EcrActionController {
                     action.setDescription(updatedAction.getDescription());
                     action.setTopicRisk(updatedAction.getTopicRisk());
                     action.setResponsible(assigneeResolver.resolve(action.getRequest(), updatedAction.getResponsible()));
-                    action.setValidator(assigneeResolver.resolve(action.getRequest(), updatedAction.getValidator()));
+                    action.setValidatorRole(updatedAction.getValidatorRole() == null || updatedAction.getValidatorRole().trim().isEmpty() ? updatedAction.getValidator() : updatedAction.getValidatorRole());
+                    action.setValidator(updatedAction.getValidator());
                     action.setCriticality(updatedAction.getCriticality());
                     action.setExpectedEvidence(updatedAction.getExpectedEvidence());
                     action.setEvidenceRequired(updatedAction.isEvidenceRequired());
@@ -167,7 +169,7 @@ public class EcrActionController {
                     EcrAction saved = actionRepository.save(action);
                     planningService.recalculateRequest(saved.getRequest());
                     notifyIfPhaseReady(saved.getRequest(), saved.getStage(), user);
-                    return ResponseEntity.ok(saved);
+                    return ResponseEntity.ok(enrichAction(saved));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
@@ -186,7 +188,7 @@ public class EcrActionController {
         EcrAction saved = actionRepository.save(action);
         planningService.recalculateRequest(saved.getRequest());
         notifyIfPhaseReady(saved.getRequest(), saved.getStage(), user);
-        return ResponseEntity.ok(saved);
+        return ResponseEntity.ok(enrichAction(saved));
     }
 
     @PostMapping(value = "/actions/{id}/evidence", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -215,7 +217,7 @@ public class EcrActionController {
                     action.setEvidencePublicId(asset.getPublicId());
                     action.setEvidenceResourceType(asset.getResourceType());
                     action.setEvidence(asset.getFileName());
-                    return ResponseEntity.ok(actionRepository.save(action));
+                    return ResponseEntity.ok(enrichAction(actionRepository.save(action)));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
@@ -239,7 +241,7 @@ public class EcrActionController {
                     action.setProofDocumentPublicId(asset.getPublicId());
                     action.setProofDocumentResourceType(asset.getResourceType());
                     action.setEvidenceRequired(true);
-                    return ResponseEntity.ok(actionRepository.save(action));
+                    return ResponseEntity.ok(enrichAction(actionRepository.save(action)));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
@@ -285,7 +287,7 @@ public class EcrActionController {
                 .map(action -> {
                     storageService.deleteQuietly(action.getProofDocumentPublicId(), action.getProofDocumentResourceType());
                     clearProofDocument(action);
-                    return ResponseEntity.ok(actionRepository.save(action));
+                    return ResponseEntity.ok(enrichAction(actionRepository.save(action)));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
@@ -315,7 +317,7 @@ public class EcrActionController {
                     assetRepository.delete(asset);
                     assetRepository.flush();
                     syncLatestEvidenceMetadata(action);
-                    return ResponseEntity.ok(actionRepository.save(action));
+                    return ResponseEntity.ok(enrichAction(actionRepository.save(action)));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
@@ -442,6 +444,19 @@ public class EcrActionController {
         validation.setRequestedAt(LocalDateTime.now());
         validationRepository.save(validation);
         accountMailService.sendPhaseReadyEmail(request, stage, accessControlService.validatorsAndManagersFor(request));
+    }
+
+    private List<EcrAction> enrichActions(List<EcrAction> actions) {
+        return actions.stream()
+                .map(this::enrichAction)
+                .collect(Collectors.toList());
+    }
+
+    private EcrAction enrichAction(EcrAction action) {
+        if (action != null) {
+            action.setValidatorDisplayName(assigneeResolver.displayFor(action.getRequest(), action.getValidatorRole(), action.getValidator()));
+        }
+        return action;
     }
 
     private String safeFileName(String fileName) {

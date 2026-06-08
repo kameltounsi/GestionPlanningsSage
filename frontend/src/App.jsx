@@ -946,6 +946,9 @@ function App() {
         setProjectForm({ name: "", projectTeam: "" });
         setEditingProject(null);
         successToast(isEdit ? "Projet modifie" : "Projet ajoute");
+        if (selectedRequest?.modificationProject === savedProject.name || selectedRequest?.modificationProject === editingProject) {
+          refreshCurrentActionsAndRequests().catch(() => {});
+        }
       })
       .catch(() => {
         const message = "Sauvegarde projet impossible. Verifiez le nom du projet.";
@@ -3013,7 +3016,7 @@ function ActionList({ actions, currentUser, expanded = false, handleToggleAction
               </div>
               <div className="action-meta">
                 <span><em>Pilote</em><strong>{action.responsible || "ì définir"}</strong></span>
-                <span><em>Validateur</em><strong>{action.validator || "a definir"}</strong></span>
+                <span><em>Validateur</em><strong>{action.validatorDisplayName || action.validator || "a definir"}</strong></span>
                 <span><em>Criticite</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>
                 <span><em>Debut</em><strong>{action.startDate || "-"}</strong></span>
                 <span><em>Fin</em><strong>{action.endDate || "-"}</strong></span>

@@ -55,7 +55,9 @@ public class ActionPlanningService {
             }
             for (EcrAction action : stageActions) {
                 action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
-                action.setValidator(assigneeResolver.resolve(request, action.getValidator()));
+                if (action.getValidatorRole() == null || action.getValidatorRole().trim().isEmpty()) {
+                    action.setValidatorRole(action.getValidator());
+                }
                 applyRule(action, rules, actionsByKey, nextPhaseStart, new HashSet<>());
                 if (action.getStartDate() != null && action.getStartDate().isBefore(nextPhaseStart)) {
                     shiftActionTo(action, nextPhaseStart);

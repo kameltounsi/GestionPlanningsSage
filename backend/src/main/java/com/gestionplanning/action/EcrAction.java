@@ -39,6 +39,12 @@ public class EcrAction {
     @Column(length = 1000)
     private String validator;
 
+    @Column(length = 1000)
+    private String validatorRole;
+
+    @Transient
+    private String validatorDisplayName;
+
     private String criticality;
 
     @Column(length = 3000)
@@ -150,6 +156,22 @@ public class EcrAction {
 
     public void setValidator(String validator) {
         this.validator = validator;
+    }
+
+    public String getValidatorRole() {
+        return validatorRole;
+    }
+
+    public void setValidatorRole(String validatorRole) {
+        this.validatorRole = validatorRole;
+    }
+
+    public String getValidatorDisplayName() {
+        return validatorDisplayName == null || validatorDisplayName.trim().isEmpty() ? validator : validatorDisplayName;
+    }
+
+    public void setValidatorDisplayName(String validatorDisplayName) {
+        this.validatorDisplayName = validatorDisplayName;
     }
 
     public String getCriticality() {

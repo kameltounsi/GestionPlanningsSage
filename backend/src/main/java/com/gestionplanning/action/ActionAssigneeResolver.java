@@ -35,7 +35,50 @@ public class ActionAssigneeResolver {
         }
         Optional<UserRole> role = roleFrom(value);
         if (!role.isPresent()) {
+            return findProjectMemberByRoleLabel(request, value)
+                    .map(this::displayName)
+                    .orElse(value);
+        }
+        return findProjectMemberByRole(request, role.get())
+                .map(this::displayName)
+                .orElse(value);
+    }
+
+    public String resolveOptional(EcrRequest request, String roleOrName) {
+        if (request == null) {
+            return clean(roleOrName);
+        }
+        String value = clean(roleOrName);
+        if (value == null || value.isEmpty()) {
+            return null;
+        }
+        Optional<UserRole> role = roleFrom(value);
+        if (!role.isPresent()) {
+            return findProjectMemberByRoleLabel(request, value)
+                    .map(this::displayName)
+                    .orElse(value);
+        }
+        return findProjectMemberByRole(request, role.get())
+                .map(this::displayName)
+                .orElse(value);
+    }
+
+    public String displayFor(EcrRequest request, String roleOrName, String fallbackName) {
+        String value = clean(roleOrName);
+        if (value == null || value.isEmpty()) {
+            value = clean(fallbackName);
+        }
+        if (value == null || value.isEmpty()) {
+            return null;
+        }
+        if (request == null) {
             return value;
+        }
+        Optional<UserRole> role = roleFrom(value);
+        if (!role.isPresent()) {
+            return findProjectMemberByRoleLabel(request, value)
+                    .map(this::displayName)
+                    .orElse(clean(fallbackName) == null ? value : clean(fallbackName));
         }
         return findProjectMemberByRole(request, role.get())
                 .map(this::displayName)
@@ -55,9 +98,29 @@ public class ActionAssigneeResolver {
                 .findFirst();
     }
 
+    private Optional<AppUser> findProjectMemberByRoleLabel(EcrRequest request, String roleLabel) {
+        String normalizedRole = normalize(roleLabel);
+        if (normalizedRole.isEmpty()) {
+            return Optional.empty();
+        }
+        return projectRepository.findById(request.getModificationProject())
+                .map(ProjectReference::getProjectTeam)
+                .map(this::teamMembers)
+                .orElse(Collections.emptyList())
+                .stream()
+                .map(this::findUserByTeamName)
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .filter(user -> normalize(user.getJobTitle()).equals(normalizedRole) || normalize(user.getRole()).equals(normalizedRole))
+                .findFirst();
+    }
+
     private boolean hasRole(AppUser user, UserRole role) {
         String value = normalize(user.getRole());
-        return value.equals(normalize(role.name())) || value.equals(normalize(roleLabel(role)));
+        return value.equals(normalize(role.name()))
+                || value.equals(normalize(roleLabel(role)))
+                || normalize(user.getJobTitle()).equals(normalize(role.name()))
+                || normalize(user.getJobTitle()).equals(normalize(roleLabel(role)));
     }
 
     private Optional<AppUser> findUserByTeamName(String memberName) {

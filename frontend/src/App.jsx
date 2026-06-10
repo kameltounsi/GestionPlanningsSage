@@ -1685,6 +1685,7 @@ function App() {
             handleDeleteActionAsset={handleDeleteActionAsset}
             handleUploadEvidence={handleUploadEvidence}
             handleApprovePhase={handleApprovePhase}
+            handleApproveActionValidation={handleApproveActionValidation}
             handleRejectPhase={handleRejectPhase}
             handleReopenPhase={handleReopenPhase}
             handleRequestPhaseValidation={handleRequestPhaseValidation}
@@ -2779,6 +2780,8 @@ function ModificationsPage(props) {
                   doneCount={doneCount}
                   handleCreateAction={handleCreateAction}
                   handleToggleAction={handleToggleAction}
+                  handleApproveActionValidation={handleApproveActionValidation}
+
                   handleApproveActionValidation={handleApproveActionValidation}
                   handleDeleteActionAsset={handleDeleteActionAsset}
                   handleUploadEvidence={handleUploadEvidence}

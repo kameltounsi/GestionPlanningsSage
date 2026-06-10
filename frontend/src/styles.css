@@ -150,27 +150,30 @@ textarea {
   color: rgba(255, 255, 255, 0.68);
   font-size: 12px;
 }
-
 .nav-toggle {
   align-items: center;
   background: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.32);
+  border: 1px solid rgba(255,255,255,0.25);
   border-radius: 8px;
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
   color: var(--accent-dark);
   cursor: pointer;
   display: inline-flex;
   flex: 0 0 auto;
-  height: 34px;
+  height: 28px;
   justify-content: center;
   margin-left: auto;
-  width: 34px;
+  width: 28px;
 }
 
+.nav-toggle svg {
+  height: 14px;
+  width: 14px;
+
+}
 .nav-toggle:hover {
   background: var(--accent-soft);
 }
-
+/*
 .nav-toggle svg {
   background: transparent;
   border: 0;
@@ -178,13 +181,23 @@ textarea {
   padding: 0;
   width: 17px;
 }
-
+*/
 .main-menu {
   align-content: start;
   display: grid;
   gap: 8px;
 }
 
+.nav-user-card {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  display: flex;
+  gap: 10px;
+  margin: 2px 0 12px;
+  padding: 0 4px;
+}
 .menu-item {
   align-items: center;
   background: transparent;
@@ -247,15 +260,21 @@ textarea {
   height: 40px;
   padding: 5px;
   width: 48px;
+  left : 35px;
 }
 
 .nav-collapsed .nav-toggle {
-  bottom: -17px;
-  margin: 0;
+  bottom: -500px;
+  margin-top: 10px;
+  margin-bottom: 3px;
   position: absolute;
-  right: 6px;
 }
-
+/*.nav-collapsed .nav-toggle {
+  bottom: -10px;
+  right: 2px;
+  height: 26px;
+  width: 26px;
+}*/
 .nav-collapsed .main-menu {
   gap: 10px;
   padding-top: 10px;
@@ -3257,4 +3276,64 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   .dialog-card {
     max-height: calc(100vh - 24px);
   }
+}
+
+.nav-user-avatar {
+  align-items: center;
+  background: #ffffff;
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 999px;
+  color: var(--accent-dark);
+  display: flex;
+  flex: 0 0 auto;
+  height: 42px;
+  justify-content: center;
+  overflow: hidden;
+  width: 42px;
+}
+
+.nav-user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.nav-user-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.nav-user-info strong {
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-user-info span {
+  color: rgba(255,255,255,0.65);
+  font-size: 12px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-collapsed .nav-user-card {
+  justify-content: center;
+  padding: 0;
+}
+
+.nav-collapsed .nav-user-info {
+  display: none;
+}
+
+.nav-collapsed .nav-user-avatar {
+  width: 40px;
+  height: 40px;
 }

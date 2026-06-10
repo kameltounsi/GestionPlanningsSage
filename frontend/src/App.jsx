@@ -1553,19 +1553,19 @@ function App() {
   return (
     <main className={menuCollapsed ? "app-frame nav-collapsed" : "app-frame"}>
       <Sidebar
-        collapsed={menuCollapsed}
-        canAdmin={isAdminUser(currentUser)}
-        page={page}
-        onCollapseToggle={() => setMenuCollapsed((collapsed) => !collapsed)}
-        onLogout={handleLogout}
-        onNavigate={(nextPage) => {
-          setPage(nextPage);
-          setShowCreateForm(false);
-          setShowEditForm(false);
-          setEditingEcrRequest(null);
-        }}
+          collapsed={menuCollapsed}
+          canAdmin={isAdminUser(currentUser)}
+          currentUser={currentUser}
+          page={page}
+          onCollapseToggle={() => setMenuCollapsed((collapsed) => !collapsed)}
+          onLogout={handleLogout}
+          onNavigate={(nextPage) => {
+            setPage(nextPage);
+            setShowCreateForm(false);
+            setShowEditForm(false);
+            setEditingEcrRequest(null);
+          }}
       />
-
       <section className="page-shell">
         {error && (
           <div className="banner">
@@ -2780,7 +2780,6 @@ function ModificationsPage(props) {
                   doneCount={doneCount}
                   handleCreateAction={handleCreateAction}
                   handleToggleAction={handleToggleAction}
-                  handleApproveActionValidation={handleApproveActionValidation}
 
                   handleApproveActionValidation={handleApproveActionValidation}
                   handleDeleteActionAsset={handleDeleteActionAsset}

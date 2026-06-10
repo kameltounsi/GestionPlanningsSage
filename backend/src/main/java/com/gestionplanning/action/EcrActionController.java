@@ -3,14 +3,10 @@ package com.gestionplanning.action;
 import com.gestionplanning.ecr.EcrRequestRepository;
 import com.gestionplanning.ecr.EcrStage;
 import com.gestionplanning.ecr.EcrTemplateService;
-import com.gestionplanning.ecr.PhaseValidationRequest;
-import com.gestionplanning.ecr.PhaseValidationRequestRepository;
-import com.gestionplanning.ecr.PhaseValidationStatus;
 import com.gestionplanning.auth.AccessControlService;
 import com.gestionplanning.storage.CloudinaryStorageService;
 import com.gestionplanning.storage.CloudinaryStorageService.DownloadedAsset;
 import com.gestionplanning.storage.StoredAsset;
-import com.gestionplanning.user.AccountMailService;
 import com.gestionplanning.user.AppUser;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -24,7 +20,9 @@ import java.net.URI;
 import java.util.Arrays;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @RestController
@@ -39,15 +37,12 @@ public class EcrActionController {
     private final CloudinaryStorageService storageService;
     private final ActionAssigneeResolver assigneeResolver;
     private final AccessControlService accessControlService;
-    private final PhaseValidationRequestRepository validationRepository;
-    private final AccountMailService accountMailService;
 
     public EcrActionController(EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
                                EcrActionAssetRepository assetRepository,
                                EcrRequestRepository requestRepository, ActionPlanningService planningService,
                                EcrTemplateService templateService, CloudinaryStorageService storageService,
-                               ActionAssigneeResolver assigneeResolver, AccessControlService accessControlService,
-                               PhaseValidationRequestRepository validationRepository, AccountMailService accountMailService) {
+                               ActionAssigneeResolver assigneeResolver, AccessControlService accessControlService) {
         this.actionRepository = actionRepository;
         this.evidenceRepository = evidenceRepository;
         this.assetRepository = assetRepository;
@@ -57,8 +52,6 @@ public class EcrActionController {
         this.storageService = storageService;
         this.assigneeResolver = assigneeResolver;
         this.accessControlService = accessControlService;
-        this.validationRepository = validationRepository;
-        this.accountMailService = accountMailService;
     }
 
     @GetMapping("/actions")
@@ -88,6 +81,9 @@ public class EcrActionController {
             templateService.ensureActionsFor(request);
             planningService.recalculateRequest(request);
             List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(requestId);
+            if (!accessControlService.canSeeAllActions(user, request)) {
+                actions = visibleActionsForUser(actions, user);
+            }
             if (stage != null) {
                 actions = actions.stream()
                         .filter(action -> action.getStage() == stage)
@@ -130,6 +126,9 @@ public class EcrActionController {
                     if (!accessControlService.isAdmin(user)) {
                         return updateActionProgress(action, updatedAction, user);
                     }
+                    if (isReopeningAction(action, updatedAction) && !isActionInCurrentPhase(action)) {
+                        return ResponseEntity.badRequest().<EcrAction>build();
+                    }
                     action.setTitle(updatedAction.getTitle());
                     action.setDescription(updatedAction.getDescription());
                     action.setTopicRisk(updatedAction.getTopicRisk());
@@ -164,17 +163,20 @@ public class EcrActionController {
                     action.setStatus(updatedAction.getStatus());
                     action.setClosedDate(updatedAction.getClosedDate());
                     syncFinalizationDate(action, updatedAction);
+                    syncValidationAfterProgressChange(action);
                     action.setComment(updatedAction.getComment());
                     action.setDossierReview(updatedAction.getDossierReview());
                     EcrAction saved = actionRepository.save(action);
                     planningService.recalculateRequest(saved.getRequest());
-                    notifyIfPhaseReady(saved.getRequest(), saved.getStage(), user);
                     return ResponseEntity.ok(enrichAction(saved));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
 
     private ResponseEntity<EcrAction> updateActionProgress(EcrAction action, EcrAction updatedAction, AppUser user) {
+        if (isReopeningAction(action, updatedAction) && !isActionInCurrentPhase(action)) {
+            return ResponseEntity.badRequest().build();
+        }
         if (isDone(updatedAction) && requiresEvidence(action) && !hasEvidence(action)) {
             return ResponseEntity.badRequest().build();
         }
@@ -185,9 +187,9 @@ public class EcrActionController {
         action.setStatus(updatedAction.getStatus());
         action.setComment(updatedAction.getComment());
         syncFinalizationDate(action, updatedAction);
+        syncValidationAfterProgressChange(action);
         EcrAction saved = actionRepository.save(action);
         planningService.recalculateRequest(saved.getRequest());
-        notifyIfPhaseReady(saved.getRequest(), saved.getStage(), user);
         return ResponseEntity.ok(enrichAction(saved));
     }
 
@@ -405,12 +407,30 @@ public class EcrActionController {
         return action != null && (action.isChecked() || action.getStatus() == ActionStatus.DONE || action.getStatus() == ActionStatus.DONE_LATE);
     }
 
+    private boolean isReopeningAction(EcrAction currentAction, EcrAction updatedAction) {
+        return isDone(currentAction) && !isDone(updatedAction);
+    }
+
+    private boolean isActionInCurrentPhase(EcrAction action) {
+        return action != null && action.getRequest() != null && action.getStage() == action.getRequest().getCurrentStage();
+    }
+
     private void syncFinalizationDate(EcrAction target, EcrAction source) {
         if (isDone(target)) {
             target.setFinalizationDate(source.getFinalizationDate() == null ? LocalDateTime.now() : source.getFinalizationDate());
         } else {
             target.setFinalizationDate(null);
         }
+    }
+
+    private void syncValidationAfterProgressChange(EcrAction action) {
+        if (isDone(action)) {
+            return;
+        }
+        action.setValidationStatus(null);
+        action.setValidationRequestedAt(null);
+        action.setValidationReviewedAt(null);
+        action.setValidationReviewedBy(null);
     }
 
     private boolean isDependencyCompleted(EcrAction action) {
@@ -420,30 +440,6 @@ public class EcrActionController {
         return actionRepository.findById(action.getDependsOnActionId())
                 .map(this::isDone)
                 .orElse(false);
-    }
-
-    private void notifyIfPhaseReady(com.gestionplanning.ecr.EcrRequest request, EcrStage stage, AppUser user) {
-        if (request == null || stage == null || stage != request.getCurrentStage()) {
-            return;
-        }
-        List<EcrAction> stageActions = actionRepository.findByRequest_IdAndStageOrderByDeadlineAscIdAsc(request.getId(), stage);
-        if (stageActions.isEmpty() || stageActions.stream().anyMatch(action -> !isDone(action))) {
-            return;
-        }
-        boolean pendingExists = validationRepository.findFirstByRequest_IdAndStageOrderByRequestedAtDescIdDesc(request.getId(), stage)
-                .map(validation -> validation.getStatus() == PhaseValidationStatus.PENDING)
-                .orElse(false);
-        if (pendingExists) {
-            return;
-        }
-        PhaseValidationRequest validation = new PhaseValidationRequest();
-        validation.setRequest(request);
-        validation.setStage(stage);
-        validation.setStatus(PhaseValidationStatus.PENDING);
-        validation.setRequestedBy(user.getFullName() == null || user.getFullName().trim().isEmpty() ? user.getEmail() : user.getFullName());
-        validation.setRequestedAt(LocalDateTime.now());
-        validationRepository.save(validation);
-        accountMailService.sendPhaseReadyEmail(request, stage, accessControlService.validatorsAndManagersFor(request));
     }
 
     private List<EcrAction> enrichActions(List<EcrAction> actions) {
@@ -457,6 +453,35 @@ public class EcrActionController {
             action.setValidatorDisplayName(assigneeResolver.displayFor(action.getRequest(), action.getValidatorRole(), action.getValidator()));
         }
         return action;
+    }
+
+    private List<EcrAction> visibleActionsForUser(List<EcrAction> actions, AppUser user) {
+        Set<Long> visibleIds = actions.stream()
+                .filter(action -> accessControlService.canViewAction(user, enrichAction(action)))
+                .map(EcrAction::getId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        boolean changed;
+        do {
+            changed = false;
+            for (EcrAction action : actions) {
+                if (action.getId() == null || visibleIds.contains(action.getId())) {
+                    continue;
+                }
+                Long dependencyId = action.getDependsOnActionId();
+                boolean dependsOnVisibleAction = dependencyId != null && visibleIds.contains(dependencyId);
+                boolean visibleActionDependsOnThis = actions.stream()
+                        .anyMatch(item -> item.getId() != null
+                                && visibleIds.contains(item.getId())
+                                && action.getId().equals(item.getDependsOnActionId()));
+                if (dependsOnVisibleAction || visibleActionDependsOnThis) {
+                    visibleIds.add(action.getId());
+                    changed = true;
+                }
+            }
+        } while (changed);
+        return actions.stream()
+                .filter(action -> action.getId() != null && visibleIds.contains(action.getId()))
+                .collect(Collectors.toList());
     }
 
     private String safeFileName(String fileName) {

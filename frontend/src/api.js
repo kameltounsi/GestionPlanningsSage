@@ -149,6 +149,12 @@ export function rejectPhaseValidation(requestId, validationId, payload) {
   });
 }
 
+export function approveActionValidation(requestId, validationId, actionId) {
+  return request(`/ecr-requests/${requestId}/phase-validations/${validationId}/actions/${actionId}/approve`, {
+    method: "POST"
+  });
+}
+
 export function getChecklist(requestId, stage) {
   const query = stage ? `?stage=${stage}` : "";
   return request(`/ecr-requests/${requestId}/checklist${query}`);

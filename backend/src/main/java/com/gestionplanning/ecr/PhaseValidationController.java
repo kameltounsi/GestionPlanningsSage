@@ -1,6 +1,7 @@
 package com.gestionplanning.ecr;
 
 import com.gestionplanning.action.ActionStatus;
+import com.gestionplanning.action.ActionValidationStatus;
 import com.gestionplanning.action.EcrAction;
 import com.gestionplanning.action.EcrActionRepository;
 import com.gestionplanning.auth.AccessControlService;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/ecr-requests/{requestId}/phase-validations")
@@ -39,8 +41,8 @@ public class PhaseValidationController {
                                                              @RequestAttribute("authenticatedUser") AppUser user) {
         return requestRepository.findById(requestId)
                 .filter(request -> accessControlService.canAccessRequest(user, request))
-                .map(request -> ResponseEntity.ok(validationRepository.findByRequest_IdOrderByRequestedAtDescIdDesc(requestId)))
-                .orElse(ResponseEntity.status(403).build());
+                .map(request -> ResponseEntity.ok(enrichValidations(validationRepository.findByRequest_IdOrderByRequestedAtDescIdDesc(requestId))))
+                .orElse(ResponseEntity.status(403).<List<PhaseValidationRequest>>build());
     }
 
     @PostMapping
@@ -67,10 +69,65 @@ public class PhaseValidationController {
                     validation.setRequestedBy(displayName(user));
                     validation.setRequestedAt(LocalDateTime.now());
                     PhaseValidationRequest saved = validationRepository.save(validation);
-                    accountMailService.sendPhaseReadyEmail(request, stage, accessControlService.validatorsAndManagersFor(request));
-                    return ResponseEntity.ok(saved);
+                    List<EcrAction> actions = actionRepository.findByRequest_IdAndStageOrderByDeadlineAscIdAsc(requestId, stage);
+                    actions.forEach(action -> {
+                        action.setValidationStatus(ActionValidationStatus.PENDING);
+                        action.setValidationRequestedAt(LocalDateTime.now());
+                        action.setValidationReviewedAt(null);
+                        action.setValidationReviewedBy(null);
+                    });
+                    actionRepository.saveAll(actions);
+                    for (EcrAction action : actions) {
+                        AppUser recipient = accessControlService.validationRecipientFor(action)
+                                .orElseThrow(() -> new IllegalStateException("Aucun destinataire de validation trouve pour l'action: " + action.getTitle()));
+                        accountMailService.sendActionValidationEmail(request, stage, action, recipient);
+                    }
+                    return ResponseEntity.ok(enrichValidation(saved));
                 })
-                .orElse(ResponseEntity.status(403).build());
+                .orElse(ResponseEntity.status(403).<PhaseValidationRequest>build());
+    }
+
+    @PostMapping("/{validationId}/actions/{actionId}/approve")
+    @Transactional
+    public ResponseEntity<PhaseValidationRequest> approveAction(@PathVariable Long requestId,
+                                                                @PathVariable Long validationId,
+                                                                @PathVariable Long actionId,
+                                                                @RequestAttribute("authenticatedUser") AppUser user) {
+        Optional<PhaseValidationRequest> validationItem = validationRepository.findById(validationId);
+        if (!validationItem.isPresent()) {
+            return ResponseEntity.status(403).<PhaseValidationRequest>build();
+        }
+        PhaseValidationRequest validation = validationItem.get();
+        if (!validation.getRequestId().equals(requestId)
+                || validation.getStatus() != PhaseValidationStatus.PENDING
+                || validation.getStage() != validation.getRequest().getCurrentStage()
+                || !accessControlService.wasPhaseValidationRequestedByPilot(validation)) {
+            return ResponseEntity.status(403).<PhaseValidationRequest>build();
+        }
+        return actionRepository.findById(actionId)
+                .filter(action -> action.getRequestId().equals(requestId))
+                .filter(action -> action.getStage() == validation.getStage())
+                .filter(action -> action.getValidationStatus() == ActionValidationStatus.PENDING)
+                .filter(action -> accessControlService.canValidateAction(user, action))
+                .map(action -> {
+                    action.setValidationStatus(ActionValidationStatus.APPROVED);
+                    action.setValidationReviewedAt(LocalDateTime.now());
+                    action.setValidationReviewedBy(displayName(user));
+                    actionRepository.save(action);
+
+                    PhaseValidationRequest updatedValidation = enrichValidation(validation);
+                    if (updatedValidation.getValidationRate() >= 100) {
+                        updatedValidation.setStatus(PhaseValidationStatus.APPROVED);
+                        updatedValidation.setReviewedBy("Validation automatique");
+                        updatedValidation.setReviewedAt(LocalDateTime.now());
+                        validationRepository.save(updatedValidation);
+                        EcrRequest request = updatedValidation.getRequest();
+                        request.setCurrentStage(nextStage(request, updatedValidation.getStage()));
+                        requestRepository.save(request);
+                    }
+                    return ResponseEntity.ok(enrichValidation(updatedValidation));
+                })
+                .orElse(ResponseEntity.status(403).<PhaseValidationRequest>build());
     }
 
     @PostMapping("/{validationId}/approve")
@@ -80,6 +137,9 @@ public class PhaseValidationController {
         return validationRepository.findById(validationId)
                 .filter(validation -> validation.getRequestId().equals(requestId))
                 .filter(validation -> accessControlService.canValidateRequest(user, validation.getRequest()))
+                .filter(validation -> validation.getStatus() == PhaseValidationStatus.PENDING)
+                .filter(validation -> validation.getStage() == validation.getRequest().getCurrentStage())
+                .filter(accessControlService::wasPhaseValidationRequestedByPilot)
                 .map(validation -> {
                     validation.setStatus(PhaseValidationStatus.APPROVED);
                     validation.setReviewedBy(displayName(user));
@@ -89,7 +149,7 @@ public class PhaseValidationController {
                     request.setCurrentStage(nextStage(request, validation.getStage()));
                     return ResponseEntity.ok(requestRepository.save(request));
                 })
-                .orElse(ResponseEntity.status(403).build());
+                .orElse(ResponseEntity.status(403).<EcrRequest>build());
     }
 
     @PostMapping("/{validationId}/reject")
@@ -101,6 +161,9 @@ public class PhaseValidationController {
         return validationRepository.findById(validationId)
                 .filter(validation -> validation.getRequestId().equals(requestId))
                 .filter(validation -> accessControlService.canValidateRequest(user, validation.getRequest()))
+                .filter(validation -> validation.getStatus() == PhaseValidationStatus.PENDING)
+                .filter(validation -> validation.getStage() == validation.getRequest().getCurrentStage())
+                .filter(accessControlService::wasPhaseValidationRequestedByPilot)
                 .map(validation -> {
                     validation.setStatus(PhaseValidationStatus.REJECTED);
                     validation.setReviewedBy(displayName(user));
@@ -118,7 +181,7 @@ public class PhaseValidationController {
                             ));
                     return ResponseEntity.ok(saved);
                 })
-                .orElse(ResponseEntity.status(403).build());
+                .orElse(ResponseEntity.status(403).<PhaseValidationRequest>build());
     }
 
     private boolean allStageActionsDone(Long requestId, EcrStage stage) {
@@ -134,6 +197,26 @@ public class PhaseValidationController {
 
     private boolean isDone(EcrAction action) {
         return action.isChecked() || action.getStatus() == ActionStatus.DONE || action.getStatus() == ActionStatus.DONE_LATE;
+    }
+
+    private List<PhaseValidationRequest> enrichValidations(List<PhaseValidationRequest> validations) {
+        validations.forEach(this::enrichValidation);
+        return validations;
+    }
+
+    private PhaseValidationRequest enrichValidation(PhaseValidationRequest validation) {
+        if (validation == null || validation.getRequestId() == null || validation.getStage() == null) {
+            return validation;
+        }
+        List<EcrAction> actions = actionRepository.findByRequest_IdAndStageOrderByDeadlineAscIdAsc(validation.getRequestId(), validation.getStage());
+        int total = actions.size();
+        int approved = (int) actions.stream()
+                .filter(action -> action.getValidationStatus() == ActionValidationStatus.APPROVED)
+                .count();
+        validation.setTotalActions(total);
+        validation.setApprovedActions(approved);
+        validation.setValidationRate(total == 0 ? 0 : (int) Math.round(approved * 100.0 / total));
+        return validation;
     }
 
     private EcrStage nextStage(EcrRequest request, EcrStage currentStage) {

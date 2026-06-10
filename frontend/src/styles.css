@@ -2220,6 +2220,28 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   white-space: pre-line;
 }
 
+.phase-validation-rate {
+  margin-top: 10px;
+  min-width: 220px;
+}
+
+.phase-validation-rate strong {
+  color: var(--accent-dark);
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.action-validation-cell {
+  gap: 5px;
+}
+
+.action-validation-button {
+  margin-top: 2px;
+  min-height: 30px;
+  padding: 6px 10px;
+  width: max-content;
+}
+
 .swal-action-list-title {
   color: #475569;
   font-size: 13px;

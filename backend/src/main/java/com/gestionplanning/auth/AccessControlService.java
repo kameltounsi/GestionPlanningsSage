@@ -1,6 +1,7 @@
 package com.gestionplanning.auth;
 
 import com.gestionplanning.ecr.EcrRequest;
+import com.gestionplanning.ecr.PhaseValidationRequest;
 import com.gestionplanning.action.EcrAction;
 import com.gestionplanning.project.ProjectReferenceRepository;
 import com.gestionplanning.user.AppUser;
@@ -42,15 +43,63 @@ public class AccessControlService {
     }
 
     public boolean canValidateRequest(AppUser user, EcrRequest request) {
-        return isAdmin(user) || isValidatorOrManager(user) && canAccessRequest(user, request);
+        return isAdmin(user) || hasApplicationRole(user, UserRole.MANAGER) && canAccessRequest(user, request);
+    }
+
+    public boolean canValidateAction(AppUser user, EcrAction action) {
+        if (user == null || action == null || action.getRequest() == null) {
+            return false;
+        }
+        String validator = normalize(action.getValidator());
+        String validatorRole = normalize(action.getValidatorRole());
+        String validatorDisplayName = normalize(action.getValidatorDisplayName());
+        if (!validator.isEmpty() || !validatorRole.isEmpty() || !validatorDisplayName.isEmpty()) {
+            return matchesActionAssignment(user, action.getValidator())
+                    || matchesActionAssignment(user, action.getValidatorRole())
+                    || matchesActionAssignment(user, action.getValidatorDisplayName());
+        }
+        return isAdmin(user) && isProjectTeamMember(user, action.getRequest());
     }
 
     public boolean canRequestPhaseValidation(AppUser user, EcrRequest request) {
+        return isRequestPilot(user, request);
+    }
+
+    public boolean isRequestPilot(AppUser user, EcrRequest request) {
         if (user == null || request == null) {
             return false;
         }
         String pilot = normalize(request.getPilot());
         return !pilot.isEmpty() && matchesUser(user, pilot);
+    }
+
+    public boolean canSeeAllActions(AppUser user, EcrRequest request) {
+        return isAdmin(user) || isRequestPilot(user, request);
+    }
+
+    public boolean canViewAction(AppUser user, EcrAction action) {
+        if (canSeeAllActions(user, action == null ? null : action.getRequest())) {
+            return true;
+        }
+        return isActionParticipant(user, action);
+    }
+
+    public boolean wasPhaseValidationRequestedByPilot(PhaseValidationRequest validation) {
+        if (validation == null || validation.getRequest() == null) {
+            return false;
+        }
+        String pilot = normalize(validation.getRequest().getPilot());
+        String requestedBy = normalize(validation.getRequestedBy());
+        if (pilot.isEmpty() || requestedBy.isEmpty()) {
+            return false;
+        }
+        if (pilot.equals(requestedBy)) {
+            return true;
+        }
+        return userRepository.findAll().stream()
+                .filter(AppUser::isEnabled)
+                .filter(user -> matchesUser(user, pilot))
+                .anyMatch(user -> normalize(displayName(user)).equals(requestedBy));
     }
 
     public boolean canManageAction(AppUser user, EcrAction action) {
@@ -67,6 +116,16 @@ public class AccessControlService {
         return matchesUser(user, responsible) || normalize(user.getJobTitle()).equals(responsible) || normalize(user.getRole()).equals(responsible);
     }
 
+    public boolean isActionParticipant(AppUser user, EcrAction action) {
+        if (user == null || action == null) {
+            return false;
+        }
+        return matchesActionAssignment(user, action.getResponsible())
+                || matchesActionAssignment(user, action.getValidator())
+                || matchesActionAssignment(user, action.getValidatorRole())
+                || matchesActionAssignment(user, action.getValidatorDisplayName());
+    }
+
     public List<AppUser> validatorsAndManagersFor(EcrRequest request) {
         Set<String> team = projectTeamTokens(request);
         if (team.isEmpty()) {
@@ -76,6 +135,32 @@ public class AccessControlService {
                 .filter(user -> user.isEnabled() && isValidatorOrManager(user))
                 .filter(user -> team.stream().anyMatch(token -> matchesUser(user, token)))
                 .collect(Collectors.toList());
+    }
+
+    public Optional<AppUser> validationRecipientFor(EcrAction action) {
+        if (action == null || action.getRequest() == null) {
+            return Optional.empty();
+        }
+        String validator = firstNonBlank(action.getValidator(), action.getValidatorRole(), action.getValidatorDisplayName());
+        if (!validator.isEmpty()) {
+            return userRepository.findAll().stream()
+                    .filter(AppUser::isEnabled)
+                    .filter(user -> matchesActionAssignment(user, validator))
+                    .findFirst();
+        }
+        Set<String> team = projectTeamTokens(action.getRequest());
+        Optional<AppUser> teamAdmin = userRepository.findAll().stream()
+                .filter(AppUser::isEnabled)
+                .filter(user -> hasApplicationRole(user, UserRole.ADMIN))
+                .filter(user -> team.stream().anyMatch(token -> matchesUser(user, token)))
+                .findFirst();
+        if (teamAdmin.isPresent()) {
+            return teamAdmin;
+        }
+        return userRepository.findAll().stream()
+                .filter(AppUser::isEnabled)
+                .filter(user -> hasApplicationRole(user, UserRole.ADMIN))
+                .findFirst();
     }
 
     public Optional<AppUser> projectLeadFor(EcrRequest request) {
@@ -135,6 +220,38 @@ public class AccessControlService {
         return normalize(user.getFullName()).equals(token)
                 || normalize(user.getUsername()).equals(token)
                 || normalize(user.getEmail()).equals(token);
+    }
+
+    private boolean matchesActionAssignment(AppUser user, String assignment) {
+        String token = normalize(assignment);
+        if (token.isEmpty()) {
+            return false;
+        }
+        return matchesUser(user, token)
+                || normalize(user.getJobTitle()).equals(token)
+                || normalize(user.getRole()).equals(token);
+    }
+
+    private boolean isProjectTeamMember(AppUser user, EcrRequest request) {
+        Set<String> team = projectTeamTokens(request);
+        return !team.isEmpty() && team.stream().anyMatch(token -> matchesUser(user, token));
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return "";
+        }
+        for (String value : values) {
+            String normalized = normalize(value);
+            if (!normalized.isEmpty()) {
+                return normalized;
+            }
+        }
+        return "";
+    }
+
+    private String displayName(AppUser user) {
+        return user == null || user.getFullName() == null || user.getFullName().trim().isEmpty() ? user == null ? "" : user.getEmail() : user.getFullName();
     }
 
     private String normalize(String value) {

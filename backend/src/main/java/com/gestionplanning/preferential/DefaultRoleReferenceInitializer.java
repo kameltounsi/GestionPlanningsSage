@@ -11,7 +11,6 @@ public class DefaultRoleReferenceInitializer implements CommandLineRunner {
     private static final List<String> DEFAULT_ROLES = Arrays.asList(
             "Admin",
             "Chef de projet",
-            "Validateur",
             "Manager",
             "Superviseur couture",
             "Superviseur coupe",

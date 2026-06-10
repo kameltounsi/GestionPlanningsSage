@@ -96,6 +96,13 @@ public class EcrAction {
     private LocalDate closedDate;
     private LocalDateTime finalizationDate;
 
+    @Enumerated(EnumType.STRING)
+    private ActionValidationStatus validationStatus;
+
+    private LocalDateTime validationRequestedAt;
+    private LocalDateTime validationReviewedAt;
+    private String validationReviewedBy;
+
     @Column(length = 2000)
     private String comment;
 
@@ -428,6 +435,38 @@ public class EcrAction {
 
     public void setFinalizationDate(LocalDateTime finalizationDate) {
         this.finalizationDate = finalizationDate;
+    }
+
+    public ActionValidationStatus getValidationStatus() {
+        return validationStatus;
+    }
+
+    public void setValidationStatus(ActionValidationStatus validationStatus) {
+        this.validationStatus = validationStatus;
+    }
+
+    public LocalDateTime getValidationRequestedAt() {
+        return validationRequestedAt;
+    }
+
+    public void setValidationRequestedAt(LocalDateTime validationRequestedAt) {
+        this.validationRequestedAt = validationRequestedAt;
+    }
+
+    public LocalDateTime getValidationReviewedAt() {
+        return validationReviewedAt;
+    }
+
+    public void setValidationReviewedAt(LocalDateTime validationReviewedAt) {
+        this.validationReviewedAt = validationReviewedAt;
+    }
+
+    public String getValidationReviewedBy() {
+        return validationReviewedBy;
+    }
+
+    public void setValidationReviewedBy(String validationReviewedBy) {
+        this.validationReviewedBy = validationReviewedBy;
     }
 
     public String getComment() {

@@ -1,5 +1,6 @@
 package com.gestionplanning.user;
 
+import com.gestionplanning.action.EcrAction;
 import com.gestionplanning.ecr.EcrRequest;
 import com.gestionplanning.ecr.EcrStage;
 import org.slf4j.Logger;
@@ -131,6 +132,40 @@ public class AccountMailService {
                 + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
                 + "</div></div></div></body></html>";
         sendMessage(to, title, text, html, "phase validation");
+    }
+
+    public void sendActionValidationEmail(EcrRequest request, EcrStage stage, EcrAction action, AppUser recipient) {
+        if (!alertMailEnabled) {
+            throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");
+        }
+        if (request == null || action == null) {
+            return;
+        }
+        if (recipient == null || isBlank(recipient.getEmail())) {
+            throw new MailDeliveryException("Le destinataire de validation n'a pas d'adresse email renseignee.");
+        }
+        if (!isMailConfigured()) {
+            LOGGER.error("Action validation email skipped because SMTP configuration is incomplete.");
+            throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
+        }
+        String title = "Action prete a valider";
+        String text = "L'action " + value(action.getTitle())
+                + " de la phase " + value(stage == null ? null : stage.getLabel(request.isNewVersion()))
+                + " est prete a etre validee.\nModification: " + value(request.getModificationNumber())
+                + "\nProjet: " + value(request.getModificationProject())
+                + "\nLien: " + value(applicationUrl);
+        String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
+                + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
+                + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
+                + "<div style=\"background:#111827;color:#ffffff;padding:24px 30px;\">"
+                + "<div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#bfdbfe;\">Gestion Planning Sage</div>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Action prete a valider</h1>"
+                + "</div><div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
+                + "<p>L'action <strong>" + escape(value(action.getTitle())) + "</strong> est prete pour validation.</p>"
+                + "<p><strong>Phase :</strong> " + escape(stage == null ? "-" : stage.getLabel(request.isNewVersion())) + "<br><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "</p>"
+                + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
+                + "</div></div></div></body></html>";
+        sendMessage(recipient.getEmail(), title, text, html, "action validation");
     }
 
     public void sendPhaseRejectedEmail(EcrRequest request, EcrStage stage, AppUser recipient, String reason, String actionsToRevisit) {

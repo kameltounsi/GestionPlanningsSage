@@ -124,8 +124,11 @@ public class EcrRequestController {
                     EcrStage nextStage = EcrStage.isAllowed(updatedRequest.getCurrentStage(), updatedRequest.isNewVersion())
                             ? updatedRequest.getCurrentStage()
                             : EcrStage.firstAllowed(updatedRequest.isNewVersion());
-                    if (isApprovedStage(request, nextStage) && nextStage != request.getCurrentStage() && !accessControlService.isAdmin(user)) {
+                    if (nextStage != request.getCurrentStage() && !accessControlService.isAdmin(user)) {
                         return ResponseEntity.status(403).<EcrRequest>build();
+                    }
+                    if (isApprovedStage(request, nextStage) && nextStage != request.getCurrentStage()) {
+                        return ResponseEntity.badRequest().<EcrRequest>build();
                     }
                     request.setCurrentStage(nextStage);
                     EcrRequest saved = requestRepository.save(request);
@@ -220,14 +223,17 @@ public class EcrRequestController {
     @PatchMapping("/{id}/stage")
     public ResponseEntity<EcrRequest> updateStage(@PathVariable Long id, @RequestParam EcrStage stage,
                                                   @RequestAttribute("authenticatedUser") AppUser user) {
+        if (!accessControlService.isAdmin(user)) {
+            return ResponseEntity.status(403).build();
+        }
         return requestRepository.findById(id)
-                .filter(request -> accessControlService.canValidateRequest(user, request))
+                .filter(request -> accessControlService.canAccessRequest(user, request))
                 .map(request -> {
                     if (!EcrStage.isAllowed(stage, request.isNewVersion())) {
                         return ResponseEntity.badRequest().<EcrRequest>build();
                     }
-                    if (isApprovedStage(request, stage) && stage != request.getCurrentStage() && !accessControlService.isAdmin(user)) {
-                        return ResponseEntity.status(403).<EcrRequest>build();
+                    if (isApprovedStage(request, stage) && stage != request.getCurrentStage()) {
+                        reopenApprovedStage(request, stage, user);
                     }
                     request.setCurrentStage(stage);
                     return ResponseEntity.ok(requestRepository.save(request));
@@ -253,6 +259,22 @@ public class EcrRequestController {
         return validationRepository.findFirstByRequest_IdAndStageOrderByRequestedAtDescIdDesc(request.getId(), stage)
                 .map(validation -> validation.getStatus() == PhaseValidationStatus.APPROVED)
                 .orElse(false);
+    }
+
+    private void reopenApprovedStage(EcrRequest request, EcrStage stage, AppUser user) {
+        validationRepository.findFirstByRequest_IdAndStageOrderByRequestedAtDescIdDesc(request.getId(), stage)
+                .filter(validation -> validation.getStatus() == PhaseValidationStatus.APPROVED)
+                .ifPresent(validation -> {
+                    validation.setStatus(PhaseValidationStatus.REOPENED);
+                    validation.setReviewedBy(displayName(user));
+                    validation.setReviewedAt(java.time.LocalDateTime.now());
+                    validation.setRefusalReason("Phase reouverte par l'admin.");
+                    validationRepository.save(validation);
+                });
+    }
+
+    private String displayName(AppUser user) {
+        return user == null || user.getFullName() == null || user.getFullName().trim().isEmpty() ? user == null ? "" : user.getEmail() : user.getFullName();
     }
 
     private RequestFile requestFile(EcrRequest request, String type) {

@@ -73,6 +73,7 @@ import {
   actionAssetDownloadUrl,
   actionEvidenceUrl,
   actionProofDocumentUrl,
+  approveActionValidation,
   approvePhaseValidation,
   changeUserPassword,
   getPhaseValidations,
@@ -227,7 +228,7 @@ function isAdminUser(user) {
 }
 
 function canValidatePhases(user) {
-  return isAdminUser(user) || hasApplicationRole(user, "VALIDATEUR", "Validateur") || hasApplicationRole(user, "MANAGER", "Manager");
+  return isAdminUser(user) || hasApplicationRole(user, "MANAGER", "Manager");
 }
 
 function normalizeRoleToken(value) {
@@ -246,6 +247,20 @@ function canManageActionForUser(user, action) {
   return [user?.jobTitle, user?.fullName, user?.username, user?.email]
     .filter(Boolean)
     .some((value) => normalizeRoleToken(value) === responsible);
+}
+
+function canValidateActionForUser(user, action) {
+  if (!user || !action) return false;
+  const validator = normalizeRoleToken(action.validatorDisplayName || action.validator || action.validatorRole);
+  if (!validator) return isAdminUser(user);
+  return [user.jobTitle, user.fullName, user.username, user.email, user.role]
+    .filter(Boolean)
+    .some((value) => normalizeRoleToken(value) === validator);
+}
+
+function canToggleActionForUser(user, action, request) {
+  if (!canManageActionForUser(user, action)) return false;
+  return !isActionDone(action) || action?.stage === request?.currentStage;
 }
 
 function isRequestPilot(user, request) {
@@ -610,6 +625,12 @@ function App() {
       warningAlert("Action reservee", "Seul l'admin peut rouvrir ou modifier la phase courante.");
       return;
     }
+    const latestValidation = phaseValidations.find((validation) => validation.stage === stage);
+    if (stage !== selectedRequest.currentStage && latestValidation?.status === "APPROVED") {
+      setSelectedStage(stage);
+      warningAlert("Phase validee", "Utilisez le bouton Reouvrir la phase pour remettre cette phase en phase courante.");
+      return;
+    }
     setSelectedStage(stage);
     updateEcrStage(selectedRequest.id, stage)
       .then((updatedRequest) => {
@@ -620,6 +641,28 @@ function App() {
         setError(message);
         errorAlert(message);
       });
+  }
+
+  function handleReopenPhase(validation) {
+    if (!selectedRequest || !validation || !isAdminUser(currentUser)) return;
+    setSaving(true);
+    setError("");
+    updateEcrStage(selectedRequest.id, validation.stage)
+      .then((updatedRequest) => {
+        setRequests((items) => items.map((item) => (item.id === updatedRequest.id ? updatedRequest : item)));
+        setSelectedStage(safeStage(updatedRequest.currentStage, Boolean(updatedRequest.newVersion)));
+        return Promise.all([
+          getActions(updatedRequest.id, updatedRequest.currentStage).then(setActions),
+          refreshPhaseValidations(updatedRequest.id)
+        ]);
+      })
+      .then(() => successToast("Phase reouverte"))
+      .catch((exception) => {
+        const message = exception?.message || "Reouverture de phase impossible.";
+        setError(message);
+        errorAlert(message);
+      })
+      .finally(() => setSaving(false));
   }
 
   function openRequest(request) {
@@ -758,6 +801,10 @@ function App() {
   }
 
   function handleToggleAction(action, completed) {
+    if (!completed && action?.stage !== selectedRequest?.currentStage) {
+      warningAlert("Action verrouillee", "L'admin doit d'abord remettre cette phase en phase courante avant de rouvrir une action.");
+      return;
+    }
     if (completed && dependencyBlocksCompletion(action)) {
       const dependency = dependencyFor(action);
       const message = `Terminez d'abord: ${dependency.title || "action precedente"}.`;
@@ -861,7 +908,10 @@ function App() {
     requestPhaseValidation(selectedRequest.id, selectedStage)
       .then(() => {
         successToast("Demande envoyee");
-        return refreshPhaseValidations(selectedRequest.id);
+        return Promise.all([
+          refreshPhaseValidations(selectedRequest.id),
+          getActions(selectedRequest.id, selectedStage).then(setActions)
+        ]);
       })
       .catch((exception) => errorAlert(exception?.message || "Demande de validation impossible. Verifiez que vous etes sur la phase courante et que toutes ses actions sont terminees."))
       .finally(() => setSaving(false));
@@ -922,6 +972,28 @@ function App() {
         .catch((exception) => errorAlert(exception?.message || "Refus de phase impossible."))
         .finally(() => setSaving(false));
     });
+  }
+
+  function handleApproveActionValidation(validation, action) {
+    if (!selectedRequest || !validation || !action) return;
+    setSaving(true);
+    approveActionValidation(selectedRequest.id, validation.id, action.id)
+      .then(() => Promise.all([
+        getActions(selectedRequest.id, selectedStage),
+        getEcrRequests(),
+        refreshPhaseValidations(selectedRequest.id)
+      ]))
+      .then(([actionData, requestData]) => {
+        setActions(actionData);
+        setRequests(requestData);
+        const refreshedRequest = requestData.find((item) => item.id === selectedRequest.id);
+        if (refreshedRequest) {
+          setSelectedStage(safeStage(refreshedRequest.currentStage, Boolean(refreshedRequest.newVersion)));
+        }
+        successToast("Action validee");
+      })
+      .catch((exception) => errorAlert(exception?.message || "Validation de l'action impossible."))
+      .finally(() => setSaving(false));
   }
 
   function handleSaveProject(event) {
@@ -1614,6 +1686,7 @@ function App() {
             handleUploadEvidence={handleUploadEvidence}
             handleApprovePhase={handleApprovePhase}
             handleRejectPhase={handleRejectPhase}
+            handleReopenPhase={handleReopenPhase}
             handleRequestPhaseValidation={handleRequestPhaseValidation}
             isCriticalAction={isCriticalAction}
             onEditRequest={openEditEcr}
@@ -2523,7 +2596,9 @@ function ModificationsPage(props) {
     handleDeleteActionAsset,
     handleUploadEvidence,
     handleApprovePhase,
+    handleApproveActionValidation,
     handleRejectPhase,
+    handleReopenPhase,
     handleRequestPhaseValidation,
     isCriticalAction,
     lateActions,
@@ -2682,15 +2757,18 @@ function ModificationsPage(props) {
                   <div className="progress-track"><span style={{ width: `${completion}%` }} /></div>
                 </section>
                 <PhaseValidationPanel
+                  canAdmin={canAdmin}
                   canRequestValidation={canRequestValidation}
                   canValidate={canValidate}
                   isCurrentStage={isCurrentStage}
                   latestValidation={latestStageValidation}
                   saving={saving}
                   stageActionsDone={stageActionsDone}
+                  validationRate={latestStageValidation?.validationRate ?? 0}
                   validation={currentValidation}
                   onApprove={handleApprovePhase}
                   onReject={(validation) => handleRejectPhase(validation, actions)}
+                  onReopen={handleReopenPhase}
                   onRequest={handleRequestPhaseValidation}
                 />
                 <ActionsPanel
@@ -2701,6 +2779,7 @@ function ModificationsPage(props) {
                   doneCount={doneCount}
                   handleCreateAction={handleCreateAction}
                   handleToggleAction={handleToggleAction}
+                  handleApproveActionValidation={handleApproveActionValidation}
                   handleDeleteActionAsset={handleDeleteActionAsset}
                   handleUploadEvidence={handleUploadEvidence}
                   isCriticalAction={isCriticalAction}
@@ -2708,6 +2787,8 @@ function ModificationsPage(props) {
                   lateActions={lateActions}
                   requiresEvidence={requiresEvidence}
                   saving={saving}
+                  selectedRequest={selectedRequest}
+                  phaseValidation={currentValidation}
                   stageNewProject={Boolean(selectedRequest.newVersion)}
                   selectedStage={selectedStage}
                   updateActionForm={updateActionForm}
@@ -2861,12 +2942,16 @@ function DossierReviewDialog({ request, saving, onClose, onSubmit }) {
   );
 }
 
-function PhaseValidationPanel({ canRequestValidation, canValidate, isCurrentStage, latestValidation, saving, stageActionsDone, validation, onApprove, onReject, onRequest }) {
+function PhaseValidationPanel({ canAdmin, canRequestValidation, isCurrentStage, latestValidation, saving, stageActionsDone, validation, validationRate, onReopen, onRequest }) {
   const phaseApproved = latestValidation?.status === "APPROVED";
+  const phaseReopened = latestValidation?.status === "REOPENED";
+  const displayedRate = latestValidation?.validationRate ?? validationRate ?? 0;
   const statusText = !isCurrentStage
     ? "Cette phase est consultable, mais seule la phase courante peut etre envoyee en validation"
     : phaseApproved
       ? "Phase deja validee"
+    : phaseReopened
+      ? "Phase reouverte, en attente de reprise"
     : validation
       ? "Demande en attente de validation"
       : !canRequestValidation
@@ -2881,10 +2966,17 @@ function PhaseValidationPanel({ canRequestValidation, canValidate, isCurrentStag
         <span>{statusText}</span>
         {latestValidation && latestValidation.status !== "PENDING" && (
           <div className={`phase-validation-result ${String(latestValidation.status).toLowerCase()}`}>
-            <b>{latestValidation.status === "APPROVED" ? "Phase validee" : "Phase refusee"}</b>
+            <b>{phaseValidationStatusLabel(latestValidation.status)}</b>
             {latestValidation.reviewedBy && <span>Par {latestValidation.reviewedBy}</span>}
             {latestValidation.refusalReason && <p>Raison: {latestValidation.refusalReason}</p>}
             {latestValidation.actionsToRevisit && <p>Actions a revisiter: {latestValidation.actionsToRevisit}</p>}
+          </div>
+        )}
+        {latestValidation && latestValidation.status === "PENDING" && (
+          <div className="phase-validation-rate">
+            <span>{latestValidation.approvedActions || 0}/{latestValidation.totalActions || 0} actions validees</span>
+            <strong>{displayedRate}%</strong>
+            <div className="progress-track"><span style={{ width: `${displayedRate}%` }} /></div>
           </div>
         )}
       </div>
@@ -2894,22 +2986,23 @@ function PhaseValidationPanel({ canRequestValidation, canValidate, isCurrentStag
             Demander validation
           </button>
         )}
-        {validation && isCurrentStage && canValidate && (
-          <>
-            <button className="primary-action compact-action" disabled={saving} type="button" onClick={() => onApprove(validation)}>
-              Valider
-            </button>
-            <button className="secondary-action compact-action" disabled={saving} type="button" onClick={() => onReject(validation)}>
-              Refuser
-            </button>
-          </>
+        {canAdmin && phaseApproved && !isCurrentStage && (
+          <button className="primary-action compact-action" disabled={saving} type="button" onClick={() => onReopen(latestValidation)}>
+            Reouvrir la phase
+          </button>
         )}
       </div>
     </section>
   );
 }
 
-function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleToggleAction, handleDeleteActionAsset, handleUploadEvidence, isCriticalAction, lateActions, requiresEvidence, saving, selectedStage, stageNewProject, updateActionForm }) {
+function phaseValidationStatusLabel(status) {
+  if (status === "APPROVED") return "Phase validee";
+  if (status === "REOPENED") return "Phase reouverte";
+  return "Phase refusee";
+}
+
+function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleToggleAction, handleApproveActionValidation, handleDeleteActionAsset, handleUploadEvidence, isCriticalAction, lateActions, phaseValidation, requiresEvidence, saving, selectedRequest, selectedStage, stageNewProject, updateActionForm }) {
   const [expanded, setExpanded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const stageTitle = stageLabel(selectedStage, stageNewProject);
@@ -2940,6 +3033,8 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
         actionRoleOptions={actionRoleOptions}
         actions={actions}
         currentUser={currentUser}
+        phaseValidation={phaseValidation}
+        handleApproveActionValidation={handleApproveActionValidation}
         handleToggleAction={handleToggleAction}
         handleDeleteActionAsset={handleDeleteActionAsset}
         handleUploadEvidence={handleUploadEvidence}
@@ -2947,6 +3042,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
         isCriticalAction={isCriticalAction}
         requiresEvidence={requiresEvidence}
         saving={saving}
+        selectedRequest={selectedRequest}
       />
       {expanded && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={() => setExpanded(false)}>
@@ -2971,6 +3067,8 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
               actionRoleOptions={actionRoleOptions}
               actions={actions}
               currentUser={currentUser}
+              phaseValidation={phaseValidation}
+              handleApproveActionValidation={handleApproveActionValidation}
               expanded
               handleToggleAction={handleToggleAction}
               handleDeleteActionAsset={handleDeleteActionAsset}
@@ -2979,6 +3077,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
               isCriticalAction={isCriticalAction}
               requiresEvidence={requiresEvidence}
               saving={saving}
+              selectedRequest={selectedRequest}
             />
           </section>
         </div>
@@ -2998,7 +3097,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
   );
 }
 
-function ActionList({ actions, currentUser, expanded = false, handleToggleAction, handleDeleteActionAsset, handleUploadEvidence, requiresEvidence, saving }) {
+function ActionList({ actions, currentUser, expanded = false, phaseValidation, handleToggleAction, handleApproveActionValidation, handleDeleteActionAsset, handleUploadEvidence, requiresEvidence, saving, selectedRequest }) {
   return (
     <>
       <div className={expanded ? "action-list expanded" : "action-list"}>
@@ -3008,7 +3107,7 @@ function ActionList({ actions, currentUser, expanded = false, handleToggleAction
           actions.map((action) => (
             <article className={action.late ? "action-row late" : "action-row"} key={action.id}>
               <label className="action-check" title={isActionDone(action) ? "Marquer non terminee" : "Marquer terminee"}>
-                <input checked={isActionDone(action)} disabled={saving || !canManageActionForUser(currentUser, action)} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
+                <input checked={isActionDone(action)} disabled={saving || !canToggleActionForUser(currentUser, action, selectedRequest)} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
               </label>
               <div className="action-main">
                 <h3>{action.title}</h3>
@@ -3055,6 +3154,21 @@ function ActionList({ actions, currentUser, expanded = false, handleToggleAction
                   </label>
                 </span>
                 <span><em>Status</em><small className={`status ${statusClass(action.status)}`}>{readableStatus(action.status)}</small></span>
+                {phaseValidation && (
+                  <span className="action-validation-cell">
+                    <em>Validation</em>
+                    <small className={`status ${action.validationStatus === "APPROVED" ? "done" : "in_progress"}`}>
+                      {action.validationStatus === "APPROVED" ? "Validee" : "En attente"}
+                    </small>
+                    {action.validationStatus === "PENDING" && canValidateActionForUser(currentUser, action) && (
+                      <button className="primary-action compact-action action-validation-button" disabled={saving} type="button" onClick={() => handleApproveActionValidation(phaseValidation, action)}>
+                        <CheckCircle2 size={14} />
+                        Valider
+                      </button>
+                    )}
+                    {action.validationReviewedBy && <strong>{action.validationReviewedBy}</strong>}
+                  </span>
+                )}
               </div>
             </article>
           ))

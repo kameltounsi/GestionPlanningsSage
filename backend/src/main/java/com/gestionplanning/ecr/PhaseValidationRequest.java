@@ -36,6 +36,15 @@ public class PhaseValidationRequest {
     @Column(length = 3000)
     private String actionsToRevisit;
 
+    @Transient
+    private int validationRate;
+
+    @Transient
+    private int approvedActions;
+
+    @Transient
+    private int totalActions;
+
     public Long getId() {
         return id;
     }
@@ -114,5 +123,29 @@ public class PhaseValidationRequest {
 
     public void setActionsToRevisit(String actionsToRevisit) {
         this.actionsToRevisit = actionsToRevisit;
+    }
+
+    public int getValidationRate() {
+        return validationRate;
+    }
+
+    public void setValidationRate(int validationRate) {
+        this.validationRate = validationRate;
+    }
+
+    public int getApprovedActions() {
+        return approvedActions;
+    }
+
+    public void setApprovedActions(int approvedActions) {
+        this.approvedActions = approvedActions;
+    }
+
+    public int getTotalActions() {
+        return totalActions;
+    }
+
+    public void setTotalActions(int totalActions) {
+        this.totalActions = totalActions;
     }
 }

@@ -10,8 +10,6 @@ Configuration par defaut:
 SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/plannings
 # Docker Compose local fallback:
 # SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5433/plannings
-# VM access fallback:
-# SPRING_DATASOURCE_URL=jdbc:postgresql://192.168.1.117:5433/plannings
 SPRING_DATASOURCE_USERNAME=postgres
 SPRING_DATASOURCE_PASSWORD=postgres
 ```
@@ -22,8 +20,6 @@ Si votre PostgreSQL local ecoute sur un autre port, par exemple `5433`, lancez l
 $env:SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:5432/plannings"
 # Docker Compose local fallback:
 # $env:SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:5433/plannings"
-# VM access fallback:
-# $env:SPRING_DATASOURCE_URL="jdbc:postgresql://192.168.1.117:5433/plannings"
 $env:SPRING_DATASOURCE_USERNAME="postgres"
 $env:SPRING_DATASOURCE_PASSWORD="votre_mot_de_passe"
 mvn spring-boot:run

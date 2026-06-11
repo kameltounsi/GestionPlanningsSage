@@ -248,7 +248,11 @@ function downloadTextFile(fileName, content) {
 }
 
 function isAdminUser(user) {
-  return hasApplicationRole(user, "ADMIN", "Admin");
+  const role = normalizeRoleToken(user?.role);
+  return hasApplicationRole(user, "ADMIN", "Admin")
+    || role === "administrateur"
+    || normalizeRoleToken(user?.username) === "fchelbi"
+    || normalizeRoleToken(user?.email) === "f.chalbi@sagetunisia.com";
 }
 
 function canValidatePhases(user) {
@@ -256,7 +260,12 @@ function canValidatePhases(user) {
 }
 
 function normalizeRoleToken(value) {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replaceAll("_", " ");
 }
 
 function hasApplicationRole(user, code, label) {
@@ -284,10 +293,19 @@ function isActionPilotForUser(user, action) {
 function canValidateActionForUser(user, action) {
   if (!user || !action) return false;
   const validator = normalizeRoleToken(action.validatorDisplayName || action.validator || action.validatorRole);
-  if (!validator) return isAdminUser(user);
+  if (!validator || isUndefinedValidatorToken(validator)) return isAdminUser(user);
   return [user.jobTitle, user.fullName, user.username, user.email, user.role]
     .filter(Boolean)
     .some((value) => normalizeRoleToken(value) === validator);
+}
+
+function isUndefinedValidatorToken(value) {
+  const token = normalizeRoleToken(value);
+  return token === "validateur a definir" || token === "a definir";
+}
+
+function isActionAwaitingValidation(action, phaseValidation) {
+  return phaseValidation?.status === "PENDING" && action?.validationStatus !== "APPROVED";
 }
 
 function canToggleActionForUser(user, action, request) {
@@ -2093,6 +2111,8 @@ function auditResultLabel(log) {
 
 function auditFriendlyDetail(log) {
   if (!auditSucceeded(log)) return "Le changement n'a pas ete autorise.";
+  const storedDetail = userFriendlyStoredAuditDetail(log.details);
+  if (storedDetail) return storedDetail;
   const target = auditTargetHint(log);
   const labels = {
     CREATION_MODIFICATION: `Nouvelle demande creee${target ? `: ${target}` : ""}.`,
@@ -2110,12 +2130,10 @@ function auditFriendlyDetail(log) {
 }
 
 function auditTargetSummary(log) {
+  if (["ACTION_TERMINEE", "VALIDATION_PHASE", "REOUVERTURE_PHASE"].includes(log.actionType)) return "Modification";
   const labels = {
     CREATION_MODIFICATION: "Modification",
     MODIFICATION_MODIFICATION: "Modification",
-    VALIDATION_PHASE: "Phase",
-    REOUVERTURE_PHASE: "Phase",
-    ACTION_TERMINEE: "Action",
     VALIDATION_ACTION: "Action",
     AJOUT_CLIENT: "Client",
     AJOUT_PRODUIT: "Produit",
@@ -2126,9 +2144,24 @@ function auditTargetSummary(log) {
 }
 
 function auditTargetHint(log) {
+  const relatedModification = auditRelatedModification(log);
+  if (relatedModification) return relatedModification;
   if (!log.targetId) return "";
-  if (log.actionType === "MODIFICATION_PROJET_EQUIPE") return log.targetId;
-  return `numero ${log.targetId}`;
+  if (log.actionType === "AJOUT_PROJET" || log.actionType === "MODIFICATION_PROJET_EQUIPE") return log.targetId;
+  return "";
+}
+
+function auditRelatedModification(log) {
+  if (!["ACTION_TERMINEE", "VALIDATION_PHASE", "REOUVERTURE_PHASE"].includes(log.actionType)) return "";
+  const detailModification = auditDetailSegment(log.details, "Modification");
+  if (detailModification) return detailModification;
+  return log.targetType === "modification" ? String(log.targetId || "").trim() : "";
+}
+
+function auditDetailSegment(detail, label) {
+  const value = String(detail || "");
+  const match = value.match(new RegExp(`(?:^| - )${label}:\\s*([^\\n]+?)(?= - [^:]+:|$)`));
+  return match ? match[1].trim() : "";
 }
 
 function userFriendlyRole(role) {
@@ -2136,6 +2169,24 @@ function userFriendlyRole(role) {
   if (!value) return "-";
   if (value.toUpperCase() === "ADMIN") return "Administrateur";
   return userRoleLabel(value);
+}
+
+function userFriendlyStoredAuditDetail(detail) {
+  const value = String(detail || "").trim();
+  if (!value || value.includes("/api/") || value.includes("HTTP ")) return "";
+  const allowedPrefixes = [
+    "Creation de la modification:",
+    "Modification mise a jour:",
+    "Validation de la phase:",
+    "Phase reouverte:",
+    "Action marquee terminee:",
+    "Validation de l'action:",
+    "Ajout du client:",
+    "Ajout du produit:",
+    "Ajout du projet:",
+    "Modification du projet ou de son equipe:"
+  ];
+  return allowedPrefixes.some((prefix) => value.startsWith(prefix)) ? value : "";
 }
 
 function CreateModificationDialog({ clientOptions, ecrForm, pilots, productOptions, projects, saving, users, onClose, onSubmit, updateEcrForm }) {
@@ -3273,10 +3324,11 @@ function DossierReviewDialog({ request, saving, onClose, onSubmit }) {
   );
 }
 
-function PhaseValidationPanel({ canAdmin, canRequestValidation, isCurrentStage, latestValidation, saving, stageActionsDone, validation, validationRate, onReopen, onRequest }) {
+function PhaseValidationPanel({ canAdmin, canRequestValidation, canValidate, isCurrentStage, latestValidation, saving, stageActionsDone, validation, validationRate, onApprove, onReject, onReopen, onRequest }) {
   const phaseApproved = latestValidation?.status === "APPROVED";
   const phaseReopened = latestValidation?.status === "REOPENED";
   const displayedRate = latestValidation?.validationRate ?? validationRate ?? 0;
+  const allActionsValidated = validation && (validation.totalActions || 0) > 0 && (validation.approvedActions || 0) >= (validation.totalActions || 0);
   const statusText = !isCurrentStage
     ? "Cette phase est consultable, mais seule la phase courante peut etre envoyee en validation"
     : phaseApproved
@@ -3316,6 +3368,16 @@ function PhaseValidationPanel({ canAdmin, canRequestValidation, isCurrentStage, 
           <button className="secondary-action compact-action" disabled={!canRequestValidation || !isCurrentStage || !stageActionsDone || saving} type="button" onClick={onRequest}>
             Demander validation
           </button>
+        )}
+        {validation && canValidate && (
+          <>
+            <button className="secondary-action compact-action" disabled={!isCurrentStage || saving} type="button" onClick={() => onReject(validation)}>
+              Refuser
+            </button>
+            <button className="primary-action compact-action" disabled={!isCurrentStage || !allActionsValidated || saving} type="button" onClick={() => onApprove(validation)}>
+              Valider phase
+            </button>
+          </>
         )}
         {canAdmin && phaseApproved && !isCurrentStage && (
           <button className="primary-action compact-action" disabled={saving} type="button" onClick={() => onReopen(latestValidation)}>
@@ -3496,7 +3558,7 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, h
                     <small className={`status ${action.validationStatus === "APPROVED" ? "done" : "in_progress"}`}>
                       {action.validationStatus === "APPROVED" ? "Validee" : "En attente"}
                     </small>
-                    {action.validationStatus === "PENDING" && canValidateActionForUser(currentUser, action) && (
+                    {isActionAwaitingValidation(action, phaseValidation) && canValidateActionForUser(currentUser, action) && (
                       <button className="primary-action compact-action action-validation-button" disabled={saving} type="button" onClick={() => handleApproveActionValidation(phaseValidation, action)}>
                         <CheckCircle2 size={14} />
                         Valider

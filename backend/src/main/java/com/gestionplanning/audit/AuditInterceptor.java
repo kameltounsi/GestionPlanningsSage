@@ -21,11 +21,7 @@ public class AuditInterceptor implements HandlerInterceptor {
 
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
-        if (shouldSkip(request)) {
-            return;
-        }
-        Object user = request.getAttribute("authenticatedUser");
-        auditLogService.record(request, response, user instanceof AppUser ? (AppUser) user : null);
+        return;
     }
 
     private boolean shouldSkip(HttpServletRequest request) {

@@ -83,7 +83,8 @@ public class EcrRequestController {
     }
 
     @PostMapping
-    public ResponseEntity<EcrRequest> create(@Valid @RequestBody EcrRequest request) {
+    public ResponseEntity<EcrRequest> create(@Valid @RequestBody EcrRequest request,
+                                             @RequestAttribute("authenticatedUser") AppUser user) {
         if (request.getAccessInternalNumber() == null) {
             request.setAccessInternalNumber(requestRepository.findMaxAccessInternalNumber() + 1);
         }
@@ -94,6 +95,13 @@ public class EcrRequestController {
         List<com.gestionplanning.action.EcrAction> initialActions = request.getInitialActions();
         EcrRequest saved = requestRepository.save(request);
         templateService.createActionsFor(saved, initialActions);
+        auditLogService.recordBusinessEvent(
+                user,
+                "CREATION_MODIFICATION",
+                "modification",
+                saved.getId() == null ? null : String.valueOf(saved.getId()),
+                "Creation de la modification: " + requestLabel(saved)
+        );
         return ResponseEntity.created(URI.create("/api/ecr-requests/" + saved.getId())).body(saved);
     }
 
@@ -136,6 +144,13 @@ public class EcrRequestController {
                     request.setCurrentStage(nextStage);
                     EcrRequest saved = requestRepository.save(request);
                     planningService.recalculateRequest(saved);
+                    auditLogService.recordBusinessEvent(
+                            user,
+                            "MODIFICATION_MODIFICATION",
+                            "modification",
+                            saved.getId() == null ? null : String.valueOf(saved.getId()),
+                            "Modification mise a jour: " + requestLabel(saved)
+                    );
                     return ResponseEntity.ok(saved);
                 })
                 .orElse(ResponseEntity.status(403).build());
@@ -245,8 +260,8 @@ public class EcrRequestController {
                         auditLogService.recordBusinessEvent(
                                 user,
                                 "REOUVERTURE_PHASE",
-                                "phase",
-                                saved.getId() == null ? null : String.valueOf(saved.getId()),
+                                "modification",
+                                requestLabel(saved),
                                 "Phase reouverte: " + stageLabel(stage) + " - Modification: " + requestLabel(saved)
                         );
                     }

@@ -1,14 +1,9 @@
 package com.gestionplanning.preferential;
 
+import com.gestionplanning.audit.AuditLogService;
+import com.gestionplanning.user.AppUser;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
 import java.util.List;
@@ -17,9 +12,11 @@ import java.util.List;
 @RequestMapping("/api/preferentials/products")
 public class ProductReferenceController {
     private final ProductReferenceRepository repository;
+    private final AuditLogService auditLogService;
 
-    public ProductReferenceController(ProductReferenceRepository repository) {
+    public ProductReferenceController(ProductReferenceRepository repository, AuditLogService auditLogService) {
         this.repository = repository;
+        this.auditLogService = auditLogService;
     }
 
     @GetMapping
@@ -28,9 +25,12 @@ public class ProductReferenceController {
     }
 
     @PostMapping
-    public ResponseEntity<ProductReference> create(@Valid @RequestBody ProductReference product) {
+    public ResponseEntity<ProductReference> create(@Valid @RequestBody ProductReference product,
+                                                   @RequestAttribute("authenticatedUser") AppUser user) {
         product.setName(product.getName().trim());
-        return ResponseEntity.ok(repository.save(product));
+        ProductReference saved = repository.save(product);
+        auditLogService.recordBusinessEvent(user, "AJOUT_PRODUIT", "produit", saved.getId() == null ? null : String.valueOf(saved.getId()), "Ajout du produit: " + saved.getName());
+        return ResponseEntity.ok(saved);
     }
 
     @PutMapping("/{id}")

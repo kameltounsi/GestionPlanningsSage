@@ -434,12 +434,21 @@ public class EcrActionController {
     }
 
     private void recordActionCompleted(AppUser user, EcrAction action) {
+        String actionTitle = action.getTitle() == null || action.getTitle().trim().isEmpty()
+                ? "action sans titre"
+                : action.getTitle().trim();
+        String modificationName = action.getRequest() == null || action.getRequest().getModificationNumber() == null || action.getRequest().getModificationNumber().trim().isEmpty()
+                ? "modification sans nom"
+                : action.getRequest().getModificationNumber().trim();
+        String projectName = action.getRequest() == null || action.getRequest().getModificationProject() == null || action.getRequest().getModificationProject().trim().isEmpty()
+                ? "projet non renseigne"
+                : action.getRequest().getModificationProject().trim();
         auditLogService.recordBusinessEvent(
                 user,
                 "ACTION_TERMINEE",
-                "action",
-                action.getId() == null ? null : String.valueOf(action.getId()),
-                "Action marquee terminee: " + (action.getTitle() == null ? "action sans titre" : action.getTitle())
+                "modification",
+                modificationName,
+                "Action marquee terminee: " + actionTitle + " - Modification: " + modificationName + " - Projet: " + projectName
         );
     }
 

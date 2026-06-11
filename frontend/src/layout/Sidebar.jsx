@@ -58,6 +58,7 @@ export function Sidebar({ canAdmin, collapsed, currentUser, page, onCollapseTogg
                   onClick={() => onNavigate(key)}
                   type="button"
                   title={label}
+                  href={label}
               >
                 <Icon size={18}/>
                 <span>{label}</span>

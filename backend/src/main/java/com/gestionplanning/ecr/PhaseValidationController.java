@@ -4,6 +4,7 @@ import com.gestionplanning.action.ActionStatus;
 import com.gestionplanning.action.ActionValidationStatus;
 import com.gestionplanning.action.EcrAction;
 import com.gestionplanning.action.EcrActionRepository;
+import com.gestionplanning.audit.AuditLogService;
 import com.gestionplanning.auth.AccessControlService;
 import com.gestionplanning.user.AccountMailService;
 import com.gestionplanning.user.AppUser;
@@ -23,17 +24,20 @@ public class PhaseValidationController {
     private final PhaseValidationRequestRepository validationRepository;
     private final AccessControlService accessControlService;
     private final AccountMailService accountMailService;
+    private final AuditLogService auditLogService;
 
     public PhaseValidationController(EcrRequestRepository requestRepository,
                                      EcrActionRepository actionRepository,
                                      PhaseValidationRequestRepository validationRepository,
                                      AccessControlService accessControlService,
-                                     AccountMailService accountMailService) {
+                                     AccountMailService accountMailService,
+                                     AuditLogService auditLogService) {
         this.requestRepository = requestRepository;
         this.actionRepository = actionRepository;
         this.validationRepository = validationRepository;
         this.accessControlService = accessControlService;
         this.accountMailService = accountMailService;
+        this.auditLogService = auditLogService;
     }
 
     @GetMapping
@@ -100,20 +104,26 @@ public class PhaseValidationController {
         PhaseValidationRequest validation = validationItem.get();
         if (!validation.getRequestId().equals(requestId)
                 || validation.getStatus() != PhaseValidationStatus.PENDING
-                || validation.getStage() != validation.getRequest().getCurrentStage()
-                || !accessControlService.wasPhaseValidationRequestedByPilot(validation)) {
+                || validation.getStage() != validation.getRequest().getCurrentStage()) {
             return ResponseEntity.status(403).<PhaseValidationRequest>build();
         }
         return actionRepository.findById(actionId)
                 .filter(action -> action.getRequestId().equals(requestId))
                 .filter(action -> action.getStage() == validation.getStage())
-                .filter(action -> action.getValidationStatus() == ActionValidationStatus.PENDING)
+                .filter(action -> isActionAwaitingValidation(action, validation))
                 .filter(action -> accessControlService.canValidateAction(user, action))
                 .map(action -> {
                     action.setValidationStatus(ActionValidationStatus.APPROVED);
                     action.setValidationReviewedAt(LocalDateTime.now());
                     action.setValidationReviewedBy(displayName(user));
                     actionRepository.save(action);
+                    auditLogService.recordBusinessEvent(
+                            user,
+                            "VALIDATION_ACTION",
+                            "action",
+                            action.getId() == null ? null : String.valueOf(action.getId()),
+                            "Validation de l'action: " + actionLabel(action) + " - Modification: " + requestLabel(action.getRequest())
+                    );
 
                     PhaseValidationRequest updatedValidation = enrichValidation(validation);
                     if (updatedValidation.getValidationRate() >= 100) {
@@ -124,6 +134,13 @@ public class PhaseValidationController {
                         EcrRequest request = updatedValidation.getRequest();
                         request.setCurrentStage(nextStage(request, updatedValidation.getStage()));
                         requestRepository.save(request);
+                        auditLogService.recordBusinessEvent(
+                                user,
+                                "VALIDATION_PHASE",
+                                "modification",
+                                requestLabel(request),
+                                "Validation de la phase: " + stageLabel(updatedValidation.getStage(), request.isNewVersion()) + " - Modification: " + requestLabel(request)
+                        );
                     }
                     return ResponseEntity.ok(enrichValidation(updatedValidation));
                 })
@@ -139,7 +156,7 @@ public class PhaseValidationController {
                 .filter(validation -> accessControlService.canValidateRequest(user, validation.getRequest()))
                 .filter(validation -> validation.getStatus() == PhaseValidationStatus.PENDING)
                 .filter(validation -> validation.getStage() == validation.getRequest().getCurrentStage())
-                .filter(accessControlService::wasPhaseValidationRequestedByPilot)
+                .filter(this::allValidationActionsApproved)
                 .map(validation -> {
                     validation.setStatus(PhaseValidationStatus.APPROVED);
                     validation.setReviewedBy(displayName(user));
@@ -147,7 +164,15 @@ public class PhaseValidationController {
                     validationRepository.save(validation);
                     EcrRequest request = validation.getRequest();
                     request.setCurrentStage(nextStage(request, validation.getStage()));
-                    return ResponseEntity.ok(requestRepository.save(request));
+                    EcrRequest savedRequest = requestRepository.save(request);
+                    auditLogService.recordBusinessEvent(
+                            user,
+                            "VALIDATION_PHASE",
+                            "modification",
+                            requestLabel(request),
+                            "Validation de la phase: " + stageLabel(validation.getStage(), request.isNewVersion()) + " - Modification: " + requestLabel(request)
+                    );
+                    return ResponseEntity.ok(savedRequest);
                 })
                 .orElse(ResponseEntity.status(403).<EcrRequest>build());
     }
@@ -163,7 +188,6 @@ public class PhaseValidationController {
                 .filter(validation -> accessControlService.canValidateRequest(user, validation.getRequest()))
                 .filter(validation -> validation.getStatus() == PhaseValidationStatus.PENDING)
                 .filter(validation -> validation.getStage() == validation.getRequest().getCurrentStage())
-                .filter(accessControlService::wasPhaseValidationRequestedByPilot)
                 .map(validation -> {
                     validation.setStatus(PhaseValidationStatus.REJECTED);
                     validation.setReviewedBy(displayName(user));
@@ -199,6 +223,18 @@ public class PhaseValidationController {
         return action.isChecked() || action.getStatus() == ActionStatus.DONE || action.getStatus() == ActionStatus.DONE_LATE;
     }
 
+    private boolean isActionAwaitingValidation(EcrAction action, PhaseValidationRequest validation) {
+        return action != null
+                && validation != null
+                && validation.getStatus() == PhaseValidationStatus.PENDING
+                && action.getValidationStatus() != ActionValidationStatus.APPROVED;
+    }
+
+    private boolean allValidationActionsApproved(PhaseValidationRequest validation) {
+        PhaseValidationRequest enriched = enrichValidation(validation);
+        return enriched.getTotalActions() > 0 && enriched.getApprovedActions() >= enriched.getTotalActions();
+    }
+
     private List<PhaseValidationRequest> enrichValidations(List<PhaseValidationRequest> validations) {
         validations.forEach(this::enrichValidation);
         return validations;
@@ -230,6 +266,26 @@ public class PhaseValidationController {
 
     private String displayName(AppUser user) {
         return user.getFullName() == null || user.getFullName().trim().isEmpty() ? user.getEmail() : user.getFullName();
+    }
+
+    private String requestLabel(EcrRequest request) {
+        if (request == null) return "-";
+        if (request.getModificationNumber() != null && !request.getModificationNumber().trim().isEmpty()) {
+            return request.getModificationNumber();
+        }
+        if (request.getClient() != null && !request.getClient().trim().isEmpty()) {
+            return request.getClient();
+        }
+        return "Modification " + request.getId();
+    }
+
+    private String actionLabel(EcrAction action) {
+        if (action == null) return "-";
+        return action.getTitle() == null || action.getTitle().trim().isEmpty() ? "Action " + action.getId() : action.getTitle();
+    }
+
+    private String stageLabel(EcrStage stage, boolean newProject) {
+        return stage == null ? "-" : stage.getLabel(newProject);
     }
 
     public static class ValidationCreateRequest {

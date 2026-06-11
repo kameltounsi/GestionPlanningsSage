@@ -47,6 +47,7 @@ import {
   getClientReferences,
   getCurrentUser,
   getEcrRequests,
+  getAuditLogs,
   getPilots,
   getProductReferences,
   getProjects,
@@ -101,6 +102,29 @@ const swalButtons = {
   confirmButtonColor: "#2563eb",
   cancelButtonColor: "#64748b"
 };
+
+const pageTitles = {
+  dashboard: "Tableau de bord",
+  modifications: "Modifications",
+  projects: "Actions standard",
+  traceability: "Tracabilite",
+  preferentials: "Préférentiels",
+  users: "Utilisateurs",
+  profile: "Profil"
+};
+
+const visibleAuditActionTypes = [
+  "CREATION_MODIFICATION",
+  "MODIFICATION_MODIFICATION",
+  "VALIDATION_PHASE",
+  "REOUVERTURE_PHASE",
+  "ACTION_TERMINEE",
+  "VALIDATION_ACTION",
+  "AJOUT_CLIENT",
+  "AJOUT_PRODUIT",
+  "AJOUT_PROJET",
+  "MODIFICATION_PROJET_EQUIPE"
+];
 
 function successToast(title) {
   return Swal.fire({
@@ -249,6 +273,14 @@ function canManageActionForUser(user, action) {
     .some((value) => normalizeRoleToken(value) === responsible);
 }
 
+function isActionPilotForUser(user, action) {
+  const responsible = normalizeRoleToken(action?.responsible);
+  if (!responsible) return false;
+  return [user?.jobTitle, user?.fullName, user?.username, user?.email, user?.role]
+    .filter(Boolean)
+    .some((value) => normalizeRoleToken(value) === responsible);
+}
+
 function canValidateActionForUser(user, action) {
   if (!user || !action) return false;
   const validator = normalizeRoleToken(action.validatorDisplayName || action.validator || action.validatorRole);
@@ -259,8 +291,19 @@ function canValidateActionForUser(user, action) {
 }
 
 function canToggleActionForUser(user, action, request) {
-  if (!canManageActionForUser(user, action)) return false;
+  if (!isActionPilotForUser(user, action)) return false;
   return !isActionDone(action) || action?.stage === request?.currentStage;
+}
+
+function blockingActionFor(action, actions = []) {
+  if (!action?.dependsOnActionId) return null;
+  return actions.find((item) => item.id === action.dependsOnActionId) || null;
+}
+
+function blockingActionLabel(action, actions = []) {
+  if (!action?.dependsOnActionId) return "Aucune";
+  const dependency = blockingActionFor(action, actions);
+  return dependency?.title || `Action #${action.dependsOnActionId}`;
 }
 
 function isRequestPilot(user, request) {
@@ -299,6 +342,9 @@ function App() {
   const [roleReferences, setRoleReferences] = useState([]);
   const [planningRules, setPlanningRules] = useState([]);
   const [users, setUsers] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditQuery, setAuditQuery] = useState("");
+  const [auditActionFilter, setAuditActionFilter] = useState("");
   const [currentUser, setCurrentUser] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [selectedStage, setSelectedStage] = useState("FEASIBILITY_VALIDATION");
@@ -382,6 +428,45 @@ function App() {
     return { active, closed, projects: projects.length, requests: requests.length };
   }, [requests, projects]);
 
+  const filteredAuditLogs = useMemo(() => {
+    const normalized = auditQuery.trim().toLowerCase();
+    return auditLogs
+      .map(normalizeAuditLog)
+      .filter(Boolean)
+      .filter((log) => visibleAuditActionTypes.includes(log.actionType))
+      .filter((log) => {
+      const matchesAction = !auditActionFilter || log.actionType === auditActionFilter;
+      const matchesSearch = !normalized || [
+        log.actorName,
+        log.actorRole,
+        log.actionType,
+        auditActionSentence(log),
+        auditTargetSummary(log),
+        auditResultLabel(log)
+      ].filter(Boolean).some((value) => String(value).toLowerCase().includes(normalized));
+      return matchesAction && matchesSearch;
+    });
+  }, [auditLogs, auditActionFilter, auditQuery]);
+
+  const auditActionOptions = useMemo(
+    () => visibleAuditActionTypes.filter((actionType) => auditLogs.map(normalizeAuditLog).some((log) => log?.actionType === actionType)),
+    [auditLogs]
+  );
+
+  useEffect(() => {
+    document.title = authSession?.token ? pageTitles[page] || "Application ECR" : "Connexion";
+  }, [authSession?.token, page]);
+
+  useEffect(() => {
+    if (page !== "traceability" || !isAdminUser(currentUser)) return;
+    getAuditLogs()
+      .then(setAuditLogs)
+      .catch(() => {
+        setAuditLogs([]);
+        setError("Chargement de la tracabilite impossible.");
+      });
+  }, [currentUser, page]);
+
   function loadInitialData() {
     return Promise.all([getEcrRequests(), getPilots(), getProjects(), getClientReferences(), getProductReferences(), getRoleReferences(), getActionPlanningRules(), getUsers(), getCurrentUser()])
       .then(([requestData, pilotData, projectData, clientReferenceData, productReferenceData, roleReferenceData, planningRuleData, userData, currentUserData]) => {
@@ -398,7 +483,22 @@ function App() {
         setSelectedId((currentId) => currentId ?? requestData[0]?.id ?? null);
       });
   }
+  function refreshSelectedData(requestId = selectedId, stage = selectedStage) {
+    if (!requestId) return Promise.resolve([]);
 
+    return Promise.all([
+      getEcrRequests(),
+      getChecklist(requestId, stage),
+      getActions(requestId, stage),
+      getPhaseValidations(requestId)
+    ]).then(([requestData, checklistData, actionData, validationData]) => {
+      setRequests(requestData);
+      setChecklist(checklistData);
+      setActions(actionData);
+      setPhaseValidations(validationData);
+      return actionData;
+    });
+  }
   useEffect(() => {
     if (!authSession?.token) {
       setLoading(false);
@@ -459,7 +559,7 @@ function App() {
   }, [showCreateForm, showEditForm]);
 
   useEffect(() => {
-    if (currentUser && !isAdminUser(currentUser) && ["projects", "preferentials", "users"].includes(page)) {
+    if (currentUser && !isAdminUser(currentUser) && ["projects", "traceability", "preferentials", "users"].includes(page)) {
       setPage("modifications");
     }
   }, [currentUser, page]);
@@ -528,7 +628,10 @@ function App() {
         setShowCreateForm(false);
         setPage("modifications");
         successToast("Modification creee");
-        return loadInitialData();
+        return refreshSelectedData(
+            savedRequest.id,
+            safeStage(savedRequest.currentStage, Boolean(savedRequest.newVersion))
+        );
       })
       .catch(() => {
         const message = "Creation ECR impossible. Creez d'abord le projet, puis verifiez les champs obligatoires.";
@@ -585,7 +688,10 @@ function App() {
         setSelectedId(savedRequest.id);
         setSelectedStage(safeStage(savedRequest.currentStage, Boolean(savedRequest.newVersion)));
         successToast("Modification mise a jour");
-        return loadInitialData();
+        return refreshSelectedData(
+            savedRequest.id,
+            safeStage(savedRequest.currentStage, Boolean(savedRequest.newVersion))
+        );
       })
       .catch(() => {
         const message = "Mise a jour de la modification impossible. Verifiez les champs obligatoires.";
@@ -635,6 +741,7 @@ function App() {
     updateEcrStage(selectedRequest.id, stage)
       .then((updatedRequest) => {
         setRequests((items) => items.map((item) => (item.id === updatedRequest.id ? updatedRequest : item)));
+        return refreshSelectedData(updatedRequest.id, safeStage(updatedRequest.currentStage, Boolean(updatedRequest.newVersion)));
       })
       .catch(() => {
         const message = "Impossible de sauvegarder l'etape ECR.";
@@ -651,10 +758,7 @@ function App() {
       .then((updatedRequest) => {
         setRequests((items) => items.map((item) => (item.id === updatedRequest.id ? updatedRequest : item)));
         setSelectedStage(safeStage(updatedRequest.currentStage, Boolean(updatedRequest.newVersion)));
-        return Promise.all([
-          getActions(updatedRequest.id, updatedRequest.currentStage).then(setActions),
-          refreshPhaseValidations(updatedRequest.id)
-        ]);
+        return refreshSelectedData(updatedRequest.id, safeStage(updatedRequest.currentStage, Boolean(updatedRequest.newVersion)));
       })
       .then(() => successToast("Phase reouverte"))
       .catch((exception) => {
@@ -744,13 +848,7 @@ function App() {
 
   function refreshCurrentActionsAndRequests() {
     if (!selectedRequest) return Promise.resolve([]);
-    return Promise.all([getActions(selectedRequest.id, selectedStage), getEcrRequests()])
-      .then(([actionData, requestData]) => {
-        setActions(actionData);
-        setRequests(requestData);
-        refreshPhaseValidations(selectedRequest.id).catch(() => {});
-        return actionData;
-      });
+    return refreshSelectedData(selectedRequest.id, selectedStage);
   }
 
   function handleCreateAction(event) {
@@ -827,16 +925,12 @@ function App() {
       finalizationDate: completed ? localDateTimeNow() : null
     };
 
-    setActions((items) => items.map((item) => (item.id === action.id ? updatedAction : item)));
     updateAction(action.id, updatedAction)
-      .then((savedAction) => {
-        setActions((items) => items.map((item) => (item.id === savedAction.id ? savedAction : item)));
-        getEcrRequests().then(setRequests).catch(() => {});
-        refreshPhaseValidations(selectedRequest.id).catch(() => {});
-        successToast(completed ? "Action terminee" : "Action reouverte");
+        .then(() => refreshSelectedData(selectedRequest.id, selectedStage))
+        .then(() => {
+          successToast(completed ? "Action terminee" : "Action reouverte");
       })
       .catch(() => {
-        setActions((items) => items.map((item) => (item.id === action.id ? action : item)));
         const message = "Impossible de mettre a jour l'action.";
         setError(message);
         errorAlert(message);
@@ -848,11 +942,10 @@ function App() {
     if (files.length === 0) return;
     setError("");
     uploadActionEvidenceFiles(action.id, files)
-      .then(() => getActions(selectedId, selectedStage))
-      .then((actionData) => {
-        setActions(actionData);
-        successToast("Asset ajoute");
-      })
+        .then(() => refreshSelectedData(selectedId, selectedStage))
+        .then(() => {
+          successToast("Asset ajoute");
+        })
       .catch(() => {
         const message = "Ajout du fichier evidence impossible.";
         setError(message);
@@ -877,8 +970,8 @@ function App() {
       if (!result.isConfirmed) return;
       setError("");
       deleteActionAsset(asset.id)
-        .then((savedAction) => {
-          setActions((items) => items.map((item) => (item.id === savedAction.id ? savedAction : item)));
+        .then(() => refreshSelectedData(selectedId, selectedStage))
+        .then(() => {
           successToast("Asset supprime");
         })
         .catch(() => {
@@ -908,10 +1001,7 @@ function App() {
     requestPhaseValidation(selectedRequest.id, selectedStage)
       .then(() => {
         successToast("Demande envoyee");
-        return Promise.all([
-          refreshPhaseValidations(selectedRequest.id),
-          getActions(selectedRequest.id, selectedStage).then(setActions)
-        ]);
+        return refreshSelectedData(selectedRequest.id, selectedStage);
       })
       .catch((exception) => errorAlert(exception?.message || "Demande de validation impossible. Verifiez que vous etes sur la phase courante et que toutes ses actions sont terminees."))
       .finally(() => setSaving(false));
@@ -921,12 +1011,12 @@ function App() {
     if (!selectedRequest || !validation) return;
     setSaving(true);
     approvePhaseValidation(selectedRequest.id, validation.id)
-      .then((updatedRequest) => {
-        setRequests((items) => items.map((item) => (item.id === updatedRequest.id ? updatedRequest : item)));
-        setSelectedStage(safeStage(updatedRequest.currentStage, Boolean(updatedRequest.newVersion)));
-        successToast("Phase validee");
-        return refreshPhaseValidations(selectedRequest.id);
-      })
+        .then((updatedRequest) => {
+          const nextStage = safeStage(updatedRequest.currentStage, Boolean(updatedRequest.newVersion));
+          setSelectedStage(nextStage);
+          successToast("Phase validee");
+          return refreshSelectedData(updatedRequest.id, nextStage);
+        })
       .catch((exception) => errorAlert(exception?.message || "Validation de phase impossible."))
       .finally(() => setSaving(false));
   }
@@ -978,20 +1068,17 @@ function App() {
     if (!selectedRequest || !validation || !action) return;
     setSaving(true);
     approveActionValidation(selectedRequest.id, validation.id, action.id)
-      .then(() => Promise.all([
-        getActions(selectedRequest.id, selectedStage),
-        getEcrRequests(),
-        refreshPhaseValidations(selectedRequest.id)
-      ]))
-      .then(([actionData, requestData]) => {
-        setActions(actionData);
-        setRequests(requestData);
-        const refreshedRequest = requestData.find((item) => item.id === selectedRequest.id);
-        if (refreshedRequest) {
-          setSelectedStage(safeStage(refreshedRequest.currentStage, Boolean(refreshedRequest.newVersion)));
-        }
-        successToast("Action validee");
-      })
+        .then(() => getEcrRequests())
+        .then((requestData) => {
+          const refreshedRequest = requestData.find((item) => item.id === selectedRequest.id);
+          const nextStage = refreshedRequest
+              ? safeStage(refreshedRequest.currentStage, Boolean(refreshedRequest.newVersion))
+              : selectedStage;
+
+          setSelectedStage(nextStage);
+          successToast("Action validee");
+          return refreshSelectedData(selectedRequest.id, nextStage);
+        })
       .catch((exception) => errorAlert(exception?.message || "Validation de l'action impossible."))
       .finally(() => setSaving(false));
   }
@@ -1019,8 +1106,9 @@ function App() {
         setEditingProject(null);
         successToast(isEdit ? "Projet modifie" : "Projet ajoute");
         if (selectedRequest?.modificationProject === savedProject.name || selectedRequest?.modificationProject === editingProject) {
-          refreshCurrentActionsAndRequests().catch(() => {});
+          return refreshCurrentActionsAndRequests();
         }
+        return getEcrRequests().then(setRequests);
       })
       .catch(() => {
         const message = "Sauvegarde projet impossible. Verifiez le nom du projet.";
@@ -1332,6 +1420,7 @@ function App() {
             setPlanningRuleForm(emptyPlanningRuleForm);
           }
           successToast("Regle planning supprimee");
+          return selectedId ? refreshSelectedData(selectedId, selectedStage) : Promise.resolve();
         })
         .catch(() => {
           const message = "Suppression regle planning impossible.";
@@ -1383,6 +1472,7 @@ function App() {
         setUserForm(emptyUserForm);
         setEditingUser(null);
         successToast(isEdit ? "Utilisateur modifie" : "Utilisateur ajoute");
+        return selectedId ? refreshSelectedData(selectedId, selectedStage) : Promise.resolve();
       })
       .catch((exception) => {
         const detail = exception?.message || "";
@@ -1413,6 +1503,7 @@ function App() {
             setUserForm(emptyUserForm);
           }
           successToast("Utilisateur supprime");
+          return selectedId ? refreshSelectedData(selectedId, selectedStage) : Promise.resolve();
         })
         .catch(() => {
           const message = "Suppression utilisateur impossible.";
@@ -1433,6 +1524,7 @@ function App() {
         setProfileForm(userToForm(savedUser));
         setUsers((items) => items.map((item) => (item.id === savedUser.id ? savedUser : item)));
         successToast("Profil mis a jour");
+        return selectedId ? refreshSelectedData(selectedId, selectedStage) : Promise.resolve();
       })
       .catch(() => {
         const message = "Mise a jour du profil impossible.";
@@ -1534,6 +1626,20 @@ function App() {
     setShowCreateForm(true);
   }
 
+  function handleNavigate(nextPage) {
+    if (nextPage === "modifications") {
+      const request = selectedRequest || requests.find((item) => item.id === selectedId) || requests[0];
+      if (request) {
+        setSelectedId(request.id);
+        setSelectedStage(safeStage(request.currentStage, Boolean(request.newVersion)));
+      }
+    }
+    setPage(nextPage);
+    setShowCreateForm(false);
+    setShowEditForm(false);
+    setEditingEcrRequest(null);
+  }
+
   if (loading) {
     return <main className="centered">Chargement...</main>;
   }
@@ -1559,12 +1665,7 @@ function App() {
           page={page}
           onCollapseToggle={() => setMenuCollapsed((collapsed) => !collapsed)}
           onLogout={handleLogout}
-          onNavigate={(nextPage) => {
-            setPage(nextPage);
-            setShowCreateForm(false);
-            setShowEditForm(false);
-            setEditingEcrRequest(null);
-          }}
+          onNavigate={handleNavigate}
       />
       <section className="page-shell">
         {error && (
@@ -1600,6 +1701,19 @@ function App() {
             onEditPlanningRule={startPlanningRuleEdit}
             onSubmitPlanningRule={handleSavePlanningRule}
             setPlanningRuleForm={setPlanningRuleForm}
+          />
+        )}
+
+        {page === "traceability" && (
+          <TraceabilityPage
+            actionFilter={auditActionFilter}
+            actionOptions={auditActionOptions}
+            logs={filteredAuditLogs}
+            query={auditQuery}
+            total={auditLogs.length}
+            onRefresh={() => getAuditLogs().then(setAuditLogs)}
+            setActionFilter={setAuditActionFilter}
+            setQuery={setAuditQuery}
           />
         )}
 
@@ -1807,6 +1921,221 @@ function DashboardPage({ requests, saving, stats, onCreateRequest, onDeleteReque
       </section>
     </section>
   );
+}
+
+function TraceabilityPage({ actionFilter, actionOptions, logs, query, total, onRefresh, setActionFilter, setQuery }) {
+  return (
+    <section className="page-content traceability-content">
+      <PageHeader eyebrow="Suivi" title="Tracabilite" subtitle="Historique des changements importants effectues dans l'application." />
+      <div className="modifications-toolbar">
+        <label className="search">
+          <Search size={16} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher une personne, un changement, un element..." />
+        </label>
+        <label className="project-filter">
+          <ClipboardList size={16} />
+          <select value={actionFilter} onChange={(event) => setActionFilter(event.target.value)}>
+            <option value="">Tous les types</option>
+            {actionOptions.map((action) => (
+              <option key={action} value={action}>{auditActionLabel(action)}</option>
+            ))}
+          </select>
+        </label>
+        <button className="secondary-action" type="button" onClick={onRefresh}>
+          <ClipboardList size={16} />
+          Actualiser
+        </button>
+        <span className="toolbar-count">{logs.length} changement{logs.length > 1 ? "s" : ""}</span>
+      </div>
+
+      <section className="panel traceability-panel">
+        {logs.length === 0 ? (
+          <EmptyState title="Aucune trace" text="Les operations apparaitront ici apres les prochaines actions." />
+        ) : (
+          <div className="traceability-table">
+            <div className="traceability-row traceability-head">
+              <span>Date</span>
+              <span>Personne</span>
+              <span>Type de modification</span>
+              <span>Element concerne</span>
+              <span>Resultat</span>
+            </div>
+            {logs.map((log) => (
+              <article className="traceability-row" key={log.id}>
+                <span>{formattedDateTime(log.occurredAt)}</span>
+                <span>
+                  <strong>{log.actorName || "-"}</strong>
+                  <small>{userFriendlyRole(log.actorRole)}</small>
+                </span>
+                <span>
+                  <strong>{auditActionLabel(log.actionType)}</strong>
+                  <small>{auditFriendlyDetail(log)}</small>
+                </span>
+                <span>
+                  <strong>{auditTargetSummary(log)}</strong>
+                  <small>{auditTargetHint(log)}</small>
+                </span>
+                <span><small className={`status ${auditSucceeded(log) ? "done" : "late"}`}>{auditResultLabel(log)}</small></span>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function auditActionLabel(actionType) {
+  const labels = {
+    CREATION_MODIFICATION: "Creation d'une modification",
+    MODIFICATION_MODIFICATION: "Modification d'une modification",
+    VALIDATION_PHASE: "Validation d'une phase",
+    REOUVERTURE_PHASE: "Reouverture d'une phase",
+    ACTION_TERMINEE: "Action marquee terminee",
+    VALIDATION_ACTION: "Validation d'une action",
+    AJOUT_CLIENT: "Ajout d'un client",
+    AJOUT_PRODUIT: "Ajout d'un produit",
+    AJOUT_PROJET: "Ajout d'un projet",
+    MODIFICATION_PROJET_EQUIPE: "Modification d'un projet ou de son equipe"
+  };
+  return labels[actionType] || actionType || "-";
+}
+
+function normalizeAuditLog(log) {
+  if (!log) return null;
+  if (visibleAuditActionTypes.includes(log.actionType)) return log;
+  const path = String(log.path || "").toLowerCase();
+  const method = String(log.httpMethod || "").toUpperCase();
+  const targetType = String(log.targetType || "").toLowerCase();
+  let actionType = null;
+  let normalizedTargetType = log.targetType;
+
+  if (method === "POST" && path === "/api/ecr-requests") {
+    actionType = "CREATION_MODIFICATION";
+    normalizedTargetType = "modification";
+  } else if (method === "PUT" && path.match(/^\/api\/ecr-requests\/\d+$/)) {
+    actionType = "MODIFICATION_MODIFICATION";
+    normalizedTargetType = "modification";
+  } else if (method === "POST" && path.match(/\/phase-validations\/\d+\/approve$/)) {
+    actionType = "VALIDATION_PHASE";
+    normalizedTargetType = "phase";
+  } else if (method === "PATCH" && path.includes("/stage")) {
+    actionType = "REOUVERTURE_PHASE";
+    normalizedTargetType = "phase";
+  } else if (method === "POST" && path.match(/\/phase-validations\/\d+\/actions\/\d+\/approve$/)) {
+    actionType = "VALIDATION_ACTION";
+    normalizedTargetType = "action";
+  } else if (method === "PUT" && targetType === "actions") {
+    actionType = "ACTION_TERMINEE";
+    normalizedTargetType = "action";
+  } else if (method === "POST" && path === "/api/preferentials/clients") {
+    actionType = "AJOUT_CLIENT";
+    normalizedTargetType = "client";
+  } else if (method === "POST" && path === "/api/preferentials/products") {
+    actionType = "AJOUT_PRODUIT";
+    normalizedTargetType = "produit";
+  } else if (method === "POST" && path === "/api/projects") {
+    actionType = "AJOUT_PROJET";
+    normalizedTargetType = "projet";
+  } else if (method === "PUT" && path.startsWith("/api/projects/")) {
+    actionType = "MODIFICATION_PROJET_EQUIPE";
+    normalizedTargetType = "projet";
+  }
+
+  return actionType ? { ...log, actionType, targetType: normalizedTargetType } : null;
+}
+
+function auditTargetLabel(targetType) {
+  const labels = {
+    action: "Action",
+    actions: "Action",
+    "action-assets": "Asset action",
+    "action-planning-rules": "Action standard",
+    auth: "Authentification",
+    client: "Client",
+    documents: "Document",
+    "ecr-requests": "Modification",
+    modification: "Modification",
+    penalties: "Penalite",
+    preferentials: "Referentiel",
+    phase: "Phase",
+    produit: "Produit",
+    projet: "Projet",
+    projects: "Projet",
+    users: "Utilisateur"
+  };
+  return labels[targetType] || targetType || "-";
+}
+
+function auditActionSentence(log) {
+  const labels = {
+    CREATION_MODIFICATION: "Creation d'une modification",
+    MODIFICATION_MODIFICATION: "Modification d'une modification",
+    VALIDATION_PHASE: "Validation d'une phase",
+    REOUVERTURE_PHASE: "Reouverture d'une phase",
+    ACTION_TERMINEE: "Action marquee comme terminee",
+    VALIDATION_ACTION: "Validation d'une action",
+    AJOUT_CLIENT: "Ajout d'un client",
+    AJOUT_PRODUIT: "Ajout d'un produit",
+    AJOUT_PROJET: "Ajout d'un projet",
+    MODIFICATION_PROJET_EQUIPE: "Modification d'un projet ou de son equipe"
+  };
+  return labels[log.actionType] || "Changement suivi";
+}
+
+function auditSucceeded(log) {
+  return Number(log.responseStatus) < 400;
+}
+
+function auditResultLabel(log) {
+  return auditSucceeded(log) ? "Effectue" : "Non effectue";
+}
+
+function auditFriendlyDetail(log) {
+  if (!auditSucceeded(log)) return "Le changement n'a pas ete autorise.";
+  const target = auditTargetHint(log);
+  const labels = {
+    CREATION_MODIFICATION: `Nouvelle demande creee${target ? `: ${target}` : ""}.`,
+    MODIFICATION_MODIFICATION: `Demande mise a jour${target ? `: ${target}` : ""}.`,
+    VALIDATION_PHASE: `Phase validee${target ? ` pour ${target}` : ""}.`,
+    REOUVERTURE_PHASE: `Phase rouverte${target ? ` pour ${target}` : ""}.`,
+    ACTION_TERMINEE: `Action terminee${target ? `: ${target}` : ""}.`,
+    VALIDATION_ACTION: `Action validee${target ? `: ${target}` : ""}.`,
+    AJOUT_CLIENT: "Nouveau client ajoute au referentiel.",
+    AJOUT_PRODUIT: "Nouveau produit ajoute au referentiel.",
+    AJOUT_PROJET: "Nouveau projet ajoute.",
+    MODIFICATION_PROJET_EQUIPE: `Projet ou equipe mis a jour${target ? `: ${target}` : ""}.`
+  };
+  return labels[log.actionType] || "Un changement important a ete effectue.";
+}
+
+function auditTargetSummary(log) {
+  const labels = {
+    CREATION_MODIFICATION: "Modification",
+    MODIFICATION_MODIFICATION: "Modification",
+    VALIDATION_PHASE: "Phase",
+    REOUVERTURE_PHASE: "Phase",
+    ACTION_TERMINEE: "Action",
+    VALIDATION_ACTION: "Action",
+    AJOUT_CLIENT: "Client",
+    AJOUT_PRODUIT: "Produit",
+    AJOUT_PROJET: "Projet",
+    MODIFICATION_PROJET_EQUIPE: "Projet"
+  };
+  return labels[log.actionType] || auditTargetLabel(log.targetType);
+}
+
+function auditTargetHint(log) {
+  if (!log.targetId) return "";
+  if (log.actionType === "MODIFICATION_PROJET_EQUIPE") return log.targetId;
+  return `numero ${log.targetId}`;
+}
+
+function userFriendlyRole(role) {
+  const value = String(role || "").trim();
+  if (!value) return "-";
+  if (value.toUpperCase() === "ADMIN") return "Administrateur";
+  return userRoleLabel(value);
 }
 
 function CreateModificationDialog({ clientOptions, ecrForm, pilots, productOptions, projects, saving, users, onClose, onSubmit, updateEcrForm }) {
@@ -3106,7 +3435,11 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, h
         {actions.length === 0 ? (
           <EmptyState title="Aucune action pour cette phase" text="Ajoutez une action ou utilisez les actions générées lors de la création ECR." />
         ) : (
-          actions.map((action) => (
+          actions.map((action) => {
+            const blockingAction = blockingActionFor(action, actions);
+            const isBlocked = Boolean(action.dependsOnActionId && (!blockingAction || !isActionDone(blockingAction)));
+
+            return (
             <article className={action.late ? "action-row late" : "action-row"} key={action.id}>
               <label className="action-check" title={isActionDone(action) ? "Marquer non terminee" : "Marquer terminee"}>
                 <input checked={isActionDone(action)} disabled={saving || !canToggleActionForUser(currentUser, action, selectedRequest)} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
@@ -3119,6 +3452,7 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, h
                 <span><em>Pilote</em><strong>{action.responsible || "ì définir"}</strong></span>
                 <span><em>Validateur</em><strong>{action.validatorDisplayName || action.validator || "a definir"}</strong></span>
                 <span><em>Criticite</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>
+                <span><em>Blocage</em><strong className={isBlocked ? "status late" : action.dependsOnActionId ? "status done" : ""}>{action.dependsOnActionId ? `Par: ${blockingActionLabel(action, actions)}` : "Aucune"}</strong></span>
                 <span><em>Debut</em><strong>{action.startDate || "-"}</strong></span>
                 <span><em>Fin</em><strong>{action.endDate || "-"}</strong></span>
                 <span><em>Finalisation</em><strong>{formattedDateTime(action.finalizationDate)}</strong></span>
@@ -3173,7 +3507,8 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, h
                 )}
               </div>
             </article>
-          ))
+            );
+          })
         )}
       </div>
     </>

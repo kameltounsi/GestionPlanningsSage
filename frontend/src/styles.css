@@ -1165,6 +1165,65 @@ textarea {
   white-space: nowrap;
 }
 
+.toolbar-count {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.traceability-panel {
+  overflow-x: auto;
+  padding: 0;
+}
+
+.traceability-table {
+  display: grid;
+  min-width: 980px;
+}
+
+.traceability-row {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 150px minmax(150px, 1fr) minmax(240px, 1.6fr) minmax(150px, 0.9fr) 120px;
+  min-height: 64px;
+  padding: 10px 14px;
+}
+
+.traceability-row:last-child {
+  border-bottom: 0;
+}
+
+.traceability-head {
+  background: #f8faf7;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  min-height: 44px;
+  text-transform: uppercase;
+}
+
+.traceability-row span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.traceability-row strong,
+.traceability-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.traceability-row small {
+  color: var(--muted);
+}
+
 body:has(.dialog-backdrop) .modifications-toolbar {
   opacity: 0;
   pointer-events: none;
@@ -3120,6 +3179,14 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   .preferentials-grid,
   .modifications-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .toolbar-count {
+    justify-self: start;
+  }
+
+  .traceability-table {
+    min-width: 820px;
   }
 
   .list-panel .request-list {

@@ -1,5 +1,4 @@
-// VM access fallback: "http://192.168.1.117:3001/api"
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001/api";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://192.168.1.117:3001/api";
 const SESSION_KEY = "gestionPlanningSession";
 
 export function getStoredSession() {
@@ -430,4 +429,8 @@ export function uploadUserPhoto(userId, file) {
   const formData = new FormData();
   formData.append("file", file);
   return multipartRequest(`/users/${userId}/photo`, formData);
+}
+
+export function getAuditLogs() {
+  return request("/audit");
 }

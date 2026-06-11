@@ -3,11 +3,9 @@ pipeline {
 
     environment {
         // VM access fallback:
-        // VM_HOST = '192.168.1.117'
-        // FRONTEND_URL = 'http://192.168.1.117:3000'
-        // BACKEND_URL = 'http://192.168.1.117:3001/api'
-        FRONTEND_URL = 'http://localhost:3000'
-        BACKEND_URL = 'http://localhost:3001/api'
+        VM_HOST = '192.168.1.117'
+        FRONTEND_URL = 'http://192.168.1.117:3000'
+        BACKEND_URL = 'http://192.168.1.117:3001/api'
 
         POSTGRES_DB = 'plannings'
         POSTGRES_USER = 'postgres'

@@ -1,11 +1,12 @@
 import React from "react";
-import { ChevronLeft, ChevronRight, Database, FolderKanban, LayoutDashboard, ListChecks, LogOut, UserCircle, Users } from "lucide-react";
+import { ChevronLeft, ChevronRight, Database, FolderKanban, History, LayoutDashboard, ListChecks, LogOut, UserCircle, Users } from "lucide-react";
 
 const navItems = [
   ["dashboard", "Tableau", LayoutDashboard],
   ["modifications", "Modifications", ListChecks],
   ["projects", "Actions", FolderKanban],
-  ["preferentials", "Préférentiels", Database],
+  ["traceability", "Tracabilite", History],
+  ["preferentials", "Preferentiels", Database],
   ["users", "Utilisateurs", Users],
   ["profile", "Profil", UserCircle]
 ];
@@ -24,10 +25,10 @@ export function Sidebar({ canAdmin, collapsed, currentUser, page, onCollapseTogg
           </div>
 
           <button
-              aria-label={collapsed ? "Agrandir le menu" : "Réduire le menu"}
+              aria-label={collapsed ? "Agrandir le menu" : "Reduire le menu"}
               className="nav-toggle"
               onClick={onCollapseToggle}
-              title={collapsed ? "Agrandir le menu" : "Réduire le menu"}
+              title={collapsed ? "Agrandir le menu" : "Reduire le menu"}
               type="button"
           >
             {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
@@ -66,7 +67,7 @@ export function Sidebar({ canAdmin, collapsed, currentUser, page, onCollapseTogg
           <button
               className="menu-item logout-item"
               onClick={onLogout}
-              title="Déconnexion"
+              title="Deconnexion"
               type="button"
           >
             <LogOut size={18}/>

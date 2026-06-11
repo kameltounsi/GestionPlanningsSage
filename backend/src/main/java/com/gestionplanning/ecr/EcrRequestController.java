@@ -5,6 +5,7 @@ import com.gestionplanning.action.EcrActionAssetRepository;
 import com.gestionplanning.action.EcrActionEvidenceRepository;
 import com.gestionplanning.action.EcrActionRepository;
 import com.gestionplanning.action.ActionPlanningService;
+import com.gestionplanning.audit.AuditLogService;
 import com.gestionplanning.auth.AccessControlService;
 import com.gestionplanning.document.EcrDocument;
 import com.gestionplanning.document.EcrDocumentRepository;
@@ -39,6 +40,7 @@ public class EcrRequestController {
     private final ActionPlanningService planningService;
     private final AccessControlService accessControlService;
     private final PhaseValidationRequestRepository validationRepository;
+    private final AuditLogService auditLogService;
 
     public EcrRequestController(EcrRequestRepository requestRepository, ChecklistItemRepository checklistItemRepository,
                                 EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
@@ -46,7 +48,7 @@ public class EcrRequestController {
                                 EcrDocumentRepository documentRepository, PenaltyRepository penaltyRepository,
                                 CloudinaryStorageService storageService, EcrTemplateService templateService,
                                 ActionPlanningService planningService, AccessControlService accessControlService,
-                                PhaseValidationRequestRepository validationRepository) {
+                                PhaseValidationRequestRepository validationRepository, AuditLogService auditLogService) {
         this.requestRepository = requestRepository;
         this.checklistItemRepository = checklistItemRepository;
         this.actionRepository = actionRepository;
@@ -59,6 +61,7 @@ public class EcrRequestController {
         this.planningService = planningService;
         this.accessControlService = accessControlService;
         this.validationRepository = validationRepository;
+        this.auditLogService = auditLogService;
     }
 
     @GetMapping
@@ -232,11 +235,22 @@ public class EcrRequestController {
                     if (!EcrStage.isAllowed(stage, request.isNewVersion())) {
                         return ResponseEntity.badRequest().<EcrRequest>build();
                     }
-                    if (isApprovedStage(request, stage) && stage != request.getCurrentStage()) {
+                    boolean reopeningApprovedStage = isApprovedStage(request, stage) && stage != request.getCurrentStage();
+                    if (reopeningApprovedStage) {
                         reopenApprovedStage(request, stage, user);
                     }
                     request.setCurrentStage(stage);
-                    return ResponseEntity.ok(requestRepository.save(request));
+                    EcrRequest saved = requestRepository.save(request);
+                    if (reopeningApprovedStage) {
+                        auditLogService.recordBusinessEvent(
+                                user,
+                                "REOUVERTURE_PHASE",
+                                "phase",
+                                saved.getId() == null ? null : String.valueOf(saved.getId()),
+                                "Phase reouverte: " + stageLabel(stage) + " - Modification: " + requestLabel(saved)
+                        );
+                    }
+                    return ResponseEntity.ok(saved);
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
@@ -311,6 +325,43 @@ public class EcrRequestController {
                 ? "inline"
                 : "attachment";
         return disposition + "; filename=\"" + safeFileName(fileName) + "\"";
+    }
+
+    private String requestLabel(EcrRequest request) {
+        if (request == null) {
+            return "-";
+        }
+        if (request.getModificationNumber() != null && !request.getModificationNumber().trim().isEmpty()) {
+            return request.getModificationNumber();
+        }
+        if (request.getClient() != null && !request.getClient().trim().isEmpty()) {
+            return request.getClient();
+        }
+        return "Modification " + request.getId();
+    }
+
+    private String stageLabel(EcrStage stage) {
+        if (stage == null) return "-";
+        switch (stage) {
+            case FEASIBILITY_VALIDATION:
+                return "Feasibility validation";
+            case PROJECT_MANAGEMENT:
+                return "Project management";
+            case PRODUCT_DEVELOPMENT:
+                return "Product development";
+            case PROCESS_DEVELOPMENT:
+                return "Process development";
+            case CUSTOMER_VALIDATION:
+                return "Customer validation";
+            case PPAP_SOP_PREPARATION:
+                return "PPAP SOP preparation";
+            case CLOSED:
+                return "Closed";
+            case CANCELLED:
+                return "Cancelled";
+            default:
+                return stage.name();
+        }
     }
 
     private static class RequestFile {

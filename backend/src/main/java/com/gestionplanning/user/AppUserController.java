@@ -1,5 +1,6 @@
 package com.gestionplanning.user;
 
+import com.gestionplanning.auth.AccessControlService;
 import com.gestionplanning.auth.PasswordService;
 import com.gestionplanning.storage.CloudinaryStorageService;
 import com.gestionplanning.storage.StoredAsset;
@@ -20,12 +21,14 @@ public class AppUserController {
     private final CloudinaryStorageService storageService;
     private final PasswordService passwordService;
     private final AccountMailService accountMailService;
+    private final AccessControlService accessControlService;
 
-    public AppUserController(AppUserRepository userRepository, CloudinaryStorageService storageService, PasswordService passwordService, AccountMailService accountMailService) {
+    public AppUserController(AppUserRepository userRepository, CloudinaryStorageService storageService, PasswordService passwordService, AccountMailService accountMailService, AccessControlService accessControlService) {
         this.userRepository = userRepository;
         this.storageService = storageService;
         this.passwordService = passwordService;
         this.accountMailService = accountMailService;
+        this.accessControlService = accessControlService;
     }
 
     @GetMapping
@@ -80,7 +83,11 @@ public class AppUserController {
     }
 
     @PutMapping("/{id}/profile")
-    public ResponseEntity<AppUser> updateProfile(@PathVariable Long id, @RequestBody AppUser updatedUser) {
+    public ResponseEntity<AppUser> updateProfile(@PathVariable Long id, @RequestBody AppUser updatedUser,
+                                                 @RequestAttribute("authenticatedUser") AppUser authenticatedUser) {
+        if (!canUpdateProfile(authenticatedUser, id)) {
+            return ResponseEntity.status(403).build();
+        }
         return userRepository.findById(id)
                 .map(user -> {
                     updatedUser.setUsername(updatedUser.getUsername() == null ? user.getUsername() : normalizedText(updatedUser.getUsername()));
@@ -99,7 +106,11 @@ public class AppUserController {
     }
 
     @PutMapping("/{id}/password")
-    public ResponseEntity<AppUser> changePassword(@PathVariable Long id, @RequestBody PasswordChangeRequest request) {
+    public ResponseEntity<AppUser> changePassword(@PathVariable Long id, @RequestBody PasswordChangeRequest request,
+                                                  @RequestAttribute("authenticatedUser") AppUser authenticatedUser) {
+        if (!canUpdateProfile(authenticatedUser, id)) {
+            return ResponseEntity.status(403).build();
+        }
         if (request == null || request.getPassword() == null || request.getPassword().trim().isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
@@ -112,7 +123,11 @@ public class AppUserController {
     }
 
     @PostMapping("/{id}/photo")
-    public ResponseEntity<AppUser> uploadPhoto(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
+    public ResponseEntity<AppUser> uploadPhoto(@PathVariable Long id, @RequestParam("file") MultipartFile file,
+                                               @RequestAttribute("authenticatedUser") AppUser authenticatedUser) {
+        if (!canUpdateProfile(authenticatedUser, id)) {
+            return ResponseEntity.status(403).build();
+        }
         if (file == null || file.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
@@ -166,6 +181,10 @@ public class AppUserController {
 
     private boolean invalidPhone(String phone) {
         return phone != null && !phone.trim().isEmpty() && !phone.trim().matches("\\+?[0-9\\s().-]{8,20}");
+    }
+
+    private boolean canUpdateProfile(AppUser authenticatedUser, Long userId) {
+        return authenticatedUser != null && (accessControlService.isAdmin(authenticatedUser) || authenticatedUser.getId().equals(userId));
     }
 
     public static class PasswordChangeRequest {

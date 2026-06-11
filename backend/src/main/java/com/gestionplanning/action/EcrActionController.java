@@ -3,6 +3,7 @@ package com.gestionplanning.action;
 import com.gestionplanning.ecr.EcrRequestRepository;
 import com.gestionplanning.ecr.EcrStage;
 import com.gestionplanning.ecr.EcrTemplateService;
+import com.gestionplanning.audit.AuditLogService;
 import com.gestionplanning.auth.AccessControlService;
 import com.gestionplanning.storage.CloudinaryStorageService;
 import com.gestionplanning.storage.CloudinaryStorageService.DownloadedAsset;
@@ -37,12 +38,14 @@ public class EcrActionController {
     private final CloudinaryStorageService storageService;
     private final ActionAssigneeResolver assigneeResolver;
     private final AccessControlService accessControlService;
+    private final AuditLogService auditLogService;
 
     public EcrActionController(EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
                                EcrActionAssetRepository assetRepository,
                                EcrRequestRepository requestRepository, ActionPlanningService planningService,
                                EcrTemplateService templateService, CloudinaryStorageService storageService,
-                               ActionAssigneeResolver assigneeResolver, AccessControlService accessControlService) {
+                               ActionAssigneeResolver assigneeResolver, AccessControlService accessControlService,
+                               AuditLogService auditLogService) {
         this.actionRepository = actionRepository;
         this.evidenceRepository = evidenceRepository;
         this.assetRepository = assetRepository;
@@ -52,6 +55,7 @@ public class EcrActionController {
         this.storageService = storageService;
         this.assigneeResolver = assigneeResolver;
         this.accessControlService = accessControlService;
+        this.auditLogService = auditLogService;
     }
 
     @GetMapping("/actions")
@@ -123,6 +127,10 @@ public class EcrActionController {
         return actionRepository.findById(id)
                 .filter(action -> accessControlService.canManageAction(user, action))
                 .map(action -> {
+                    boolean completingAction = isCompletingAction(action, updatedAction);
+                    if (completingAction && !accessControlService.canCompleteAction(user, action)) {
+                        return ResponseEntity.status(403).<EcrAction>build();
+                    }
                     if (!accessControlService.isAdmin(user)) {
                         return updateActionProgress(action, updatedAction, user);
                     }
@@ -168,12 +176,19 @@ public class EcrActionController {
                     action.setDossierReview(updatedAction.getDossierReview());
                     EcrAction saved = actionRepository.save(action);
                     planningService.recalculateRequest(saved.getRequest());
+                    if (completingAction) {
+                        recordActionCompleted(user, saved);
+                    }
                     return ResponseEntity.ok(enrichAction(saved));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
 
     private ResponseEntity<EcrAction> updateActionProgress(EcrAction action, EcrAction updatedAction, AppUser user) {
+        boolean completingAction = isCompletingAction(action, updatedAction);
+        if (completingAction && !accessControlService.canCompleteAction(user, action)) {
+            return ResponseEntity.status(403).build();
+        }
         if (isReopeningAction(action, updatedAction) && !isActionInCurrentPhase(action)) {
             return ResponseEntity.badRequest().build();
         }
@@ -190,6 +205,9 @@ public class EcrActionController {
         syncValidationAfterProgressChange(action);
         EcrAction saved = actionRepository.save(action);
         planningService.recalculateRequest(saved.getRequest());
+        if (completingAction) {
+            recordActionCompleted(user, saved);
+        }
         return ResponseEntity.ok(enrichAction(saved));
     }
 
@@ -409,6 +427,20 @@ public class EcrActionController {
 
     private boolean isReopeningAction(EcrAction currentAction, EcrAction updatedAction) {
         return isDone(currentAction) && !isDone(updatedAction);
+    }
+
+    private boolean isCompletingAction(EcrAction currentAction, EcrAction updatedAction) {
+        return !isDone(currentAction) && isDone(updatedAction);
+    }
+
+    private void recordActionCompleted(AppUser user, EcrAction action) {
+        auditLogService.recordBusinessEvent(
+                user,
+                "ACTION_TERMINEE",
+                "action",
+                action.getId() == null ? null : String.valueOf(action.getId()),
+                "Action marquee terminee: " + (action.getTitle() == null ? "action sans titre" : action.getTitle())
+        );
     }
 
     private boolean isActionInCurrentPhase(EcrAction action) {

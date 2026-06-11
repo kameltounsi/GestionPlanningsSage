@@ -58,7 +58,7 @@ public class AccessControlService {
                     || matchesActionAssignment(user, action.getValidatorRole())
                     || matchesActionAssignment(user, action.getValidatorDisplayName());
         }
-        return isAdmin(user) && isProjectTeamMember(user, action.getRequest());
+        return isAdmin(user);
     }
 
     public boolean canRequestPhaseValidation(AppUser user, EcrRequest request) {
@@ -114,6 +114,13 @@ public class AccessControlService {
             return canAccessRequest(user, action.getRequest());
         }
         return matchesUser(user, responsible) || normalize(user.getJobTitle()).equals(responsible) || normalize(user.getRole()).equals(responsible);
+    }
+
+    public boolean canCompleteAction(AppUser user, EcrAction action) {
+        if (user == null || action == null) {
+            return false;
+        }
+        return matchesActionAssignment(user, action.getResponsible());
     }
 
     public boolean isActionParticipant(AppUser user, EcrAction action) {

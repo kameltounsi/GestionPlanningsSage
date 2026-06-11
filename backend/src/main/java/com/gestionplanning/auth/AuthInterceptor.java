@@ -32,6 +32,7 @@ public class AuthInterceptor implements HandlerInterceptor {
         return tokenRepository.findByTokenAndExpiresAtAfter(token, LocalDateTime.now())
                 .filter(authToken -> authToken.getUser().isEnabled())
                 .map(authToken -> {
+                    request.setAttribute("authenticatedUser", authToken.getUser());
                     if (isAdminOnlyRequest(request) && !accessControlService.isAdmin(authToken.getUser())) {
                         try {
                             response.sendError(HttpServletResponse.SC_FORBIDDEN);
@@ -39,7 +40,6 @@ public class AuthInterceptor implements HandlerInterceptor {
                         }
                         return false;
                     }
-                    request.setAttribute("authenticatedUser", authToken.getUser());
                     return true;
                 })
                 .orElseGet(() -> {
@@ -82,6 +82,9 @@ public class AuthInterceptor implements HandlerInterceptor {
         String path = request.getRequestURI();
         String method = request.getMethod();
         if (HttpMethod.GET.matches(method) || HttpMethod.OPTIONS.matches(method)) {
+            return false;
+        }
+        if (path.matches("/api/users/\\d+/(profile|password|photo)")) {
             return false;
         }
         if (path.matches("/api/users(/.*)?")) {

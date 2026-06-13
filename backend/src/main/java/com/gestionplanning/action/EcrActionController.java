@@ -39,13 +39,14 @@ public class EcrActionController {
     private final ActionAssigneeResolver assigneeResolver;
     private final AccessControlService accessControlService;
     private final AuditLogService auditLogService;
+    private final ActionStandardSuggestionRepository suggestionRepository;
 
     public EcrActionController(EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
                                EcrActionAssetRepository assetRepository,
                                EcrRequestRepository requestRepository, ActionPlanningService planningService,
                                EcrTemplateService templateService, CloudinaryStorageService storageService,
                                ActionAssigneeResolver assigneeResolver, AccessControlService accessControlService,
-                               AuditLogService auditLogService) {
+                               AuditLogService auditLogService, ActionStandardSuggestionRepository suggestionRepository) {
         this.actionRepository = actionRepository;
         this.evidenceRepository = evidenceRepository;
         this.assetRepository = assetRepository;
@@ -56,6 +57,7 @@ public class EcrActionController {
         this.assigneeResolver = assigneeResolver;
         this.accessControlService = accessControlService;
         this.auditLogService = auditLogService;
+        this.suggestionRepository = suggestionRepository;
     }
 
     @GetMapping("/actions")
@@ -100,11 +102,13 @@ public class EcrActionController {
     @PostMapping("/ecr-requests/{requestId}/actions")
     public ResponseEntity<EcrAction> create(@PathVariable Long requestId, @Valid @RequestBody EcrAction action,
                                             @RequestAttribute("authenticatedUser") AppUser user) {
-        if (!accessControlService.isAdmin(user)) {
-            return ResponseEntity.status(403).build();
-        }
         return requestRepository.findById(requestId)
                 .map(request -> {
+                    boolean admin = accessControlService.isAdmin(user);
+                    boolean pilot = accessControlService.isRequestPilot(user, request);
+                    if (!admin && !pilot) {
+                        return ResponseEntity.status(403).<EcrAction>build();
+                    }
                     if (isDone(action) && requiresEvidence(action)) {
                         return ResponseEntity.badRequest().<EcrAction>build();
                     }
@@ -114,6 +118,9 @@ public class EcrActionController {
                     action.setValidator(action.getValidator());
                     syncFinalizationDate(action, action);
                     EcrAction saved = actionRepository.save(action);
+                    if (!admin && pilot) {
+                        suggestionRepository.save(suggestionFor(saved, requestLabel(request), displayName(user), request.isNewVersion()));
+                    }
                     planningService.recalculateRequest(request);
                     return ResponseEntity.created(URI.create("/api/actions/" + saved.getId())).body(enrichAction(saved));
                 })
@@ -261,7 +268,9 @@ public class EcrActionController {
                     action.setProofDocumentPublicId(asset.getPublicId());
                     action.setProofDocumentResourceType(asset.getResourceType());
                     action.setEvidenceRequired(true);
-                    return ResponseEntity.ok(enrichAction(actionRepository.save(action)));
+                    EcrAction saved = actionRepository.save(action);
+                    syncPendingSuggestionProofDocument(saved);
+                    return ResponseEntity.ok(enrichAction(saved));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
@@ -450,6 +459,67 @@ public class EcrActionController {
                 modificationName,
                 "Action marquee terminee: " + actionTitle + " - Modification: " + modificationName + " - Projet: " + projectName
         );
+    }
+
+    private ActionStandardSuggestion suggestionFor(EcrAction action, String requestLabel, String createdBy, boolean newProject) {
+        ActionStandardSuggestion suggestion = new ActionStandardSuggestion();
+        suggestion.setActionId(action.getId());
+        suggestion.setRequestId(action.getRequestId());
+        suggestion.setRequestLabel(requestLabel);
+        suggestion.setNewProject(newProject);
+        suggestion.setStage(action.getStage());
+        suggestion.setActionTitle(action.getTitle());
+        suggestion.setTopicRisk(action.getTopicRisk());
+        suggestion.setResponsible(action.getResponsible());
+        suggestion.setValidator(action.getValidator());
+        suggestion.setCriticality(action.getCriticality());
+        suggestion.setExpectedEvidence(action.getExpectedEvidence());
+        suggestion.setEvidenceRequired(action.isEvidenceRequired());
+        suggestion.setProofDocument(action.getProofDocument());
+        suggestion.setProofDocumentFileName(action.getProofDocumentFileName());
+        suggestion.setProofDocumentContentType(action.getProofDocumentContentType());
+        suggestion.setProofDocumentFileSize(action.getProofDocumentFileSize());
+        suggestion.setProofDocumentFileUrl(action.getProofDocumentFileUrl());
+        suggestion.setProofDocumentPublicId(action.getProofDocumentPublicId());
+        suggestion.setProofDocumentResourceType(action.getProofDocumentResourceType());
+        suggestion.setDependencyAnchor(action.getDependencyAnchor());
+        suggestion.setDurationDays(action.getWorkDurationDays());
+        suggestion.setCreatedBy(createdBy);
+        return suggestion;
+    }
+
+    private void syncPendingSuggestionProofDocument(EcrAction action) {
+        if (action == null || action.getId() == null) {
+            return;
+        }
+        suggestionRepository.findFirstByActionIdAndStatus(action.getId(), ActionStandardSuggestionStatus.PENDING)
+                .ifPresent(suggestion -> {
+                    suggestion.setEvidenceRequired(action.isEvidenceRequired());
+                    suggestion.setProofDocument(action.getProofDocument());
+                    suggestion.setProofDocumentFileName(action.getProofDocumentFileName());
+                    suggestion.setProofDocumentContentType(action.getProofDocumentContentType());
+                    suggestion.setProofDocumentFileSize(action.getProofDocumentFileSize());
+                    suggestion.setProofDocumentFileUrl(action.getProofDocumentFileUrl());
+                    suggestion.setProofDocumentPublicId(action.getProofDocumentPublicId());
+                    suggestion.setProofDocumentResourceType(action.getProofDocumentResourceType());
+                    suggestionRepository.save(suggestion);
+                });
+    }
+
+    private String requestLabel(com.gestionplanning.ecr.EcrRequest request) {
+        if (request == null) return "-";
+        if (request.getModificationNumber() != null && !request.getModificationNumber().trim().isEmpty()) {
+            return request.getModificationNumber();
+        }
+        if (request.getClient() != null && !request.getClient().trim().isEmpty()) {
+            return request.getClient();
+        }
+        return "Modification " + request.getId();
+    }
+
+    private String displayName(AppUser user) {
+        if (user == null) return "";
+        return user.getFullName() == null || user.getFullName().trim().isEmpty() ? user.getEmail() : user.getFullName();
     }
 
     private boolean isActionInCurrentPhase(EcrAction action) {

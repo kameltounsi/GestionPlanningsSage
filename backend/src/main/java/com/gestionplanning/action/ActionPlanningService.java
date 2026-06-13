@@ -53,15 +53,36 @@ public class ActionPlanningService {
             if (stageActions.isEmpty()) {
                 continue;
             }
+            List<EcrAction> localActionsWithoutDates = new ArrayList<>();
             for (EcrAction action : stageActions) {
                 action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
                 if (action.getValidatorRole() == null || action.getValidatorRole().trim().isEmpty()) {
                     action.setValidatorRole(action.getValidator());
                 }
+                boolean hasRule = rules.containsKey(actionKey(action));
+                if (!hasRule && action.getStartDate() == null && action.getEndDate() == null) {
+                    localActionsWithoutDates.add(action);
+                    continue;
+                }
                 applyRule(action, rules, actionsByKey, nextPhaseStart, new HashSet<>());
                 if (action.getStartDate() != null && action.getStartDate().isBefore(nextPhaseStart)) {
                     shiftActionTo(action, nextPhaseStart);
                 }
+            }
+            LocalDate localActionStart = stageActions.stream()
+                    .filter(action -> !localActionsWithoutDates.contains(action))
+                    .map(EcrAction::getEndDate)
+                    .filter(Objects::nonNull)
+                    .max(LocalDate::compareTo)
+                    .map(date -> date.plusDays(1))
+                    .orElse(nextPhaseStart);
+            localActionsWithoutDates.sort(Comparator.comparing(action -> action.getId() == null ? Long.MAX_VALUE : action.getId()));
+            for (EcrAction action : localActionsWithoutDates) {
+                action.setWorkDurationDays(durationOrDefault(action.getWorkDurationDays()));
+                action.setDependsOnActionId(null);
+                action.setDependencyAnchor(OUTPUT);
+                shiftActionTo(action, localActionStart);
+                localActionStart = action.getEndDate() == null ? localActionStart : action.getEndDate().plusDays(1);
             }
             nextPhaseStart = stageActions.stream()
                     .map(EcrAction::getEndDate)

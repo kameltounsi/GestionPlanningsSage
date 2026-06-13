@@ -6,6 +6,8 @@ import {
   CheckCircle2,
   CircleAlert,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   ClipboardList,
   FileText,
@@ -31,6 +33,7 @@ import {
   createRoleReference,
   createUser,
   clearSession,
+  addActionSuggestionToDefaults,
   deleteActionPlanningRule,
   deleteActionAsset,
   deleteActionPlanningRuleProofDocument,
@@ -42,6 +45,7 @@ import {
   deleteUser,
   ecrRequestFileDownloadUrl,
   getActionPlanningRules,
+  getActionStandardSuggestions,
   getActions,
   getChecklist,
   getClientReferences,
@@ -54,6 +58,7 @@ import {
   getRoleReferences,
   getStoredSession,
   getUsers,
+  ignoreActionSuggestion,
   login,
   logout,
   storeSession,
@@ -102,6 +107,8 @@ const swalButtons = {
   confirmButtonColor: "#2563eb",
   cancelButtonColor: "#64748b"
 };
+
+const PREFERENTIAL_PAGE_SIZE = 5;
 
 const pageTitles = {
   dashboard: "Tableau de bord",
@@ -359,6 +366,7 @@ function App() {
   const [productReferences, setProductReferences] = useState([]);
   const [roleReferences, setRoleReferences] = useState([]);
   const [planningRules, setPlanningRules] = useState([]);
+  const [actionSuggestions, setActionSuggestions] = useState([]);
   const [users, setUsers] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [auditQuery, setAuditQuery] = useState("");
@@ -381,6 +389,7 @@ function App() {
   const [profileForm, setProfileForm] = useState(emptyUserForm);
   const [passwordForm, setPasswordForm] = useState({ password: "", confirmation: "" });
   const [editingPlanningRule, setEditingPlanningRule] = useState(null);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
   const [editingEcrRequest, setEditingEcrRequest] = useState(null);
   const [editingClientReference, setEditingClientReference] = useState(null);
@@ -484,6 +493,30 @@ function App() {
         setError("Chargement de la tracabilite impossible.");
       });
   }, [currentUser, page]);
+
+  useEffect(() => {
+    if (!isAdminUser(currentUser)) {
+      setActionSuggestions([]);
+      return;
+    }
+    refreshActionSuggestions();
+  }, [currentUser]);
+
+  function refreshActionSuggestions() {
+    if (!isAdminUser(currentUser)) return Promise.resolve([]);
+    return getActionStandardSuggestions()
+      .then((items) => {
+        setActionSuggestions(items);
+        if (items.length > 0) {
+          setSuggestionsOpen(true);
+        }
+        return items;
+      })
+      .catch(() => {
+        setActionSuggestions([]);
+        return [];
+      });
+  }
 
   function loadInitialData() {
     return Promise.all([getEcrRequests(), getPilots(), getProjects(), getClientReferences(), getProductReferences(), getRoleReferences(), getActionPlanningRules(), getUsers(), getCurrentUser()])
@@ -839,7 +872,7 @@ function App() {
       startDate: form.startDate || null,
       endDate: form.endDate || null,
       workDurationDays: Number(form.workDurationDays) || 1,
-      stage
+      stage: form.stage || stage
     };
   }
 
@@ -1104,20 +1137,20 @@ function App() {
   function handleSaveProject(event) {
     event.preventDefault();
     const name = projectForm.name.trim();
-    if (!name) return;
+    if (!name) return Promise.reject(new Error("Nom du projet requis."));
     const projectLeadCount = countSelectedProjectLeads(projectForm.projectTeam, users);
     if (projectLeadCount !== 1) {
       const message = "Selectionnez exactement un utilisateur avec le role Chef de projet.";
       setError("Choisissez un et un seul Chef de projet dans l'equipe projet.");
       warningAlert("Chef de projet requis", message);
-      return;
+      return Promise.reject(new Error(message));
     }
     setSaving(true);
     setError("");
     const payload = { name, projectTeam: projectForm.projectTeam.trim() || null };
     const isEdit = Boolean(editingProject);
     const request = isEdit ? updateProject(editingProject, payload) : createProject(payload);
-    request
+    return request
       .then((savedProject) => {
         setProjects((items) => [...items.filter((item) => item.name !== editingProject && item.name !== savedProject.name), savedProject].sort((a, b) => a.name.localeCompare(b.name)));
         setProjectForm({ name: "", projectTeam: "" });
@@ -1132,6 +1165,7 @@ function App() {
         const message = "Sauvegarde projet impossible. Verifiez le nom du projet.";
         setError(message);
         errorAlert(message);
+        throw new Error(message);
       })
       .finally(() => setSaving(false));
   }
@@ -1395,6 +1429,31 @@ function App() {
         })
         .finally(() => setSaving(false));
     });
+  }
+
+  function handleAddSuggestionToDefaults(suggestion) {
+    if (!suggestion) return;
+    setSaving(true);
+    addActionSuggestionToDefaults(suggestion.id)
+      .then(() => Promise.all([getActionPlanningRules(), refreshActionSuggestions()]))
+      .then(([rules]) => {
+        setPlanningRules(rules);
+        successToast("Action ajoutee aux actions standard");
+      })
+      .catch((exception) => {
+        const message = String(exception?.message || "");
+        errorAlert(message.includes("409") ? "Une action standard avec ce nom existe deja dans cette phase." : "Ajout aux actions standard impossible.");
+      })
+      .finally(() => setSaving(false));
+  }
+
+  function handleIgnoreSuggestion(suggestion) {
+    if (!suggestion) return;
+    setSaving(true);
+    ignoreActionSuggestion(suggestion.id)
+      .then(refreshActionSuggestions)
+      .then(() => successToast("Suggestion ignoree"))
+      .finally(() => setSaving(false));
   }
 
   function startPlanningRuleEdit(rule) {
@@ -1693,6 +1752,16 @@ function App() {
           </div>
         )}
 
+        {isAdminUser(currentUser) && actionSuggestions.length > 0 && (
+          <div className="banner action-suggestion-banner">
+            <CircleAlert size={18} />
+            {actionSuggestions.length} action{actionSuggestions.length > 1 ? "s" : ""} creee{actionSuggestions.length > 1 ? "s" : ""} par pilote en attente de decision.
+            <button className="secondary-action compact-action" type="button" onClick={() => setSuggestionsOpen(true)}>
+              Voir
+            </button>
+          </div>
+        )}
+
         {page === "dashboard" && (
           <DashboardPage
             requests={requests}
@@ -1890,6 +1959,16 @@ function App() {
           onClose={closeEditEcr}
           onSubmit={handleUpdateEcr}
           updateEcrForm={updateEcrEditForm}
+        />
+      )}
+
+      {suggestionsOpen && isAdminUser(currentUser) && actionSuggestions.length > 0 && (
+        <ActionSuggestionDialog
+          saving={saving}
+          suggestions={actionSuggestions}
+          onAdd={handleAddSuggestionToDefaults}
+          onClose={() => setSuggestionsOpen(false)}
+          onIgnore={handleIgnoreSuggestion}
         />
       )}
     </main>
@@ -2484,9 +2563,33 @@ function PreferentialsPage({
   setProjectForm,
   setRoleForm
 }) {
+  const [activePreferential, setActivePreferential] = useState("projects");
+  const preferentialEntities = [
+    { key: "projects", label: "Projets", count: projects.length },
+    { key: "clients", label: "Clients", count: clients.length },
+    { key: "products", label: "Produits", count: products.length },
+    { key: "roles", label: "Rôles d'action", count: roles.length }
+  ];
+
   return (
     <section className="page-content">
       <PageHeader eyebrow="Référentiel" title="Préférentiels" subtitle="Gérez les projets, clients, produits et rôles d'action utilisés dans les modifications." />
+      <div className="preferentials-layout">
+        <aside className="panel preferential-entity-list" aria-label="Entites du referentiel">
+          {preferentialEntities.map((entity) => (
+            <button
+              className={activePreferential === entity.key ? "preferential-entity-button active" : "preferential-entity-button"}
+              key={entity.key}
+              type="button"
+              onClick={() => setActivePreferential(entity.key)}
+            >
+              <span>{entity.label}</span>
+              <strong>{entity.count}</strong>
+            </button>
+          ))}
+        </aside>
+        <div className="preferential-entity-content">
+          {activePreferential === "projects" && (
       <ProjectPreferentialPanel
         editingProject={editingProject}
         projectForm={projectForm}
@@ -2499,7 +2602,8 @@ function PreferentialsPage({
         onSubmit={onSubmitProject}
         setProjectForm={setProjectForm}
       />
-      <div className="preferentials-grid">
+          )}
+          {activePreferential === "clients" && (
         <PreferentialPanel
           count={clients.length}
           editing={editingClient}
@@ -2515,6 +2619,8 @@ function PreferentialsPage({
           references={clients}
           setForm={setClientForm}
         />
+          )}
+          {activePreferential === "products" && (
         <PreferentialPanel
           count={products.length}
           editing={editingProduct}
@@ -2530,6 +2636,8 @@ function PreferentialsPage({
           references={products}
           setForm={setProductForm}
         />
+          )}
+          {activePreferential === "roles" && (
         <PreferentialPanel
           count={roles.length}
           editing={editingRole}
@@ -2545,12 +2653,18 @@ function PreferentialsPage({
           references={roles}
           setForm={setRoleForm}
         />
+          )}
+        </div>
       </div>
     </section>
   );
 }
 
 function PreferentialPanel({ count, editing, emptyText, emptyTitle, form, references, saving, title, onCancelEdit, onDelete, onEdit, onSubmit, setForm }) {
+  const [searchTerm, setSearchTerm] = useState("");
+  const filteredReferences = useFilteredItems(references, searchTerm, (reference) => [reference.name]);
+  const { currentPage, pageCount, pagedItems, setCurrentPage } = usePaginatedItems(filteredReferences, PREFERENTIAL_PAGE_SIZE);
+
   return (
     <section className="panel preferential-panel">
       <form className="form-page compact-preferential-form" onSubmit={onSubmit}>
@@ -2572,38 +2686,167 @@ function PreferentialPanel({ count, editing, emptyText, emptyTitle, form, refere
           {editing && <button className="secondary-action" type="button" onClick={onCancelEdit}>Annuler</button>}
         </div>
       </form>
+      <label className="preferential-search">
+        Rechercher
+        <div className="input-with-icon">
+          <Search size={16} />
+          <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder={`Rechercher dans ${title.toLowerCase()}`} />
+        </div>
+      </label>
       <div className="table-list">
         {references.length === 0 ? (
           <EmptyState title={emptyTitle} text={emptyText} compact />
-        ) : references.map((reference) => (
-          <article className="project-table-row" key={reference.id}>
-            <div>
-              <strong>{reference.name}</strong>
-            </div>
-            <div className="row-actions">
-              <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(reference)} aria-label={`Modifier ${reference.name}`} title="Modifier">
-                <Pencil size={15} />
-              </button>
-              <button className="ghost-icon" type="button" onClick={() => onDelete(reference.id)} title="Supprimer">
-                <Trash2 size={15} />
-              </button>
-            </div>
-          </article>
-        ))}
+        ) : filteredReferences.length === 0 ? (
+          <EmptyState title="Aucun résultat" text="Essayez un autre terme de recherche." compact />
+        ) : (
+          <>
+            {pagedItems.map((reference) => (
+              <article className="project-table-row preferential-table-row" key={reference.id}>
+                <div>
+                  <strong>{reference.name}</strong>
+                </div>
+                <div className="row-actions">
+                  <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(reference)} aria-label={`Modifier ${reference.name}`} title="Modifier">
+                    <Pencil size={15} />
+                  </button>
+                  <button className="ghost-icon" type="button" onClick={() => onDelete(reference.id)} title="Supprimer">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </article>
+            ))}
+            <PaginationControls
+              currentPage={currentPage}
+              pageCount={pageCount}
+              totalCount={filteredReferences.length}
+              onPageChange={setCurrentPage}
+            />
+          </>
+        )}
       </div>
     </section>
   );
 }
 
 function ProjectPreferentialPanel({ editingProject, projectForm, projects, saving, users, onCancelEdit, onDelete, onEdit, onSubmit, setProjectForm }) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const filteredProjects = useFilteredItems(projects, searchTerm, (project) => [
+    project.name,
+    project.projectTeam,
+    formatProjectTeamWithRoles(project.projectTeam, users)
+  ]);
+  const { currentPage, pageCount, pagedItems, setCurrentPage } = usePaginatedItems(filteredProjects, PREFERENTIAL_PAGE_SIZE);
+
+  useEffect(() => {
+    if (editingProject) {
+      setDialogOpen(true);
+    }
+  }, [editingProject]);
+
+  function openCreateDialog() {
+    onCancelEdit();
+    setDialogOpen(true);
+  }
+
+  function closeDialog() {
+    onCancelEdit();
+    setDialogOpen(false);
+  }
+
+  function submitDialog(event) {
+    const result = onSubmit(event);
+    if (!result?.then) return result;
+    return result
+      .then(() => setDialogOpen(false))
+      .catch(() => {});
+  }
+
   return (
     <section className="panel project-preferential-panel">
-      <form className="form-page compact-preferential-form" onSubmit={onSubmit}>
-        <div className="section-title">
+      <div className="section-title">
+        <div>
+          <h2>Projets</h2>
+          <span>{projects.length} projet{projects.length > 1 ? "s" : ""}</span>
+        </div>
+        <button className="primary-action compact-action" disabled={saving} type="button" onClick={openCreateDialog}>
+          <Plus size={15} />
+          Ajouter
+        </button>
+      </div>
+      <label className="preferential-search">
+        Rechercher
+        <div className="input-with-icon">
+          <Search size={16} />
+          <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Rechercher dans projets" />
+        </div>
+      </label>
+      <div className="table-list">
+        {projects.length === 0 ? (
+          <EmptyState title="Aucun projet créé" text="Ajoutez un premier projet pour débloquer la création des modifications." compact />
+        ) : filteredProjects.length === 0 ? (
+          <EmptyState title="Aucun resultat" text="Essayez un nom de projet ou un membre d'equipe." compact />
+        ) : (
+          <>
+            {pagedItems.map((project) => (
+              <article className="project-table-row" key={project.name}>
+                <div>
+                  <strong>{project.name}</strong>
+                  <span className="project-team-list">{formatProjectTeamWithRoles(project.projectTeam, users)}</span>
+                </div>
+                <div className="row-actions">
+                  <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(project)} aria-label="Modifier le projet" title="Modifier">
+                    <Pencil size={15} />
+                  </button>
+                  <button className="ghost-icon" type="button" onClick={() => onDelete(project.name)} title="Supprimer">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </article>
+            ))}
+            <PaginationControls
+              currentPage={currentPage}
+              pageCount={pageCount}
+              totalCount={filteredProjects.length}
+              onPageChange={setCurrentPage}
+            />
+          </>
+        )}
+      </div>
+      {dialogOpen && (
+        <ProjectDialog
+          editingProject={editingProject}
+          projectForm={projectForm}
+          saving={saving}
+          users={users}
+          onClose={closeDialog}
+          onSubmit={submitDialog}
+          setProjectForm={setProjectForm}
+        />
+      )}
+    </section>
+  );
+}
+
+function ProjectDialog({ editingProject, projectForm, saving, users, onClose, onSubmit, setProjectForm }) {
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <form
+        aria-labelledby="project-dialog-title"
+        aria-modal="true"
+        className="dialog-card project-dialog panel form-page"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={onSubmit}
+        role="dialog"
+      >
+        <div className="form-intro">
           <div>
-            <h2>Projets</h2>
-            <span>{projects.length} projet{projects.length > 1 ? "s" : ""}</span>
+            <p className="eyebrow">Projet</p>
+            <h2 id="project-dialog-title">{editingProject ? "Modifier le projet" : "Ajouter un projet"}</h2>
           </div>
+          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
+            <X size={18} />
+          </button>
         </div>
         <label>
           Nom du projet
@@ -2619,32 +2862,66 @@ function ProjectPreferentialPanel({ editingProject, projectForm, projects, savin
             <Save size={16} />
             Enregistrer
           </button>
-          {editingProject && <button className="secondary-action" type="button" onClick={onCancelEdit}>Annuler</button>}
+          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
         </div>
       </form>
-      <div className="table-list">
-        {projects.length === 0 ? (
-          <EmptyState title="Aucun projet créé" text="Ajoutez un premier projet pour débloquer la création des modifications." compact />
-        ) : (
-          projects.map((project) => (
-            <article className="project-table-row" key={project.name}>
-              <div>
-                <strong>{project.name}</strong>
-                <span>{formatProjectTeamWithRoles(project.projectTeam, users)}</span>
-              </div>
-              <div className="row-actions">
-                <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(project)} aria-label="Modifier le projet" title="Modifier">
-                  <Pencil size={15} />
-                </button>
-                <button className="ghost-icon" type="button" onClick={() => onDelete(project.name)} title="Supprimer">
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            </article>
-          ))
-        )}
+    </div>
+  );
+}
+
+function useFilteredItems(items, searchTerm, getValues) {
+  return useMemo(() => {
+    const normalized = normalizeSearchText(searchTerm);
+    if (!normalized) return items;
+
+    return items.filter((item) => getValues(item)
+      .filter(Boolean)
+      .some((value) => normalizeSearchText(value).includes(normalized)));
+  }, [getValues, items, searchTerm]);
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function usePaginatedItems(items, pageSize) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+  const boundedPage = Math.min(currentPage, pageCount);
+
+  useEffect(() => {
+    if (currentPage !== boundedPage) {
+      setCurrentPage(boundedPage);
+    }
+  }, [boundedPage, currentPage]);
+
+  const pagedItems = useMemo(() => {
+    const start = (boundedPage - 1) * pageSize;
+    return items.slice(start, start + pageSize);
+  }, [boundedPage, items, pageSize]);
+
+  return { currentPage: boundedPage, pageCount, pagedItems, setCurrentPage };
+}
+
+function PaginationControls({ currentPage, pageCount, totalCount, onPageChange }) {
+  if (pageCount <= 1) return null;
+
+  return (
+    <nav className="pagination" aria-label="Pagination">
+      <span>Page {currentPage} / {pageCount} - {totalCount} éléments</span>
+      <div className="pagination-actions">
+        <button className="ghost-icon" disabled={currentPage <= 1} type="button" onClick={() => onPageChange(currentPage - 1)} title="Page précédente" aria-label="Page précédente">
+          <ChevronLeft size={16} />
+        </button>
+        <button className="ghost-icon" disabled={currentPage >= pageCount} type="button" onClick={() => onPageChange(currentPage + 1)} title="Page suivante" aria-label="Page suivante">
+          <ChevronRight size={16} />
+        </button>
       </div>
-    </section>
+    </nav>
   );
 }
 
@@ -3172,6 +3449,7 @@ function ModificationsPage(props) {
                   selectedRequest={selectedRequest}
                   phaseValidation={currentValidation}
                   stageNewProject={Boolean(selectedRequest.newVersion)}
+                  selectedStages={selectedStages}
                   selectedStage={selectedStage}
                   updateActionForm={updateActionForm}
                 />
@@ -3395,10 +3673,16 @@ function phaseValidationStatusLabel(status) {
   return "Phase refusee";
 }
 
-function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleToggleAction, handleApproveActionValidation, handleDeleteActionAsset, handleUploadEvidence, isCriticalAction, lateActions, phaseValidation, requiresEvidence, saving, selectedRequest, selectedStage, stageNewProject, updateActionForm }) {
+function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleToggleAction, handleApproveActionValidation, handleDeleteActionAsset, handleUploadEvidence, isCriticalAction, lateActions, phaseValidation, requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm }) {
   const [expanded, setExpanded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const stageTitle = stageLabel(selectedStage, stageNewProject);
+  const canCreateAction = canAdmin || isRequestPilot(currentUser, selectedRequest);
+
+  function openCreateAction() {
+    updateActionForm("stage", selectedRequest?.currentStage || selectedStage);
+    setCreateOpen(true);
+  }
 
   function submitCreateAction(event) {
     handleCreateAction(event).then(() => setCreateOpen(false)).catch(() => {});
@@ -3412,7 +3696,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
           <span>{doneCount}/{actions.length} terminées / {lateActions} retards</span>
         </div>
         <div className="row-actions">
-          <button className="primary-action compact-action" disabled={!canAdmin} type="button" onClick={() => setCreateOpen(true)} title="Ajouter une action">
+          <button className="primary-action compact-action" disabled={!canCreateAction} type="button" onClick={openCreateAction} title="Ajouter une action">
             <Plus size={15} />
             Ajouter action
           </button>
@@ -3481,6 +3765,8 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
           actionRoleOptions={actionRoleOptions}
           isCriticalAction={isCriticalAction}
           saving={saving}
+          selectedStages={selectedStages}
+          stageNewProject={stageNewProject}
           onClose={() => setCreateOpen(false)}
           onSubmit={submitCreateAction}
           updateActionForm={updateActionForm}
@@ -3577,6 +3863,61 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, h
   );
 }
 
+function ActionSuggestionDialog({ saving, suggestions, onAdd, onClose, onIgnore }) {
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        aria-labelledby="action-suggestion-title"
+        aria-modal="true"
+        className="dialog-card action-suggestion-dialog panel"
+        onMouseDown={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="form-intro">
+          <div>
+            <p className="eyebrow">Notification admin</p>
+            <h2 id="action-suggestion-title">Actions creees par les pilotes</h2>
+            <p>Decidez si chaque action locale doit aussi devenir une action standard.</p>
+          </div>
+          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="suggestion-list">
+          {suggestions.map((suggestion) => (
+            <article className="suggestion-card" key={suggestion.id}>
+              <div className="suggestion-main">
+                <span className={`stage-pill ${stageColorClass(suggestion.stage, suggestion.newProject)}`}>{stageLabel(suggestion.stage, suggestion.newProject)}</span>
+                <strong>{suggestion.actionTitle}</strong>
+                <span>Modification: {suggestion.requestLabel || `#${suggestion.requestId}`}</span>
+                <span>Creee par: {suggestion.createdBy || "-"}</span>
+              </div>
+              <div className="suggestion-details">
+                <span><em>Topic / risque</em><strong>{suggestion.topicRisk || "-"}</strong></span>
+                <span><em>Pilote</em><strong>{suggestion.responsible || "A definir"}</strong></span>
+                <span><em>Validateur</em><strong>{suggestion.validator || "A definir"}</strong></span>
+                <span><em>Criticite</em><strong className={`criticality ${criticalityClass(suggestion.criticality)}`}>{suggestion.criticality || "3-faible"}</strong></span>
+                <span><em>Asset</em><strong>{suggestion.evidenceRequired ? "Obligatoire" : "Optionnel"}</strong></span>
+                <span><em>Element preuve</em><strong>{suggestion.proofDocumentFileName || suggestion.proofDocument || "-"}</strong></span>
+                <span><em>Duree</em><strong>{suggestion.durationDays ?? 1} j</strong></span>
+                <span><em>Type standard cible</em><strong>{suggestion.newProject ? "Nouveau projet" : "Modification"}</strong></span>
+              </div>
+              <div className="row-actions">
+                <button className="primary-action compact-action" disabled={saving} type="button" onClick={() => onAdd(suggestion)}>
+                  Ajouter aux actions par defaut
+                </button>
+                <button className="secondary-action compact-action" disabled={saving} type="button" onClick={() => onIgnore(suggestion)}>
+                  Ignorer l'action
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function ActionRoleSelect({ options = [], placeholder = "Selectionner un role", value, onChange }) {
   const availableOptions = value && !options.includes(value) ? [value, ...options] : options;
   return (
@@ -3589,7 +3930,7 @@ function ActionRoleSelect({ options = [], placeholder = "Selectionner un role", 
   );
 }
 
-function ActionCreateDialog({ actionForm, actionRoleOptions, isCriticalAction, saving, onClose, onSubmit, updateActionForm }) {
+function ActionCreateDialog({ actionForm, actionRoleOptions, isCriticalAction, saving, selectedStages = [], stageNewProject, onClose, onSubmit, updateActionForm }) {
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <form
@@ -3610,6 +3951,14 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, isCriticalAction, s
           </button>
         </div>
         <div className="action-edit-grid">
+          <label>
+            Phase
+            <select value={actionForm.stage || selectedStages[0]?.[0] || ""} onChange={(event) => updateActionForm("stage", event.target.value)}>
+              {selectedStages.map(([stage, label]) => (
+                <option key={stage} value={stage}>{label || stageLabel(stage, stageNewProject)}</option>
+              ))}
+            </select>
+          </label>
           <input value={actionForm.topicRisk} onChange={(event) => updateActionForm("topicRisk", event.target.value)} placeholder="Topic_Risk" />
           <input className="action-title-input" required value={actionForm.title} onChange={(event) => updateActionForm("title", event.target.value)} placeholder="Point_verif" />
           <ActionRoleSelect options={actionRoleOptions} value={actionForm.responsible} onChange={(value) => updateActionForm("responsible", value)} />

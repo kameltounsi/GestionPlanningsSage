@@ -25,6 +25,7 @@ export const emptyEcrForm = {
 export const emptyActionForm = {
   topicRisk: "",
   title: "",
+  stage: "",
   responsible: "",
   validator: "",
   criticality: "3-faible",

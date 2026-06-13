@@ -356,6 +356,22 @@ export function actionPlanningRuleProofDocumentUrl(ruleId) {
   return `${API_BASE}/action-planning-rules/${ruleId}/proof-document`;
 }
 
+export function getActionStandardSuggestions() {
+  return request("/action-standard-suggestions");
+}
+
+export function addActionSuggestionToDefaults(id) {
+  return request(`/action-standard-suggestions/${id}/add-to-defaults`, {
+    method: "POST"
+  });
+}
+
+export function ignoreActionSuggestion(id) {
+  return request(`/action-standard-suggestions/${id}/ignore`, {
+    method: "POST"
+  });
+}
+
 export function actionAssetDownloadUrl(assetId) {
   return `${API_BASE}/action-assets/${assetId}/download`;
 }

@@ -111,11 +111,17 @@ public class ActionPlanningRuleController {
             if (rule.getProofDocumentFileUrl() == null || rule.getProofDocumentFileUrl().trim().isEmpty()) {
                 return ResponseEntity.notFound().build();
             }
-            DownloadedAsset asset = storageService.download(rule.getProofDocumentPublicId(), rule.getProofDocumentResourceType(), rule.getProofDocumentFileUrl(), rule.getProofDocumentContentType());
-            return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(rule.getProofDocumentFileName(), asset.getContentType()))
-                    .contentType(MediaType.parseMediaType(asset.getContentType()))
-                    .body(asset.getData());
+            try {
+                DownloadedAsset asset = storageService.download(rule.getProofDocumentPublicId(), rule.getProofDocumentResourceType(), rule.getProofDocumentFileUrl(), rule.getProofDocumentContentType());
+                return ResponseEntity.ok()
+                        .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(rule.getProofDocumentFileName(), asset.getContentType()))
+                        .contentType(MediaType.parseMediaType(asset.getContentType()))
+                        .body(asset.getData());
+            } catch (RuntimeException exception) {
+                return ResponseEntity.status(502)
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .body("Telechargement impossible depuis Cloudinary. Activez la livraison des fichiers PDF/ZIP dans les parametres Security de Cloudinary, puis reessayez.");
+            }
         }).orElseGet(() -> ResponseEntity.notFound().build());
     }
 

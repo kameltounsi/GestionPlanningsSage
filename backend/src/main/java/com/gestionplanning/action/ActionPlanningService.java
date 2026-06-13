@@ -43,6 +43,9 @@ public class ActionPlanningService {
                 .collect(Collectors.toMap(this::ruleKey, Function.identity(), (first, second) -> second));
         Map<String, EcrAction> actionsByKey = actions.stream()
                 .collect(Collectors.toMap(this::actionKey, Function.identity(), (first, second) -> first));
+        Map<Long, EcrAction> actionsById = actions.stream()
+                .filter(action -> action.getId() != null)
+                .collect(Collectors.toMap(EcrAction::getId, Function.identity(), (first, second) -> first));
         LocalDate fallbackStart = request.getReceptionDate() == null ? LocalDate.now() : request.getReceptionDate();
 
         LocalDate nextPhaseStart = fallbackStart;
@@ -60,11 +63,11 @@ public class ActionPlanningService {
                     action.setValidatorRole(action.getValidator());
                 }
                 boolean hasRule = rules.containsKey(actionKey(action));
-                if (!hasRule && action.getStartDate() == null && action.getEndDate() == null) {
+                if (!hasRule && action.getDependsOnActionId() == null && action.getStartDate() == null && action.getEndDate() == null) {
                     localActionsWithoutDates.add(action);
                     continue;
                 }
-                applyRule(action, rules, actionsByKey, nextPhaseStart, new HashSet<>());
+                applyRule(action, rules, actionsByKey, actionsById, nextPhaseStart, new HashSet<>());
                 if (action.getStartDate() != null && action.getStartDate().isBefore(nextPhaseStart)) {
                     shiftActionTo(action, nextPhaseStart);
                 }
@@ -136,7 +139,7 @@ public class ActionPlanningService {
                 && action.getFinalizationDate().toLocalDate().isAfter(action.getEndDate());
     }
 
-    private void applyRule(EcrAction action, Map<String, ActionPlanningRule> rules, Map<String, EcrAction> actionsByKey,
+    private void applyRule(EcrAction action, Map<String, ActionPlanningRule> rules, Map<String, EcrAction> actionsByKey, Map<Long, EcrAction> actionsById,
                            LocalDate fallbackStart, Set<Long> visiting) {
         if (action == null || action.getId() == null || visiting.contains(action.getId())) {
             return;
@@ -146,18 +149,29 @@ public class ActionPlanningService {
         ActionPlanningRule rule = rules.get(actionKey(action));
         int duration = rule == null || rule.getDurationDays() == null ? durationOrDefault(action.getWorkDurationDays()) : Math.max(0, rule.getDurationDays());
         LocalDate start = action.getStartDate() == null ? fallbackStart : action.getStartDate();
-        Long dependsOnId = null;
+        Long dependsOnId = rule == null ? action.getDependsOnActionId() : null;
         String anchor = rule == null || rule.getDependencyAnchor() == null ? OUTPUT : rule.getDependencyAnchor();
 
         if (rule != null && rule.getDependencyActionTitle() != null && !rule.getDependencyActionTitle().trim().isEmpty()) {
             EcrAction dependency = actionsByKey.get(key(action.getStage().name(), rule.getDependencyActionTitle()));
             if (dependency != null && !Objects.equals(dependency.getId(), action.getId())) {
-                applyRule(dependency, rules, actionsByKey, fallbackStart, visiting);
+                applyRule(dependency, rules, actionsByKey, actionsById, fallbackStart, visiting);
                 dependsOnId = dependency.getId();
                 LocalDate anchorDate = INPUT.equalsIgnoreCase(anchor) ? dependency.getStartDate() : dependency.getEndDate();
                 if (anchorDate != null) {
                     start = INPUT.equalsIgnoreCase(anchor) ? anchorDate : anchorDate.plusDays(1);
                 }
+            }
+        } else if (rule == null && dependsOnId != null) {
+            EcrAction dependency = actionsById.get(dependsOnId);
+            if (dependency != null && !Objects.equals(dependency.getId(), action.getId())) {
+                applyRule(dependency, rules, actionsByKey, actionsById, fallbackStart, visiting);
+                LocalDate anchorDate = INPUT.equalsIgnoreCase(anchor) ? dependency.getStartDate() : dependency.getEndDate();
+                if (anchorDate != null) {
+                    start = INPUT.equalsIgnoreCase(anchor) ? anchorDate : anchorDate.plusDays(1);
+                }
+            } else {
+                dependsOnId = null;
             }
         }
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Swal from "sweetalert2";
 import "sweetalert2/dist/sweetalert2.min.css";
 import {
@@ -14,7 +14,6 @@ import {
   FolderKanban,
   Gauge,
   Maximize2,
-  Paperclip,
   Pencil,
   Plus,
   Save,
@@ -160,6 +159,29 @@ function warningAlert(title, message) {
     confirmButtonText: "OK",
     confirmButtonColor: "#2563eb"
   });
+}
+
+function playActionSuggestionSound() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const context = new AudioContext();
+    const gain = context.createGain();
+    gain.connect(context.destination);
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.18, context.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.55);
+    [740, 980].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(frequency, context.currentTime + index * 0.16);
+      oscillator.connect(gain);
+      oscillator.start(context.currentTime + index * 0.16);
+      oscillator.stop(context.currentTime + index * 0.16 + 0.28);
+    });
+    setTimeout(() => context.close().catch(() => {}), 900);
+  } catch {
+  }
 }
 
 function confirmDelete(title, text) {
@@ -390,6 +412,7 @@ function App() {
   const [passwordForm, setPasswordForm] = useState({ password: "", confirmation: "" });
   const [editingPlanningRule, setEditingPlanningRule] = useState(null);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const notifiedSuggestionIds = useRef(new Set());
   const [editingProject, setEditingProject] = useState(null);
   const [editingEcrRequest, setEditingEcrRequest] = useState(null);
   const [editingClientReference, setEditingClientReference] = useState(null);
@@ -497,17 +520,34 @@ function App() {
   useEffect(() => {
     if (!isAdminUser(currentUser)) {
       setActionSuggestions([]);
+      notifiedSuggestionIds.current = new Set();
       return;
     }
-    refreshActionSuggestions();
+    notifiedSuggestionIds.current = new Set();
+    refreshActionSuggestions({ notify: true });
   }, [currentUser]);
 
-  function refreshActionSuggestions() {
+  useEffect(() => {
+    if (!isAdminUser(currentUser)) return undefined;
+    const intervalId = window.setInterval(() => {
+      refreshActionSuggestions({ notify: true, openDialog: false });
+    }, 3000);
+    return () => window.clearInterval(intervalId);
+  }, [currentUser]);
+
+  function refreshActionSuggestions(options = {}) {
+    const { notify = false, openDialog = true } = options;
     if (!isAdminUser(currentUser)) return Promise.resolve([]);
     return getActionStandardSuggestions()
       .then((items) => {
+        const nextIds = new Set(items.map((item) => item.id));
+        const newItems = items.filter((item) => !notifiedSuggestionIds.current.has(item.id));
         setActionSuggestions(items);
-        if (items.length > 0) {
+        if (notify && newItems.length > 0) {
+          playActionSuggestionSound();
+        }
+        notifiedSuggestionIds.current = nextIds;
+        if (items.length > 0 && (openDialog || newItems.length > 0)) {
           setSuggestionsOpen(true);
         }
         return items;
@@ -872,6 +912,8 @@ function App() {
       startDate: form.startDate || null,
       endDate: form.endDate || null,
       workDurationDays: Number(form.workDurationDays) || 1,
+      dependsOnActionId: form.dependsOnActionId ? Number(form.dependsOnActionId) : null,
+      dependencyAnchor: form.dependencyAnchor || "OUTPUT",
       stage: form.stage || stage
     };
   }
@@ -3763,6 +3805,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
         <ActionCreateDialog
           actionForm={actionForm}
           actionRoleOptions={actionRoleOptions}
+          actions={actions}
           isCriticalAction={isCriticalAction}
           saving={saving}
           selectedStages={selectedStages}
@@ -3930,13 +3973,19 @@ function ActionRoleSelect({ options = [], placeholder = "Selectionner un role", 
   );
 }
 
-function ActionCreateDialog({ actionForm, actionRoleOptions, isCriticalAction, saving, selectedStages = [], stageNewProject, onClose, onSubmit, updateActionForm }) {
+function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCriticalAction, saving, selectedStages = [], stageNewProject, onClose, onSubmit, updateActionForm }) {
+  const selectedActionStage = actionForm.stage || selectedStages[0]?.[0] || "";
+  const dependencyOptions = actions
+    .filter((action) => action.stage === selectedActionStage)
+    .filter((action) => action.id)
+    .sort((first, second) => String(first.title || "").localeCompare(String(second.title || "")));
+
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <form
         aria-labelledby="create-action-title"
         aria-modal="true"
-        className="dialog-card action-edit-dialog panel form-page"
+        className="dialog-card action-rule-dialog panel form-page"
         onMouseDown={(event) => event.stopPropagation()}
         onSubmit={onSubmit}
         role="dialog"
@@ -3950,55 +3999,66 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, isCriticalAction, s
             <X size={18} />
           </button>
         </div>
-        <div className="action-edit-grid">
+        <div className="planning-rule-form dialog-rule-form">
           <label>
             Phase
-            <select value={actionForm.stage || selectedStages[0]?.[0] || ""} onChange={(event) => updateActionForm("stage", event.target.value)}>
+            <select value={selectedActionStage} onChange={(event) => updateActionForm("stage", event.target.value)}>
               {selectedStages.map(([stage, label]) => (
                 <option key={stage} value={stage}>{label || stageLabel(stage, stageNewProject)}</option>
               ))}
             </select>
           </label>
-          <input value={actionForm.topicRisk} onChange={(event) => updateActionForm("topicRisk", event.target.value)} placeholder="Topic_Risk" />
-          <input className="action-title-input" required value={actionForm.title} onChange={(event) => updateActionForm("title", event.target.value)} placeholder="Point_verif" />
-          <ActionRoleSelect options={actionRoleOptions} value={actionForm.responsible} onChange={(value) => updateActionForm("responsible", value)} />
-          <ActionRoleSelect options={actionRoleOptions} value={actionForm.validator} onChange={(value) => updateActionForm("validator", value)} placeholder="Selectionner un validateur" />
-          <select value={actionForm.criticality} onChange={(event) => updateActionForm("criticality", event.target.value)}>
-            <option value="1-critique">1-critique</option>
-            <option value="2-moyenne">2-moyenne</option>
-            <option value="3-faible">3-faible</option>
-          </select>
+          <label className="planning-action-title-field">
+            Action
+            <input required value={actionForm.title} onChange={(event) => updateActionForm("title", event.target.value)} placeholder="Ex: Action 7 - Validation input" />
+          </label>
+          <label>
+            Topic / risque
+            <input value={actionForm.topicRisk} onChange={(event) => updateActionForm("topicRisk", event.target.value)} placeholder="Risque ou sujet" />
+          </label>
+          <label>
+            Responsable
+            <ActionRoleSelect options={actionRoleOptions} value={actionForm.responsible} onChange={(value) => updateActionForm("responsible", value)} />
+          </label>
+          <label>
+            Validateur
+            <ActionRoleSelect options={actionRoleOptions} value={actionForm.validator} onChange={(value) => updateActionForm("validator", value)} placeholder="Selectionner un role" />
+          </label>
+          <label>
+            Criticite
+            <select value={actionForm.criticality} onChange={(event) => updateActionForm("criticality", event.target.value)}>
+              <option value="1-critique">1-critique</option>
+              <option value="2-moyenne">2-moyenne</option>
+              <option value="3-faible">3-faible</option>
+            </select>
+          </label>
+          <label>
+            Bloquee par
+            <select value={actionForm.dependsOnActionId || ""} onChange={(event) => updateActionForm("dependsOnActionId", event.target.value)}>
+              <option value="">Aucune action</option>
+              {dependencyOptions.map((action) => (
+                <option key={action.id} value={action.id}>{action.title}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Jours de travail
+            <input min="0" type="number" value={actionForm.workDurationDays} onChange={(event) => updateActionForm("workDurationDays", event.target.value)} />
+          </label>
           <label className="file-picker">
             <FileText size={15} />
             <span>{fileNamesLabel(actionForm.proofDocumentFile, "Element preuve")}</span>
             <input type="file" onChange={(event) => updateActionForm("proofDocumentFile", event.target.files?.[0] || null)} />
           </label>
-          <input type="date" value={actionForm.startDate} onChange={(event) => updateActionForm("startDate", event.target.value)} title="Date debut" />
-          <input type="date" value={actionForm.endDate} onChange={(event) => updateActionForm("endDate", event.target.value)} title="Date fin" />
-          <input min="0" type="number" value={actionForm.workDurationDays} onChange={(event) => updateActionForm("workDurationDays", event.target.value)} title="Jours de travail" />
-          <label className="file-picker">
-            <Paperclip size={15} />
-            <span>{fileNamesLabel(actionForm.evidenceFile, "Assets validation")}</span>
-            <input multiple type="file" onChange={(event) => updateActionForm("evidenceFile", event.target.files)} />
-          </label>
-          <label className="action-asset-toggle">
+          <label className="asset-required-field user-enabled-field">
             <input
               checked={actionForm.evidenceRequired || Boolean(actionForm.proofDocumentFile) || isCriticalAction(actionForm)}
               disabled={Boolean(actionForm.proofDocumentFile) || isCriticalAction(actionForm)}
               type="checkbox"
               onChange={(event) => updateActionForm("evidenceRequired", event.target.checked)}
             />
-            Asset requis
+            Asset obligatoire
           </label>
-          <select value={actionForm.status} onChange={(event) => updateActionForm("status", event.target.value)}>
-            <option value="TODO">TODO</option>
-            <option value="IN_PROGRESS">IN_PROGRESS</option>
-            <option value="DONE">DONE</option>
-            <option value="DONE_LATE">DONE_LATE</option>
-            <option value="LATE">LATE</option>
-            <option value="CANCELLED">CANCELLED</option>
-          </select>
-          <textarea className="action-review-field" value={actionForm.dossierReview} onChange={(event) => updateActionForm("dossierReview", event.target.value)} placeholder="Revue dossier: notes, points ouverts, decisions, prochaines actions..." />
         </div>
         <div className="button-row">
           <button className="primary-action" disabled={saving} type="submit">

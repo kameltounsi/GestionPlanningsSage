@@ -96,6 +96,10 @@ public class CloudinaryStorageService {
             HttpURLConnection connection = (HttpURLConnection) new URL(fileUrl).openConnection();
             connection.setConnectTimeout(10000);
             connection.setReadTimeout(30000);
+            int responseCode = connection.getResponseCode();
+            if (responseCode < 200 || responseCode >= 300) {
+                throw new IOException("Cloudinary returned HTTP " + responseCode + " for " + fileUrl);
+            }
             String contentType = connection.getContentType();
             if (contentType == null || contentType.trim().isEmpty()) {
                 contentType = fallbackContentType;

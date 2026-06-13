@@ -40,6 +40,8 @@ export const emptyActionForm = {
   startDate: "",
   endDate: "",
   workDurationDays: 1,
+  dependsOnActionId: "",
+  dependencyAnchor: "OUTPUT",
   status: "TODO",
   evidenceRequired: false,
   comment: "",

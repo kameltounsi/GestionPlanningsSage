@@ -163,23 +163,9 @@ function warningAlert(title, message) {
 
 function playActionSuggestionSound() {
   try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-    const context = new AudioContext();
-    const gain = context.createGain();
-    gain.connect(context.destination);
-    gain.gain.setValueAtTime(0.0001, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.18, context.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.55);
-    [740, 980].forEach((frequency, index) => {
-      const oscillator = context.createOscillator();
-      oscillator.type = "sine";
-      oscillator.frequency.setValueAtTime(frequency, context.currentTime + index * 0.16);
-      oscillator.connect(gain);
-      oscillator.start(context.currentTime + index * 0.16);
-      oscillator.stop(context.currentTime + index * 0.16 + 0.28);
-    });
-    setTimeout(() => context.close().catch(() => {}), 900);
+    const audio = new Audio("/notif.mp3");
+    audio.volume = 0.8;
+    audio.play().catch(() => {});
   } catch {
   }
 }

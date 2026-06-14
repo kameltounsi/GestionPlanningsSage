@@ -372,6 +372,17 @@ export function ignoreActionSuggestion(id) {
   });
 }
 
+export function getPendingActionDeadlineAlerts() {
+  return request("/action-deadline-alerts/pending-sound");
+}
+
+export function acknowledgeActionDeadlineAlerts(ids) {
+  return request("/action-deadline-alerts/ack-sound", {
+    method: "POST",
+    body: JSON.stringify(ids)
+  });
+}
+
 export function actionAssetDownloadUrl(assetId) {
   return `${API_BASE}/action-assets/${assetId}/download`;
 }

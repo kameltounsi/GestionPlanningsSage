@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Swal from "sweetalert2";
 import "sweetalert2/dist/sweetalert2.min.css";
 import {
@@ -33,6 +33,7 @@ import {
   createUser,
   clearSession,
   addActionSuggestionToDefaults,
+  acknowledgeActionDeadlineAlerts,
   deleteActionPlanningRule,
   deleteActionAsset,
   deleteActionPlanningRuleProofDocument,
@@ -45,6 +46,7 @@ import {
   ecrRequestFileDownloadUrl,
   getActionPlanningRules,
   getActionStandardSuggestions,
+  getPendingActionDeadlineAlerts,
   getActions,
   getChecklist,
   getClientReferences,
@@ -250,8 +252,314 @@ function dossierReviewExportText(request, value) {
   ].join("\n");
 }
 
+function projectDossierReviewsExportText(projectName, projectRequests) {
+  const sortedRequests = [...projectRequests].sort((first, second) =>
+    requestDisplayName(first).localeCompare(requestDisplayName(second), "fr", { sensitivity: "base" })
+  );
+  return [
+    `Extraction revue dossier par projet`,
+    `Projet: ${projectName || "Projet non renseigne"}`,
+    `Modifications: ${sortedRequests.length}`,
+    `Date extraction: ${new Date().toLocaleString("fr-FR")}`,
+    "",
+    ...sortedRequests.flatMap((request, index) => [
+      "============================================================",
+      `${index + 1}. ${requestDisplayName(request)}`,
+      dossierReviewMetaLine(request),
+      `Pilote: ${request.pilot || "-"}`,
+      `Phase: ${stageLabel(request.currentStage, Boolean(request.newVersion))}`,
+      "",
+      request.dossierReview || "Revue dossier vide.",
+      ""
+    ])
+  ].join("\n");
+}
+
+function sortedProjectDossierRequests(projectRequests) {
+  return [...projectRequests].sort((first, second) =>
+    requestDisplayName(first).localeCompare(requestDisplayName(second), "fr", { sensitivity: "base" })
+  );
+}
+
+function projectDossierReviewsExportHtml(projectName, projectRequests) {
+  const sortedRequests = sortedProjectDossierRequests(projectRequests);
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Extraction revue dossier - ${escapeHtml(projectName)}</title><style>
+    body{font-family:Arial,sans-serif;color:#111827;margin:32px;line-height:1.5}
+    h1{font-size:22px;margin:0 0 8px}
+    .meta{color:#4b5563;font-size:13px;margin-bottom:24px}
+    article{break-inside:avoid;border-top:1px solid #d1d5db;padding:18px 0}
+    h2{font-size:17px;margin:0 0 6px}
+    dl{display:grid;grid-template-columns:120px 1fr;gap:4px 12px;margin:0 0 12px;font-size:13px}
+    dt{color:#64748b;font-weight:700}
+    dd{margin:0}
+    pre{background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px;white-space:pre-wrap}
+  </style></head><body><h1>Extraction revue dossier par projet</h1><div class="meta">Projet: ${escapeHtml(projectName || "Projet non renseigne")} | Modifications: ${sortedRequests.length} | Date extraction: ${escapeHtml(new Date().toLocaleString("fr-FR"))}</div>${sortedRequests.map((request, index) => `
+    <article>
+      <h2>${index + 1}. ${escapeHtml(requestDisplayName(request))}</h2>
+      <dl>
+        <dt>Demande</dt><dd>${escapeHtml(request.modificationNumber || "-")}</dd>
+        <dt>Client</dt><dd>${escapeHtml(request.client || "-")}</dd>
+        <dt>Produit</dt><dd>${escapeHtml(request.product || "-")}</dd>
+        <dt>Pilote</dt><dd>${escapeHtml(request.pilot || "-")}</dd>
+        <dt>Phase</dt><dd>${escapeHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</dd>
+      </dl>
+      <pre>${escapeHtml(request.dossierReview || "Revue dossier vide.")}</pre>
+    </article>`).join("")}</body></html>`;
+}
+
+function projectDossierReviewsExportExcel(projectName, projectRequests) {
+  const sortedRequests = sortedProjectDossierRequests(projectRequests);
+  return `<!doctype html><html><head><meta charset="utf-8"></head><body><table border="1">
+    <thead><tr><th>Projet</th><th>Modification</th><th>Client</th><th>Produit</th><th>Pilote</th><th>Phase</th><th>Revue dossier</th></tr></thead>
+    <tbody>${sortedRequests.map((request) => `<tr><td>${escapeHtml(request.modificationProject || projectName || "")}</td><td>${escapeHtml(requestDisplayName(request))}</td><td>${escapeHtml(request.client || "")}</td><td>${escapeHtml(request.product || "")}</td><td>${escapeHtml(request.pilot || "")}</td><td>${escapeHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</td><td>${escapeHtml(request.dossierReview || "Revue dossier vide.")}</td></tr>`).join("")}</tbody>
+  </table></body></html>`;
+}
+
+function parseDateOnly(value) {
+  if (!value) return null;
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDateOnly(value) {
+  const date = value instanceof Date ? value : parseDateOnly(value);
+  return date ? new Intl.DateTimeFormat("fr-FR").format(date) : "-";
+}
+
+function daysBetween(start, end) {
+  return Math.round((end.getTime() - start.getTime()) / 86400000);
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function requestTimelineStart(request) {
+  return parseDateOnly(request.receptionDate)
+    || parseDateOnly(request.feasibilityValidationDate)
+    || parseDateOnly(request.internalCostingDate)
+    || parseDateOnly(request.internalVpValidationDate)
+    || parseDateOnly(request.customerValidationDate)
+    || parseDateOnly(request.ppapValidationDate)
+    || parseDateOnly(request.closureDate)
+    || parseDateOnly(request.cancelledDate)
+    || new Date();
+}
+
+function requestTimelineEnd(request, startDate) {
+  const today = new Date();
+  const explicitEnd = parseDateOnly(request.sopDate)
+    || parseDateOnly(request.closureDate)
+    || parseDateOnly(request.cancelledDate);
+  if (explicitEnd && explicitEnd >= startDate) return explicitEnd;
+  const fallbackEnd = request.currentStage === "CLOSED" || request.currentStage === "CANCELLED"
+    ? startDate
+    : today > startDate ? today : addDays(startDate, 30);
+  return fallbackEnd >= startDate ? fallbackEnd : startDate;
+}
+
+function actionTimelineStart(action, fallbackDate) {
+  const deadline = parseDateOnly(action.deadline);
+  const duration = Math.max(1, Number(action.workDurationDays) || 1);
+  return parseDateOnly(action.startDate)
+    || parseDateOnly(action.date1)
+    || (deadline ? addDays(deadline, -duration) : null)
+    || fallbackDate
+    || new Date();
+}
+
+function actionTimelineEnd(action, startDate) {
+  const explicitEnd = parseDateOnly(action.endDate)
+    || parseDateOnly(action.deadline)
+    || parseDateOnly(action.date3)
+    || parseDateOnly(action.date2);
+  if (explicitEnd && explicitEnd >= startDate) return explicitEnd;
+  const duration = Math.max(1, Number(action.workDurationDays) || 1);
+  return addDays(startDate, duration);
+}
+
+function actionGanttStatusClass(action) {
+  if (isCriticalActionValue(action)) return "critical";
+  if (isActionDone(action)) return "closed";
+  const end = parseDateOnly(action.endDate) || parseDateOnly(action.deadline);
+  return end && end < new Date() ? "late" : "planned";
+}
+
+function isCriticalActionValue(action) {
+  return String(action?.criticality || "").startsWith("1");
+}
+
+function actionGanttStatusLabel(action) {
+  if (isCriticalActionValue(action)) return "Critique";
+  if (isActionDone(action)) return "Done";
+  return actionGanttStatusClass(action) === "late" ? "En retard" : "Planifie / a faire";
+}
+
+function actionGanttColor(action) {
+  const status = actionGanttStatusClass(action);
+  if (status === "critical") return "#df7d3f";
+  if (status === "closed") return "#16a34a";
+  if (status === "late") return "#dc2626";
+  return "#9ca3af";
+}
+
+function ganttColorBarStyle(color) {
+  return `background:${color};border-color:${color};color:${color}`;
+}
+
+function ganttScale(timelineStart, timelineEnd) {
+  const totalDays = Math.max(1, daysBetween(timelineStart, timelineEnd));
+  if (totalDays <= 45) {
+    return Array.from({ length: totalDays + 1 }, (_, index) => {
+      const date = addDays(timelineStart, index);
+      return { date, label: date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) };
+    });
+  }
+  if (totalDays <= 150) {
+    const ticks = [];
+    for (let offset = 0; offset <= totalDays; offset += 7) {
+      const date = addDays(timelineStart, offset);
+      ticks.push({ date, label: date.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) });
+    }
+    if (ticks[ticks.length - 1]?.date < timelineEnd) {
+      ticks.push({ date: timelineEnd, label: timelineEnd.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) });
+    }
+    return ticks;
+  }
+  const ticks = [];
+  const cursor = new Date(timelineStart.getFullYear(), timelineStart.getMonth(), 1);
+  if (cursor < timelineStart) cursor.setMonth(cursor.getMonth() + 1);
+  ticks.push({ date: timelineStart, label: timelineStart.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" }) });
+  while (cursor < timelineEnd) {
+    ticks.push({ date: new Date(cursor), label: cursor.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" }) });
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  ticks.push({ date: timelineEnd, label: timelineEnd.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" }) });
+  return ticks;
+}
+
+function ganttBarStyle(start, end, timelineStart, totalDays) {
+  const left = Math.max(0, Math.min(100, (daysBetween(timelineStart, start) / totalDays) * 100));
+  const width = Math.max(1, Math.min(100 - left, (Math.max(1, daysBetween(start, end)) / totalDays) * 100));
+  return `left:${left}%;width:${width}%`;
+}
+
+function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
+  const fallbackStart = requestTimelineStart(request);
+  const actionRows = actions
+    .map((action) => {
+      const start = actionTimelineStart(action, fallbackStart);
+      const end = actionTimelineEnd(action, start);
+      return { action, start, end };
+    })
+    .sort((first, second) => first.start - second.start || String(first.action.title || "").localeCompare(String(second.action.title || ""), "fr", { sensitivity: "base" }));
+  const requestEnd = requestTimelineEnd(request, fallbackStart);
+  const minDate = actionRows.reduce((min, row) => row.start < min ? row.start : min, fallbackStart);
+  const maxDate = actionRows.reduce((max, row) => row.end > max ? row.end : max, requestEnd);
+  const timelineStart = addDays(minDate, -2);
+  const timelineEnd = addDays(maxDate, 3);
+  const totalDays = Math.max(1, daysBetween(timelineStart, timelineEnd));
+  const ticks = ganttScale(timelineStart, timelineEnd);
+  const gridStep = 100 / Math.max(1, ticks.length);
+  const stageOrder = new Map(selectedStages.map(([key], index) => [key, index]));
+  const groupedRows = actionRows.reduce((groups, row) => {
+    const stage = row.action.stage || request.currentStage || "FEASIBILITY_VALIDATION";
+    if (!groups.has(stage)) groups.set(stage, []);
+    groups.get(stage).push(row);
+    return groups;
+  }, new Map());
+  const sortedStages = selectedStages.length > 0
+    ? selectedStages.map(([key]) => key)
+    : Array.from(groupedRows.keys()).sort((first, second) => (stageOrder.get(first) ?? 99) - (stageOrder.get(second) ?? 99));
+  const doneCount = actionRows.filter(({ action }) => isActionDone(action)).length;
+  const lateCount = actionRows.filter(({ action }) => actionGanttStatusClass(action) === "late").length;
+  const criticalCount = actionRows.filter(({ action }) => actionGanttStatusClass(action) === "critical").length;
+  const rowHtml = sortedStages.map((stage) => {
+    const stageRows = (groupedRows.get(stage) || []).sort((first, second) => first.start - second.start);
+    const stageStart = stageRows.reduce((min, row) => row.start < min ? row.start : min, stageRows[0]?.start || null);
+    const stageEnd = stageRows.reduce((max, row) => row.end > max ? row.end : max, stageRows[0]?.end || null);
+    const phaseBar = stageStart && stageEnd
+      ? `<span class="phase-bar" style="${ganttBarStyle(stageStart, stageEnd, timelineStart, totalDays)}"></span>`
+      : "";
+    return `<div class="gantt-row phase-row">
+        <div class="left activity">${escapeHtml(stageLabel(stage, Boolean(request.newVersion)))}</div>
+        <div class="left date">${escapeHtml(stageStart ? formatDateOnly(stageStart) : "-")}</div>
+        <div class="left date">${escapeHtml(stageEnd ? formatDateOnly(stageEnd) : "-")}</div>
+        <div class="timeline">${phaseBar}</div>
+      </div>${stageRows.map(({ action, start, end }) => {
+        const assignee = action.responsible || "Responsable";
+        const actionColor = actionGanttColor(action);
+        return `<div class="gantt-row">
+          <div class="left activity"><strong>${escapeHtml(action.title || `Action ${action.id || ""}`)}</strong><span>${escapeHtml(actionGanttStatusLabel(action))} | Pilote: ${escapeHtml(assignee)} | Validateur: ${escapeHtml(action.validatorDisplayName || action.validator || "Validateur")}</span></div>
+          <div class="left date">${escapeHtml(formatDateOnly(start))}</div>
+          <div class="left date">${escapeHtml(formatDateOnly(end))}</div>
+          <div class="timeline"><span class="bar ${actionGanttStatusClass(action)}" style="${ganttBarStyle(start, end, timelineStart, totalDays)};${ganttColorBarStyle(actionColor)}"></span></div>
+        </div>`;
+      }).join("")}`;
+  }).join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Gantt - ${escapeHtml(requestDisplayName(request))}</title><style>
+    @page{size:A4 landscape;margin:10mm}
+    *{box-sizing:border-box}
+    html,body,.gantt-table,.timeline,.left,.bar,.phase-bar,.legend i{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    body{font-family:Arial,sans-serif;color:#111;margin:0;background:#f7f7f7}
+    header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:10px;background:#fff;padding:0 0 8px}
+    h1{font-family:Georgia,serif;font-size:28px;margin:0 0 4px;text-transform:uppercase}
+    h1 span{color:#8fb5d2}
+    .meta{font-size:11px;color:#526071;line-height:1.45}
+    .summary{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+    .summary span{border:1px solid #d8dee8;padding:5px 8px;font-size:11px;background:#fff}
+    .gantt-table{background:#fff;border:1px solid #8fb5d2}
+    .gantt-row{display:grid;grid-template-columns:260px 84px 84px minmax(760px,1fr);min-height:43px;break-inside:avoid}
+    .gantt-head{min-height:34px;background:#8fb5d2;color:#fff;font-weight:700}
+    .left{border-right:1px solid #d8d8d8;border-bottom:1px solid #d8d8d8;padding:6px 8px;background:#fff}
+    .gantt-head .left{background:#8fb5d2;border-right:1px solid #dce8f1;border-bottom:0;font-size:12px}
+    .activity{font-size:12px}
+    .activity strong{display:block;font-weight:700}
+    .activity span{display:block;font-size:9.5px;color:#526071;margin-top:2px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.25;overflow-wrap:anywhere}
+    .date{text-align:center;font-size:11px;white-space:nowrap}
+    .timeline{position:relative;border-bottom:1px solid #d8d8d8;background-color:#f4f4f4;background-image:linear-gradient(to right,#d8d8d8 1px,transparent 1px);background-size:${gridStep}% 100%}
+    .gantt-head .timeline{display:grid;grid-template-columns:repeat(${Math.max(1, ticks.length)},1fr);background:#8fb5d2;border-bottom:0}
+    .tick{border-left:1px solid #dce8f1;padding:7px 4px;text-align:center;font-size:10px;white-space:nowrap}
+    .phase-row .left{background:#e9eef3;font-weight:700}
+    .phase-row .timeline{background:#eef3f6}
+    .phase-bar{position:absolute;top:14px;height:0;border-top:12px solid #8fb5d2;background:#8fb5d2;border-radius:2px;opacity:.95}
+    .bar{position:absolute;top:13px;height:0;border-top:16px solid;border-radius:1px;min-width:4px}
+    .bar.late{outline:2px solid #7f1d1d}
+    .bar.critical{outline:2px solid #9a3412}
+    .legend{display:grid;grid-template-columns:repeat(4,1fr);gap:8px 28px;margin-top:10px;padding:8px;background:#fff;border-top:1px solid #8fb5d2;font-size:11px}
+    .legend span{display:flex;align-items:center;gap:8px;font-weight:700}
+    .legend i{display:inline-block;width:34px;height:0;border-top:14px solid}
+    .empty{padding:24px;text-align:center;color:#64748b;background:#fff}
+  </style></head><body>
+    <header>
+      <div><h1>DIAGRAMME <span>DE GANTT</span></h1><div class="meta">${escapeHtml(requestDisplayName(request))} | Projet: ${escapeHtml(request.modificationProject || "-")} | Client: ${escapeHtml(request.client || "-")} | Produit: ${escapeHtml(request.product || "-")} | Pilote: ${escapeHtml(request.pilot || "-")}<br>Extraction: ${escapeHtml(new Date().toLocaleString("fr-FR"))} | Periode: ${escapeHtml(formatDateOnly(timelineStart))} - ${escapeHtml(formatDateOnly(timelineEnd))}</div></div>
+      <div class="summary"><span>Actions: ${actionRows.length}</span><span>Done: ${doneCount}</span><span>En retard: ${lateCount}</span><span>Critiques: ${criticalCount}</span><span>Phase: ${escapeHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</span></div>
+    </header>
+    <section class="gantt-table">
+      <div class="gantt-row gantt-head"><div class="left">Activites</div><div class="left">Deb</div><div class="left">Fin</div><div class="timeline">${ticks.map((tick) => `<span class="tick">${escapeHtml(tick.label)}</span>`).join("")}</div></div>
+      ${actionRows.length === 0 ? `<div class="empty">Aucune action planifiee pour cette modification.</div>` : rowHtml}
+    </section>
+    <div class="legend"><span><i style="${ganttColorBarStyle("#9ca3af")}"></i>Planifie / a faire</span><span><i style="${ganttColorBarStyle("#16a34a")}"></i>Done</span><span><i style="${ganttColorBarStyle("#dc2626")}"></i>En retard</span><span><i style="${ganttColorBarStyle("#df7d3f")}"></i>Critique</span></div>
+    <script>window.onload=function(){window.print();};</script>
+  </body></html>`;
+}
+
 function downloadTextFile(fileName, content) {
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function downloadBlobFile(fileName, content, type) {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -521,6 +829,15 @@ function App() {
     return () => window.clearInterval(intervalId);
   }, [currentUser]);
 
+  useEffect(() => {
+    if (!currentUser) return undefined;
+    refreshActionDeadlineAlerts();
+    const intervalId = window.setInterval(() => {
+      refreshActionDeadlineAlerts();
+    }, 3000);
+    return () => window.clearInterval(intervalId);
+  }, [currentUser]);
+
   function refreshActionSuggestions(options = {}) {
     const { notify = false, openDialog = true } = options;
     if (!isAdminUser(currentUser)) return Promise.resolve([]);
@@ -542,6 +859,29 @@ function App() {
         setActionSuggestions([]);
         return [];
       });
+  }
+
+  function refreshActionDeadlineAlerts() {
+    return getPendingActionDeadlineAlerts()
+      .then((alerts) => {
+        if (!Array.isArray(alerts) || alerts.length === 0) {
+          return [];
+        }
+        playActionSuggestionSound();
+        const firstAlert = alerts[0];
+        Swal.fire({
+          toast: true,
+          position: "top-end",
+          icon: firstAlert.alertType === "J_PLUS_1" ? "error" : "warning",
+          title: `${alerts.length} alerte${alerts.length > 1 ? "s" : ""} echeance action`,
+          text: `${firstAlert.actionTitle || "Action"} - ${firstAlert.requestLabel || "Modification"}`,
+          showConfirmButton: false,
+          timer: 7000,
+          timerProgressBar: true
+        });
+        return acknowledgeActionDeadlineAlerts(alerts.map((alert) => alert.id)).then(() => alerts);
+      })
+      .catch(() => []);
   }
 
   function loadInitialData() {
@@ -933,6 +1273,12 @@ function App() {
   function handleCreateAction(event) {
     event.preventDefault();
     if (!selectedRequest) return Promise.resolve();
+    if (!String(actionForm.responsible || "").trim() || !String(actionForm.validator || "").trim()) {
+      const message = "Choisissez le pilote d'action et le validateur avant de creer l'action. Sans ces deux champs, l'action ne sera pas creee.";
+      setError(message);
+      warningAlert("Pilote et validateur requis", message);
+      return Promise.reject(new Error("Action assignees required"));
+    }
     const evidenceFiles = filesFromValue(actionForm.evidenceFile);
     const proofDocumentFile = firstFileFromValue(actionForm.proofDocumentFile);
     if (requiresEvidence(actionForm) && isActionDone(actionForm) && evidenceFiles.length === 0) {
@@ -969,7 +1315,9 @@ function App() {
       })
       .catch((error) => {
         if (error.message === "Evidence required") throw error;
-        const message = "Creation action impossible.";
+        const message = error.message?.includes("422")
+          ? "La date de debut de l'action ne peut pas etre apres le debut d'une phase suivante."
+          : "Creation action impossible.";
         setError(message);
         errorAlert(message);
         throw error;
@@ -1792,9 +2140,16 @@ function App() {
 
         {page === "dashboard" && (
           <DashboardPage
+            clients={clientReferences}
+            currentUser={currentUser}
+            planningRules={planningRules}
+            products={productReferences}
+            projects={projects}
             requests={requests}
+            roles={roleReferences}
             saving={saving}
             stats={dashboardStats}
+            users={users}
             onCreateRequest={openCreateFlow}
             onDeleteRequest={handleDeleteEcr}
             onOpenRequest={openRequest}
@@ -2003,25 +2358,299 @@ function App() {
   );
 }
 
-function DashboardPage({ requests, saving, stats, onCreateRequest, onDeleteRequest, onOpenRequest }) {
+function DashboardPage({ clients = [], currentUser, planningRules = [], products = [], projects, requests, roles = [], saving, stats, users = [], onCreateRequest, onDeleteRequest, onOpenRequest }) {
+  const allProjectsValue = "__ALL__";
+  const [dossierProject, setDossierProject] = useState(allProjectsValue);
+  const adminView = isAdminUser(currentUser);
+  const activeRequests = requests.filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED");
+  const closedRequests = requests.filter((request) => request.currentStage === "CLOSED");
+  const cancelledRequests = requests.filter((request) => request.currentStage === "CANCELLED");
+  const lateRequests = activeRequests.filter((request) => {
+    const sopDate = parseDateOnly(request.sopDate);
+    return sopDate && sopDate < new Date();
+  });
+  const newProjectRequests = requests.filter((request) => request.newVersion);
+  const stageEntries = getStages(true).map(([stage, label]) => {
+    const count = requests.filter((request) => request.currentStage === stage).length;
+    return { stage, label, count };
+  }).filter((entry) => entry.count > 0);
+  const stageStatusMatrix = stageEntries.map((entry) => {
+    const phaseRequests = requests.filter((request) => request.currentStage === entry.stage);
+    const phaseLate = phaseRequests.filter((request) => {
+      const sopDate = parseDateOnly(request.sopDate);
+      return sopDate && sopDate < new Date() && request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED";
+    }).length;
+    const phaseClosed = phaseRequests.filter((request) => request.currentStage === "CLOSED" || request.currentStage === "CANCELLED").length;
+    return { ...entry, active: Math.max(0, phaseRequests.length - phaseLate - phaseClosed), late: phaseLate, closed: phaseClosed };
+  });
+  const maxStageCount = Math.max(1, ...stageEntries.map((entry) => entry.count));
+  const projectLoad = Array.from(requests.reduce((map, request) => {
+    const projectName = request.modificationProject || "Projet non renseigne";
+    const item = map.get(projectName) || { name: projectName, total: 0, active: 0, late: 0, representative: request };
+    item.total += 1;
+    if (request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED") {
+      item.active += 1;
+      item.representative = request;
+    }
+    const sopDate = parseDateOnly(request.sopDate);
+    if (sopDate && sopDate < new Date() && request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED") item.late += 1;
+    map.set(projectName, item);
+    return map;
+  }, new Map()).values())
+    .sort((first, second) => second.active - first.active || second.total - first.total || first.name.localeCompare(second.name))
+    .slice(0, 6);
+  const maxProjectLoad = Math.max(1, ...projectLoad.map((project) => project.active));
+  const dueSoonRequests = activeRequests
+    .map((request) => ({ request, sopDate: parseDateOnly(request.sopDate) }))
+    .filter((item) => item.sopDate)
+    .sort((first, second) => first.sopDate - second.sopDate)
+    .slice(0, 6);
+  const urgentRequests = [...lateRequests]
+    .sort((first, second) => (parseDateOnly(first.sopDate) || new Date()) - (parseDateOnly(second.sopDate) || new Date()))
+    .slice(0, 4);
+  const clientImpact = dashboardDistribution(requests, (request) => request.client || "Client non renseigne", 6);
+  const productImpact = dashboardDistribution(requests, (request) => request.product || "Produit non renseigne", 6);
+  const pilotLoad = dashboardDistribution(requests, (request) => request.pilot || "Pilote non renseigne", 6);
+  const modificationTypes = [
+    { label: "Nouveau projet", count: requests.filter((request) => request.newVersion).length },
+    { label: "Digit change", count: requests.filter((request) => request.digitChange).length },
+    { label: "Component change", count: requests.filter((request) => request.componentChange).length },
+    { label: "Process change", count: requests.filter((request) => request.processChange).length },
+    { label: "Supplier change", count: requests.filter((request) => request.supplierChange).length }
+  ].filter((item) => item.count > 0);
+  const maxTypeCount = Math.max(1, ...modificationTypes.map((item) => item.count));
+  const rulesByPhase = dashboardDistribution(planningRules, (rule) => stageLabel(rule.stage, Boolean(rule.newProject)), 6);
+  const enabledUsers = users.filter((user) => user.enabled !== false);
+  const roleCoverage = dashboardDistribution(enabledUsers, (user) => userRoleLabel(user.role), 6);
   const visibleRequests = requests
     .filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED")
     .slice(0, 5);
   const recentRequests = visibleRequests.length > 0 ? visibleRequests : requests.slice(0, 5);
+  const projectOptions = useMemo(() => Array.from(new Set([
+    ...projects.map((project) => project.name),
+    ...requests.map((request) => request.modificationProject)
+  ].filter(Boolean))).sort((first, second) => first.localeCompare(second, "fr", { sensitivity: "base" })), [projects, requests]);
+  const exportingAllProjects = dossierProject === allProjectsValue;
+  const dossierRequests = exportingAllProjects ? requests : requests.filter((request) => request.modificationProject === dossierProject);
+  const dossierExportLabel = exportingAllProjects ? "Tous les projets" : dossierProject;
+
+  function exportProjectDossierReviews(format) {
+    if (!dossierProject) {
+      warningAlert("Projet requis", "Selectionnez un projet avant de lancer l'extraction.");
+      return;
+    }
+    if (dossierRequests.length === 0) {
+      warningAlert("Aucune modification", "Aucune modification trouvee pour ce projet.");
+      return;
+    }
+    const fileBaseName = `revues-dossier-${exportingAllProjects ? "toutes-modifications" : `projet-${fileNameToken(dossierProject)}`}`;
+    if (format === "pdf") {
+      const win = window.open("", "_blank");
+      if (!win) return;
+      win.document.write(projectDossierReviewsExportHtml(dossierExportLabel, dossierRequests).replace("</body></html>", "<script>window.onload=function(){window.print();};</script></body></html>"));
+      win.document.close();
+    } else if (format === "excel") {
+      downloadBlobFile(
+        `${fileBaseName}.xls`,
+        projectDossierReviewsExportExcel(dossierExportLabel, dossierRequests),
+        "application/vnd.ms-excel;charset=utf-8"
+      );
+    } else {
+      downloadTextFile(
+        `${fileBaseName}.txt`,
+        projectDossierReviewsExportText(dossierExportLabel, dossierRequests)
+      );
+    }
+    successToast("Extraction revue dossier generee");
+  }
 
   return (
     <section className="page-content">
-      <PageHeader eyebrow="Vue générale" title="Tableau de bord" subtitle="Suivi rapide des modifications et du référentiel projet." />
+      <PageHeader
+        eyebrow={adminView ? "Vue globale" : "Votre périmètre"}
+        title={adminView ? "Dashboard direction ECR" : "Dashboard personnel ECR"}
+        subtitle={adminView ? "Pilotage de toutes les modifications, priorités et charges projet." : "Synthèse des modifications où vous intervenez comme membre, pilote, responsable ou validateur."}
+      />
       <div className="stat-grid">
-        <StatCard label="Demandes" value={stats.requests} icon={ClipboardList} />
-        <StatCard label="Actives" value={stats.active} icon={Gauge} />
-        <StatCard label="Clôturées" value={stats.closed} icon={CheckCircle2} />
-        <StatCard label="Projets" value={stats.projects} icon={FolderKanban} />
+        <StatCard label={adminView ? "Modifications" : "Dans mon périmètre"} value={stats.requests} icon={ClipboardList} />
+        <StatCard label="Actives" value={activeRequests.length} icon={Gauge} />
+        <StatCard label="En retard SOP" value={lateRequests.length} icon={CircleAlert} />
+        <StatCard label="Clôturées" value={closedRequests.length} icon={CheckCircle2} />
       </div>
+      <section className="dashboard-grid">
+        <article className="panel dashboard-health-panel">
+          <div className="section-title">
+            <div>
+              <h2>Santé du portefeuille</h2>
+              <span>{adminView ? "Tous les dossiers visibles admin" : "Vos dossiers accessibles"}</span>
+            </div>
+          </div>
+          <div className="dashboard-health-content">
+            <DashboardDonut active={activeRequests.length} closed={closedRequests.length} cancelled={cancelledRequests.length} late={lateRequests.length} />
+            <div className="dashboard-health-copy">
+              <strong>{lateRequests.length === 0 ? "Aucun retard SOP détecté" : `${lateRequests.length} modification${lateRequests.length > 1 ? "s" : ""} à surveiller`}</strong>
+              <span>{newProjectRequests.length} nouveau{newProjectRequests.length > 1 ? "x" : ""} projet{newProjectRequests.length > 1 ? "s" : ""} dans le périmètre.</span>
+              <span>{activeRequests.length} modification{activeRequests.length > 1 ? "s" : ""} encore active{activeRequests.length > 1 ? "s" : ""}.</span>
+            </div>
+          </div>
+        </article>
+        <article className="panel dashboard-chart-panel">
+          <div className="section-title">
+            <div>
+              <h2>Répartition par phase</h2>
+              <span>{stageEntries.length} phase{stageEntries.length > 1 ? "s" : ""} active{stageEntries.length > 1 ? "s" : ""}</span>
+            </div>
+          </div>
+          <div className="dashboard-bars">
+            {stageEntries.length === 0 ? (
+              <EmptyState title="Aucune phase" text="Les phases apparaîtront dès qu'une modification sera créée." compact />
+            ) : stageEntries.map(({ stage, label, count }) => (
+              <div className="dashboard-bar-row" key={stage}>
+                <span>{label}</span>
+                <div><i className={stageColorClass(stage, true)} style={{ width: `${Math.max(8, (count / maxStageCount) * 100)}%` }} /></div>
+                <strong>{count}</strong>
+              </div>
+            ))}
+          </div>
+        </article>
+        <article className="panel dashboard-chart-panel">
+          <div className="section-title">
+            <div>
+              <h2>Charge par projet</h2>
+              <span>Top projets actifs</span>
+            </div>
+          </div>
+          <div className="dashboard-project-load">
+            {projectLoad.length === 0 ? (
+              <EmptyState title="Aucun projet" text="La charge projet apparaîtra ici." compact />
+            ) : projectLoad.map((project) => (
+              <button className="dashboard-project-row" key={project.name} type="button" onClick={() => onOpenRequest(project.representative)}>
+                <span>{project.name}</span>
+                <div><i style={{ width: `${Math.max(8, (project.active / maxProjectLoad) * 100)}%` }} /></div>
+                <strong>{project.active} actif{project.active > 1 ? "s" : ""}</strong>
+                {project.late > 0 && <em>{project.late} retard</em>}
+              </button>
+            ))}
+          </div>
+        </article>
+        <article className="panel dashboard-risk-panel">
+          <div className="section-title">
+            <div>
+              <h2>Priorités</h2>
+              <span>Retards et prochaines SOP</span>
+            </div>
+          </div>
+          <div className="dashboard-risk-list">
+            {(urgentRequests.length > 0 ? urgentRequests : dueSoonRequests.map((item) => item.request)).map((request) => (
+              <button className="dashboard-risk-item" key={request.id} type="button" onClick={() => onOpenRequest(request)}>
+                <span className={lateRequests.some((item) => item.id === request.id) ? "risk-dot late" : "risk-dot"} />
+                <strong>{requestDisplayName(request)}</strong>
+                <small>{request.modificationProject || "-"} | SOP {formatDateOnly(request.sopDate)}</small>
+              </button>
+            ))}
+            {urgentRequests.length === 0 && dueSoonRequests.length === 0 && (
+              <EmptyState title="Rien d'urgent" text="Aucune échéance SOP renseignée à court terme." compact />
+            )}
+          </div>
+        </article>
+      </section>
+      <section className="panel dashboard-matrix-panel">
+        <div className="section-title">
+          <div>
+            <h2>Matrice phase / statut</h2>
+            <span>Lecture croisée du portefeuille</span>
+          </div>
+        </div>
+        <DashboardStatusMatrix entries={stageStatusMatrix} />
+      </section>
+      <section className="dashboard-entity-grid">
+        <DashboardTilesCard title="Clients impactés" subtitle={`${clients.length} client${clients.length > 1 ? "s" : ""} référencé${clients.length > 1 ? "s" : ""}`} items={clientImpact} />
+        <DashboardBubbleCard title="Produits concernés" subtitle={`${products.length} produit${products.length > 1 ? "s" : ""} référencé${products.length > 1 ? "s" : ""}`} items={productImpact} />
+        <article className="panel dashboard-chart-panel">
+          <div className="section-title">
+            <div>
+              <h2>Nature des modifications</h2>
+              <span>Types déclarés</span>
+            </div>
+          </div>
+          <div className="dashboard-bars">
+            {modificationTypes.length === 0 ? (
+              <EmptyState title="Aucun type" text="Les types apparaîtront selon les dossiers créés." compact />
+            ) : modificationTypes.map((item) => (
+              <div className="dashboard-bar-row" key={item.label}>
+                <span>{item.label}</span>
+                <div><i style={{ width: `${Math.max(8, (item.count / maxTypeCount) * 100)}%` }} /></div>
+                <strong>{item.count}</strong>
+              </div>
+            ))}
+          </div>
+        </article>
+        <DashboardRankingCard title="Pilotes de modification" subtitle="Charge nominative" items={pilotLoad} />
+        {adminView && (
+          <>
+            <DashboardDistributionCard title="Utilisateurs par rôle" subtitle={`${enabledUsers.length} compte${enabledUsers.length > 1 ? "s" : ""} actif${enabledUsers.length > 1 ? "s" : ""}`} items={roleCoverage} />
+            <DashboardDistributionCard title="Actions standard par phase" subtitle={`${planningRules.length} action${planningRules.length > 1 ? "s" : ""} standard`} items={rulesByPhase} />
+            <article className="panel dashboard-referential-panel">
+              <div className="section-title">
+                <div>
+                  <h2>Couverture référentiel</h2>
+                  <span>Entités configurées</span>
+                </div>
+              </div>
+              <div className="dashboard-entity-metrics">
+                <span><strong>{projects.length}</strong>Projets</span>
+                <span><strong>{clients.length}</strong>Clients</span>
+                <span><strong>{products.length}</strong>Produits</span>
+                <span><strong>{roles.length}</strong>Rôles action</span>
+                <span><strong>{users.length}</strong>Utilisateurs</span>
+                <span><strong>{planningRules.length}</strong>Actions standard</span>
+              </div>
+            </article>
+          </>
+        )}
+      </section>
+      {isAdminUser(currentUser) && (
+        <section className="panel">
+          <div className="section-title">
+            <div>
+              <h2>Extraction revue dossier par projet</h2>
+              <span>{dossierRequests.length} modification{dossierRequests.length > 1 ? "s" : ""}</span>
+            </div>
+            <div className="button-row compact-export-row">
+              <button className="secondary-action" type="button" onClick={() => exportProjectDossierReviews("txt")} disabled={!dossierProject || dossierRequests.length === 0}>
+                <FileText size={16} />
+                TXT
+              </button>
+              <button className="secondary-action" type="button" onClick={() => exportProjectDossierReviews("pdf")} disabled={!dossierProject || dossierRequests.length === 0}>
+                <FileText size={16} />
+                PDF
+              </button>
+              <button className="secondary-action" type="button" onClick={() => exportProjectDossierReviews("excel")} disabled={!dossierProject || dossierRequests.length === 0}>
+                <FileText size={16} />
+                Excel
+              </button>
+            </div>
+          </div>
+          <div className="modifications-toolbar dashboard-extraction-toolbar">
+            <label className="project-filter">
+              <FolderKanban size={16} />
+              <select value={dossierProject} onChange={(event) => setDossierProject(event.target.value)}>
+                <option value={allProjectsValue}>Tous les projets</option>
+                {projectOptions.map((projectName) => (
+                  <option key={projectName} value={projectName}>{projectName}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </section>
+      )}
       <section className="panel">
         <div className="section-title">
-          <h2>Dernieres modifications</h2>
-          <button className="secondary-action" onClick={onCreateRequest}>
+          <div>
+            <h2>{adminView ? "Dernières modifications" : "Mes modifications à suivre"}</h2>
+            <span>{recentRequests.length} affichée{recentRequests.length > 1 ? "s" : ""}</span>
+          </div>
+          <button className="secondary-action" disabled={!adminView} onClick={onCreateRequest}>
             <Plus size={16} />
             Créer ECR
           </button>
@@ -2045,6 +2674,158 @@ function DashboardPage({ requests, saving, stats, onCreateRequest, onDeleteReque
         </div>
       </section>
     </section>
+  );
+}
+
+function DashboardDonut({ active, closed, cancelled, late }) {
+  const total = Math.max(1, active + closed + cancelled);
+  const lateAngle = (late / total) * 360;
+  const healthyActiveAngle = (Math.max(0, active - late) / total) * 360;
+  const closedAngle = (closed / total) * 360;
+  const activeEnd = lateAngle + healthyActiveAngle;
+  const closedEnd = activeEnd + closedAngle;
+  const background = `conic-gradient(#dc2626 0deg ${lateAngle}deg, #2563eb ${lateAngle}deg ${activeEnd}deg, #16a34a ${activeEnd}deg ${closedEnd}deg, #64748b ${closedEnd}deg 360deg)`;
+  return (
+    <div className="dashboard-donut" style={{ background }}>
+      <div>
+        <strong>{Math.round(((closed + cancelled) / total) * 100)}%</strong>
+        <span>clos</span>
+      </div>
+    </div>
+  );
+}
+
+function dashboardDistribution(items, labelFor, limit = 6) {
+  return Array.from(items.reduce((map, item) => {
+    const label = labelFor(item);
+    map.set(label, (map.get(label) || 0) + 1);
+    return map;
+  }, new Map()).entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((first, second) => second.count - first.count || first.label.localeCompare(second.label, "fr", { sensitivity: "base" }))
+    .slice(0, limit);
+}
+
+function DashboardDistributionCard({ title, subtitle, items = [] }) {
+  const maxCount = Math.max(1, ...items.map((item) => item.count));
+  return (
+    <article className="panel dashboard-chart-panel">
+      <div className="section-title">
+        <div>
+          <h2>{title}</h2>
+          <span>{subtitle}</span>
+        </div>
+      </div>
+      <div className="dashboard-bars">
+        {items.length === 0 ? (
+          <EmptyState title="Aucune donnée" text="Les données apparaîtront selon les dossiers accessibles." compact />
+        ) : items.map((item) => (
+          <div className="dashboard-bar-row" key={item.label}>
+            <span>{item.label}</span>
+            <div><i style={{ width: `${Math.max(8, (item.count / maxCount) * 100)}%` }} /></div>
+            <strong>{item.count}</strong>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function DashboardTilesCard({ title, subtitle, items = [] }) {
+  const maxCount = Math.max(1, ...items.map((item) => item.count));
+  return (
+    <article className="panel dashboard-chart-panel">
+      <div className="section-title">
+        <div>
+          <h2>{title}</h2>
+          <span>{subtitle}</span>
+        </div>
+      </div>
+      {items.length === 0 ? (
+        <EmptyState title="Aucune donnée" text="Les données apparaîtront selon les dossiers accessibles." compact />
+      ) : (
+        <div className="dashboard-tile-map">
+          {items.map((item, index) => (
+            <span className={`tile-${(index % 5) + 1}`} key={item.label} style={{ minHeight: `${46 + (item.count / maxCount) * 58}px` }}>
+              <strong>{item.count}</strong>
+              {item.label}
+            </span>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function DashboardBubbleCard({ title, subtitle, items = [] }) {
+  const maxCount = Math.max(1, ...items.map((item) => item.count));
+  return (
+    <article className="panel dashboard-chart-panel">
+      <div className="section-title">
+        <div>
+          <h2>{title}</h2>
+          <span>{subtitle}</span>
+        </div>
+      </div>
+      {items.length === 0 ? (
+        <EmptyState title="Aucune donnée" text="Les données apparaîtront selon les dossiers accessibles." compact />
+      ) : (
+        <div className="dashboard-bubbles">
+          {items.map((item, index) => (
+            <span className={`bubble-${(index % 5) + 1}`} key={item.label} style={{ width: `${68 + (item.count / maxCount) * 58}px`, height: `${68 + (item.count / maxCount) * 58}px` }}>
+              <strong>{item.count}</strong>
+              <em>{item.label}</em>
+            </span>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function DashboardRankingCard({ title, subtitle, items = [] }) {
+  return (
+    <article className="panel dashboard-chart-panel">
+      <div className="section-title">
+        <div>
+          <h2>{title}</h2>
+          <span>{subtitle}</span>
+        </div>
+      </div>
+      <div className="dashboard-ranking">
+        {items.length === 0 ? (
+          <EmptyState title="Aucune donnée" text="Les données apparaîtront selon les dossiers accessibles." compact />
+        ) : items.map((item, index) => (
+          <div className="dashboard-rank-row" key={item.label}>
+            <span>{index + 1}</span>
+            <strong>{item.label}</strong>
+            <em>{item.count}</em>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function DashboardStatusMatrix({ entries = [] }) {
+  const maxCount = Math.max(1, ...entries.flatMap((entry) => [entry.active, entry.late, entry.closed]));
+  return (
+    <div className="dashboard-status-matrix">
+      <span className="matrix-head">Phase</span>
+      <span className="matrix-head">Actif</span>
+      <span className="matrix-head">Retard</span>
+      <span className="matrix-head">Clos</span>
+      {entries.length === 0 ? (
+        <span className="matrix-empty">Aucune donnée de phase.</span>
+      ) : entries.map((entry) => (
+        <Fragment key={entry.stage}>
+          <strong>{entry.label}</strong>
+          <i className="matrix-cell active" style={{ opacity: 0.25 + (entry.active / maxCount) * 0.75 }}>{entry.active}</i>
+          <i className="matrix-cell late" style={{ opacity: 0.25 + (entry.late / maxCount) * 0.75 }}>{entry.late}</i>
+          <i className="matrix-cell closed" style={{ opacity: 0.25 + (entry.closed / maxCount) * 0.75 }}>{entry.closed}</i>
+        </Fragment>
+      ))}
+    </div>
   );
 }
 
@@ -3310,6 +4091,7 @@ function ModificationsPage(props) {
   const canAdmin = isAdminUser(currentUser);
   const canValidate = canValidatePhases(currentUser);
   const canRequestValidation = isRequestPilot(currentUser, selectedRequest);
+  const canExportGantt = canAdmin || canRequestValidation;
   const currentValidation = phaseValidations.find((validation) => validation.stage === selectedStage && validation.status === "PENDING");
   const latestStageValidation = phaseValidations.find((validation) => validation.stage === selectedStage);
   const stageActionsDone = actions.length > 0 && actions.every(isActionDone);
@@ -3321,6 +4103,21 @@ function ModificationsPage(props) {
     setSelectedStage(safeStage(request.currentStage, Boolean(request.newVersion)));
     setDetailsCollapsed(false);
     setListOpen(false);
+  }
+
+  function exportModificationGanttPdf() {
+    if (!selectedRequest) return;
+    getActions(selectedRequest.id)
+      .then((requestActions) => {
+        const win = window.open("", "_blank");
+        if (!win) return;
+        win.document.write(modificationGanttPdfHtml(selectedRequest, requestActions, selectedStages));
+        win.document.close();
+        successToast("Gantt PDF genere");
+      })
+      .catch(() => {
+        errorAlert("Generation du diagramme de Gantt impossible.");
+      });
   }
 
   return (
@@ -3406,6 +4203,12 @@ function ModificationsPage(props) {
                   <FileText size={24} />
                   <span>Revue dossier</span>
                 </button>
+                {canExportGantt && (
+                  <button className="dossier-review-card" type="button" onClick={exportModificationGanttPdf} title="Extraire le diagramme de Gantt">
+                    <CalendarDays size={24} />
+                    <span>Gantt PDF</span>
+                  </button>
+                )}
                 {(selectedRequest.beforePhotoUrl || selectedRequest.afterPhotoUrl) && (
                   <div className="request-image-grid">
                     {selectedRequest.beforePhotoUrl && (
@@ -3829,7 +4632,7 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, h
                 <span><em>Pilote</em><strong>{action.responsible || "ì définir"}</strong></span>
                 <span><em>Validateur</em><strong>{action.validatorDisplayName || action.validator || "a definir"}</strong></span>
                 <span><em>Criticite</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>
-                <span><em>Blocage</em><strong className={isBlocked ? "status late" : action.dependsOnActionId ? "status done" : ""}>{action.dependsOnActionId ? `Par: ${blockingActionLabel(action, actions)}` : "Aucune"}</strong></span>
+                <span className="blocking-action-meta"><em>Blocage</em><strong className={isBlocked ? "status late" : action.dependsOnActionId ? "status done" : ""}>{action.dependsOnActionId ? `Par: ${blockingActionLabel(action, actions)}` : "Aucune"}</strong></span>
                 <span><em>Debut</em><strong>{action.startDate || "-"}</strong></span>
                 <span><em>Fin</em><strong>{action.endDate || "-"}</strong></span>
                 <span><em>Finalisation</em><strong>{formattedDateTime(action.finalizationDate)}</strong></span>
@@ -3947,10 +4750,10 @@ function ActionSuggestionDialog({ saving, suggestions, onAdd, onClose, onIgnore 
   );
 }
 
-function ActionRoleSelect({ options = [], placeholder = "Selectionner un role", value, onChange }) {
+function ActionRoleSelect({ options = [], placeholder = "Selectionner un role", required = false, value, onChange }) {
   const availableOptions = value && !options.includes(value) ? [value, ...options] : options;
   return (
-    <select value={value} onChange={(event) => onChange(event.target.value)}>
+    <select required={required} value={value} onChange={(event) => onChange(event.target.value)}>
       <option value="">{placeholder}</option>
       {availableOptions.map((role) => (
         <option key={role} value={role}>{role}</option>
@@ -3972,6 +4775,7 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
         aria-labelledby="create-action-title"
         aria-modal="true"
         className="dialog-card action-rule-dialog panel form-page"
+        noValidate
         onMouseDown={(event) => event.stopPropagation()}
         onSubmit={onSubmit}
         role="dialog"
@@ -4003,12 +4807,12 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
             <input value={actionForm.topicRisk} onChange={(event) => updateActionForm("topicRisk", event.target.value)} placeholder="Risque ou sujet" />
           </label>
           <label>
-            Responsable
-            <ActionRoleSelect options={actionRoleOptions} value={actionForm.responsible} onChange={(value) => updateActionForm("responsible", value)} />
+            Pilote d'action
+            <ActionRoleSelect required options={actionRoleOptions} value={actionForm.responsible} onChange={(value) => updateActionForm("responsible", value)} />
           </label>
           <label>
             Validateur
-            <ActionRoleSelect options={actionRoleOptions} value={actionForm.validator} onChange={(value) => updateActionForm("validator", value)} placeholder="Selectionner un role" />
+            <ActionRoleSelect required options={actionRoleOptions} value={actionForm.validator} onChange={(value) => updateActionForm("validator", value)} placeholder="Selectionner un role" />
           </label>
           <label>
             Criticite

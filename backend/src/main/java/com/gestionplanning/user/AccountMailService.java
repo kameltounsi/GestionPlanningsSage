@@ -168,6 +168,43 @@ public class AccountMailService {
         sendMessage(recipient.getEmail(), title, text, html, "action validation");
     }
 
+    public void sendActionDeadlineEmail(EcrRequest request, EcrAction action, AppUser recipient, String timingLabel, String timingMessage) {
+        if (!alertMailEnabled) {
+            throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");
+        }
+        if (request == null || action == null) {
+            return;
+        }
+        if (recipient == null || isBlank(recipient.getEmail())) {
+            throw new MailDeliveryException("Le pilote destinataire n'a pas d'adresse email renseignee.");
+        }
+        if (!isMailConfigured()) {
+            LOGGER.error("Action deadline email skipped because SMTP configuration is incomplete.");
+            throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
+        }
+        String phase = action.getStage() == null ? "-" : action.getStage().getLabel(request.isNewVersion());
+        String title = "Alerte echeance action - " + value(timingLabel);
+        String text = value(timingMessage)
+                + "\nAction: " + value(action.getTitle())
+                + "\nDate de fin: " + value(action.getEndDate() == null ? null : action.getEndDate().toString())
+                + "\nModification: " + value(request.getModificationNumber())
+                + "\nProjet: " + value(request.getModificationProject())
+                + "\nPhase: " + value(phase)
+                + "\nPilote action: " + value(action.getResponsible())
+                + "\nLien: " + value(applicationUrl);
+        String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
+                + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
+                + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
+                + "<div style=\"background:#3f6212;color:#ffffff;padding:24px 30px;\"><div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#d9f99d;\">Gestion Planning Sage</div>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Alerte echeance action</h1></div>"
+                + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
+                + "<p><strong>" + escape(value(timingLabel)) + "</strong> - " + escape(value(timingMessage)) + "</p>"
+                + "<p><strong>Action :</strong> " + escape(value(action.getTitle())) + "<br><strong>Date de fin :</strong> " + escape(value(action.getEndDate() == null ? null : action.getEndDate().toString())) + "<br><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Phase :</strong> " + escape(value(phase)) + "<br><strong>Pilote action :</strong> " + escape(value(action.getResponsible())) + "</p>"
+                + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#4d7c0f;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
+                + "</div></div></div></body></html>";
+        sendMessage(recipient.getEmail(), title, text, html, "action deadline");
+    }
+
     public void sendPhaseRejectedEmail(EcrRequest request, EcrStage stage, AppUser recipient, String reason, String actionsToRevisit) {
         if (!alertMailEnabled) {
             throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");

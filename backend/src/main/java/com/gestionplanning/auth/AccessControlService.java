@@ -3,6 +3,7 @@ package com.gestionplanning.auth;
 import com.gestionplanning.ecr.EcrRequest;
 import com.gestionplanning.ecr.PhaseValidationRequest;
 import com.gestionplanning.action.EcrAction;
+import com.gestionplanning.action.EcrActionRepository;
 import com.gestionplanning.project.ProjectReferenceRepository;
 import com.gestionplanning.user.AppUser;
 import com.gestionplanning.user.AppUserRepository;
@@ -22,10 +23,13 @@ import java.util.stream.Collectors;
 public class AccessControlService {
     private final ProjectReferenceRepository projectRepository;
     private final AppUserRepository userRepository;
+    private final EcrActionRepository actionRepository;
 
-    public AccessControlService(ProjectReferenceRepository projectRepository, AppUserRepository userRepository) {
+    public AccessControlService(ProjectReferenceRepository projectRepository, AppUserRepository userRepository,
+                                EcrActionRepository actionRepository) {
         this.projectRepository = projectRepository;
         this.userRepository = userRepository;
+        this.actionRepository = actionRepository;
     }
 
     public boolean isAdmin(AppUser user) {
@@ -47,7 +51,18 @@ public class AccessControlService {
         if (isAdmin(user)) {
             return true;
         }
-        return user != null && request != null && projectTeamTokens(request).stream().anyMatch(token -> matchesUser(user, token));
+        if (user == null || request == null) {
+            return false;
+        }
+        if (isRequestPilot(user, request)) {
+            return true;
+        }
+        if (projectTeamTokens(request).stream().anyMatch(token -> matchesUser(user, token))) {
+            return true;
+        }
+        return request.getId() != null
+                && actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId()).stream()
+                .anyMatch(action -> isActionParticipant(user, action));
     }
 
     public boolean canValidateRequest(AppUser user, EcrRequest request) {
@@ -85,11 +100,15 @@ public class AccessControlService {
     }
 
     public boolean canSeeAllActions(AppUser user, EcrRequest request) {
-        return isAdmin(user) || isRequestPilot(user, request);
+        return isAdmin(user);
     }
 
     public boolean canViewAction(AppUser user, EcrAction action) {
         if (canSeeAllActions(user, action == null ? null : action.getRequest())) {
+            return true;
+        }
+        if (action != null && action.getRequest() != null && isRequestPilot(user, action.getRequest())
+                && action.getStage() == action.getRequest().getCurrentStage()) {
             return true;
         }
         return isActionParticipant(user, action);

@@ -21,9 +21,9 @@ import java.net.URI;
 import java.util.Arrays;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @RestController
@@ -87,7 +87,8 @@ public class EcrActionController {
             templateService.ensureActionsFor(request);
             planningService.recalculateRequest(request);
             List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(requestId);
-            if (!accessControlService.canSeeAllActions(user, request)) {
+            if (!accessControlService.canSeeAllActions(user, request)
+                    && !(stage == null && accessControlService.isRequestPilot(user, request))) {
                 actions = visibleActionsForUser(actions, user);
             }
             if (stage != null) {
@@ -111,6 +112,12 @@ public class EcrActionController {
                     }
                     if (isDone(action) && requiresEvidence(action)) {
                         return ResponseEntity.badRequest().<EcrAction>build();
+                    }
+                    if (!hasText(action.getResponsible()) || !hasText(action.getValidator())) {
+                        return ResponseEntity.badRequest().<EcrAction>build();
+                    }
+                    if (!isActionStartBeforeNextPhase(request, action, null)) {
+                        return ResponseEntity.status(422).<EcrAction>build();
                     }
                     action.setRequest(request);
                     action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
@@ -143,6 +150,9 @@ public class EcrActionController {
                     }
                     if (isReopeningAction(action, updatedAction) && !isActionInCurrentPhase(action)) {
                         return ResponseEntity.badRequest().<EcrAction>build();
+                    }
+                    if (!isActionStartBeforeNextPhase(action.getRequest(), updatedAction, action.getId())) {
+                        return ResponseEntity.status(422).<EcrAction>build();
                     }
                     action.setTitle(updatedAction.getTitle());
                     action.setDescription(updatedAction.getDescription());
@@ -448,6 +458,59 @@ public class EcrActionController {
         return !isDone(currentAction) && isDone(updatedAction);
     }
 
+    private boolean isActionStartBeforeNextPhase(com.gestionplanning.ecr.EcrRequest request, EcrAction action, Long excludedActionId) {
+        if (request == null || request.getId() == null || action == null) {
+            return true;
+        }
+        EcrStage stage = action.getStage() == null ? request.getCurrentStage() : action.getStage();
+        List<EcrStage> stages = EcrStage.allowedStages(request.isNewVersion());
+        int stageIndex = stages.indexOf(stage);
+        if (stageIndex < 0 || stageIndex >= stages.size() - 1) {
+            return true;
+        }
+        List<EcrAction> requestActions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId()).stream()
+                .filter(item -> excludedActionId == null || !Objects.equals(item.getId(), excludedActionId))
+                .collect(Collectors.toList());
+        Optional<LocalDate> nextPhaseStart = requestActions.stream()
+                .filter(item -> stages.indexOf(item.getStage()) > stageIndex)
+                .map(EcrAction::getStartDate)
+                .filter(Objects::nonNull)
+                .min(LocalDate::compareTo);
+        if (!nextPhaseStart.isPresent()) {
+            return true;
+        }
+        LocalDate proposedStart = action.getStartDate() == null ? estimatedStartForNewLocalAction(request, stage, requestActions) : action.getStartDate();
+        return proposedStart == null || !proposedStart.isAfter(nextPhaseStart.get());
+    }
+
+    private LocalDate estimatedStartForNewLocalAction(com.gestionplanning.ecr.EcrRequest request, EcrStage stage, List<EcrAction> requestActions) {
+        LocalDate fallbackStart = request.getReceptionDate() == null ? LocalDate.now() : request.getReceptionDate();
+        List<EcrStage> stages = EcrStage.allowedStages(request.isNewVersion());
+        LocalDate phaseStart = fallbackStart;
+        for (EcrStage currentStage : stages) {
+            List<EcrAction> stageActions = requestActions.stream()
+                    .filter(item -> item.getStage() == currentStage)
+                    .collect(Collectors.toList());
+            if (currentStage == stage) {
+                return stageActions.stream()
+                        .map(EcrAction::getEndDate)
+                        .filter(Objects::nonNull)
+                        .max(LocalDate::compareTo)
+                        .map(date -> date.plusDays(1))
+                        .orElse(phaseStart);
+            }
+            if (!stageActions.isEmpty()) {
+                phaseStart = stageActions.stream()
+                        .map(EcrAction::getEndDate)
+                        .filter(Objects::nonNull)
+                        .max(LocalDate::compareTo)
+                        .map(date -> date.plusDays(1))
+                        .orElse(phaseStart);
+            }
+        }
+        return phaseStart;
+    }
+
     private void recordActionCompleted(AppUser user, EcrAction action) {
         String actionTitle = action.getTitle() == null || action.getTitle().trim().isEmpty()
                 ? "action sans titre"
@@ -573,31 +636,8 @@ public class EcrActionController {
     }
 
     private List<EcrAction> visibleActionsForUser(List<EcrAction> actions, AppUser user) {
-        Set<Long> visibleIds = actions.stream()
-                .filter(action -> accessControlService.canViewAction(user, enrichAction(action)))
-                .map(EcrAction::getId)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-        boolean changed;
-        do {
-            changed = false;
-            for (EcrAction action : actions) {
-                if (action.getId() == null || visibleIds.contains(action.getId())) {
-                    continue;
-                }
-                Long dependencyId = action.getDependsOnActionId();
-                boolean dependsOnVisibleAction = dependencyId != null && visibleIds.contains(dependencyId);
-                boolean visibleActionDependsOnThis = actions.stream()
-                        .anyMatch(item -> item.getId() != null
-                                && visibleIds.contains(item.getId())
-                                && action.getId().equals(item.getDependsOnActionId()));
-                if (dependsOnVisibleAction || visibleActionDependsOnThis) {
-                    visibleIds.add(action.getId());
-                    changed = true;
-                }
-            }
-        } while (changed);
         return actions.stream()
-                .filter(action -> action.getId() != null && visibleIds.contains(action.getId()))
+                .filter(action -> accessControlService.canViewAction(user, enrichAction(action)))
                 .collect(Collectors.toList());
     }
 

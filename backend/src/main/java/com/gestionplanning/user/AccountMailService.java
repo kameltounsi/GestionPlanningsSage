@@ -44,7 +44,7 @@ public class AccountMailService {
                               @Value("${spring.mail.properties.mail.smtp.auth:true}") boolean smtpAuth,
                               @Value("${spring.mail.properties.mail.smtp.starttls.enable:true}") boolean startTlsEnabled,
                               @Value("${spring.mail.properties.mail.smtp.starttls.required:true}") boolean startTlsRequired,
-                              @Value("${app.frontend.url:http://localhost:3000}") String applicationUrl,
+                              @Value("${app.frontend.url:http://192.168.1.117:3000}") String applicationUrl,
                               @Value("${app.account.mail.enabled:true}") boolean accountMailEnabled,
                               @Value("${app.alert.mail.enabled:true}") boolean alertMailEnabled) {
         this.host = host;

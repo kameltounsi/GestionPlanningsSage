@@ -2,15 +2,14 @@ pipeline {
     agent any
 
     environment {
-        // VM access fallback:
-        VM_HOST = '192.168.1.117'
-        FRONTEND_URL = 'http://192.168.1.117:3000'
-        BACKEND_URL = 'http://192.168.1.117:3001/api'
+        VM_HOST = 'localhost'
+        FRONTEND_URL = 'http://localhost:3000'
+        BACKEND_URL = 'http://localhost:3001/api'
 
         POSTGRES_DB = 'plannings'
         POSTGRES_USER = 'postgres'
         POSTGRES_HOST_PORT = '5433'
-        SPRING_DATASOURCE_URL = 'jdbc:postgresql://192.168.1.117:5433/plannings'
+        SPRING_DATASOURCE_URL = 'jdbc:postgresql://localhost:5433/plannings'
         SERVER_PORT = '3001'
         VITE_API_BASE_URL = '/api'
         SPRING_MAIL_HOST = 'smtp.gmail.com'

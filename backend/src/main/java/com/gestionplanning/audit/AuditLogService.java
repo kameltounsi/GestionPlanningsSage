@@ -70,7 +70,7 @@ public class AuditLogService {
     private String targetType(String actionType) {
         if ("CREATION_MODIFICATION".equals(actionType) || "MODIFICATION_MODIFICATION".equals(actionType)) return "modification";
         if ("VALIDATION_PHASE".equals(actionType) || "REOUVERTURE_PHASE".equals(actionType)) return "phase";
-        if ("ACTION_TERMINEE".equals(actionType) || "VALIDATION_ACTION".equals(actionType)) return "action";
+        if ("ACTION_TERMINEE".equals(actionType) || "VALIDATION_ACTION".equals(actionType) || "REFUS_VALIDATION_ACTION".equals(actionType)) return "action";
         if ("AJOUT_CLIENT".equals(actionType)) return "client";
         if ("AJOUT_PRODUIT".equals(actionType)) return "produit";
         if ("AJOUT_PROJET".equals(actionType) || "MODIFICATION_PROJET_EQUIPE".equals(actionType)) return "projet";
@@ -108,6 +108,7 @@ public class AuditLogService {
         if ("REOUVERTURE_PHASE".equals(actionType)) return "Reouverture d'une phase";
         if ("ACTION_TERMINEE".equals(actionType)) return "Action marquee terminee";
         if ("VALIDATION_ACTION".equals(actionType)) return "Validation d'une action";
+        if ("REFUS_VALIDATION_ACTION".equals(actionType)) return "Refus de validation d'une action";
         if ("AJOUT_CLIENT".equals(actionType)) return "Ajout d'un client";
         if ("AJOUT_PRODUIT".equals(actionType)) return "Ajout d'un produit";
         if ("AJOUT_PROJET".equals(actionType)) return "Ajout d'un projet";

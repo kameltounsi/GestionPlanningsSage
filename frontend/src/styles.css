@@ -2925,6 +2925,31 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   width: max-content;
 }
 
+.action-validation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.action-validation-button.reject {
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.action-refusal-reason {
+  color: #991b1b;
+  font-size: 12px;
+  line-height: 1.4;
+  max-width: 220px;
+  white-space: normal;
+}
+
+.dossier-review-editor[readonly] {
+  background: #f8fafc;
+  color: #334155;
+  cursor: default;
+}
+
 .swal-action-list-title {
   color: #475569;
   font-size: 13px;

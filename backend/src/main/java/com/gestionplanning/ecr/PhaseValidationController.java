@@ -13,7 +13,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -79,6 +82,7 @@ public class PhaseValidationController {
                         action.setValidationRequestedAt(LocalDateTime.now());
                         action.setValidationReviewedAt(null);
                         action.setValidationReviewedBy(null);
+                        action.setValidationRefusalReason(null);
                     });
                     actionRepository.saveAll(actions);
                     for (EcrAction action : actions) {
@@ -87,6 +91,40 @@ public class PhaseValidationController {
                         accountMailService.sendActionValidationEmail(request, stage, action, recipient);
                     }
                     return ResponseEntity.ok(enrichValidation(saved));
+                })
+                .orElse(ResponseEntity.status(403).<PhaseValidationRequest>build());
+    }
+
+    @PostMapping("/{validationId}/actions/{actionId}/request")
+    @Transactional
+    public ResponseEntity<PhaseValidationRequest> requestActionValidation(@PathVariable Long requestId,
+                                                                          @PathVariable Long validationId,
+                                                                          @PathVariable Long actionId,
+                                                                          @RequestAttribute("authenticatedUser") AppUser user) {
+        Optional<PhaseValidationRequest> validationItem = validationRepository.findById(validationId);
+        if (!validationItem.isPresent()) {
+            return ResponseEntity.status(403).<PhaseValidationRequest>build();
+        }
+        PhaseValidationRequest validation = validationItem.get();
+        if (!isOpenCurrentValidation(validation, requestId)) {
+            return ResponseEntity.status(403).<PhaseValidationRequest>build();
+        }
+        return actionRepository.findById(actionId)
+                .filter(action -> action.getRequestId().equals(requestId))
+                .filter(action -> action.getStage() == validation.getStage())
+                .filter(action -> action.getValidationStatus() == ActionValidationStatus.REJECTED)
+                .filter(this::isDone)
+                .filter(action -> canRequestActionValidation(user, action))
+                .map(action -> {
+                    action.setValidationStatus(ActionValidationStatus.PENDING);
+                    action.setValidationRequestedAt(LocalDateTime.now());
+                    action.setValidationReviewedAt(null);
+                    action.setValidationReviewedBy(null);
+                    action.setValidationRefusalReason(null);
+                    actionRepository.save(action);
+                    accessControlService.validationRecipientFor(action)
+                            .ifPresent(recipient -> accountMailService.sendActionValidationEmail(validation.getRequest(), validation.getStage(), action, recipient));
+                    return ResponseEntity.ok(enrichValidation(validation));
                 })
                 .orElse(ResponseEntity.status(403).<PhaseValidationRequest>build());
     }
@@ -116,6 +154,7 @@ public class PhaseValidationController {
                     action.setValidationStatus(ActionValidationStatus.APPROVED);
                     action.setValidationReviewedAt(LocalDateTime.now());
                     action.setValidationReviewedBy(displayName(user));
+                    action.setValidationRefusalReason(null);
                     actionRepository.save(action);
                     auditLogService.recordBusinessEvent(
                             user,
@@ -143,6 +182,53 @@ public class PhaseValidationController {
                         );
                     }
                     return ResponseEntity.ok(enrichValidation(updatedValidation));
+                })
+                .orElse(ResponseEntity.status(403).<PhaseValidationRequest>build());
+    }
+
+    @PostMapping("/{validationId}/actions/{actionId}/reject")
+    @Transactional
+    public ResponseEntity<PhaseValidationRequest> rejectAction(@PathVariable Long requestId,
+                                                               @PathVariable Long validationId,
+                                                               @PathVariable Long actionId,
+                                                               @RequestBody ValidationDecisionRequest payload,
+                                                               @RequestAttribute("authenticatedUser") AppUser user) {
+        Optional<PhaseValidationRequest> validationItem = validationRepository.findById(validationId);
+        if (!validationItem.isPresent()) {
+            return ResponseEntity.status(403).<PhaseValidationRequest>build();
+        }
+        PhaseValidationRequest validation = validationItem.get();
+        if (!isOpenCurrentValidation(validation, requestId)) {
+            return ResponseEntity.status(403).<PhaseValidationRequest>build();
+        }
+        String reason = payload == null ? null : payload.getReason();
+        if (reason == null || reason.trim().isEmpty()) {
+            return ResponseEntity.badRequest().<PhaseValidationRequest>build();
+        }
+        return actionRepository.findById(actionId)
+                .filter(action -> action.getRequestId().equals(requestId))
+                .filter(action -> action.getStage() == validation.getStage())
+                .filter(action -> isActionAwaitingValidation(action, validation))
+                .filter(action -> accessControlService.canValidateAction(user, action))
+                .map(action -> {
+                    action.setValidationStatus(ActionValidationStatus.REJECTED);
+                    action.setValidationReviewedAt(LocalDateTime.now());
+                    action.setValidationReviewedBy(displayName(user));
+                    action.setValidationRefusalReason(reason.trim());
+                    action.setChecked(false);
+                    action.setStatus(ActionStatus.TODO);
+                    action.setClosedDate(null);
+                    action.setFinalizationDate(null);
+                    actionRepository.save(action);
+                    notifyActionRejected(validation.getRequest(), validation.getStage(), action, reason.trim());
+                    auditLogService.recordBusinessEvent(
+                            user,
+                            "REFUS_VALIDATION_ACTION",
+                            "action",
+                            action.getId() == null ? null : String.valueOf(action.getId()),
+                            "Refus de validation de l'action: " + actionLabel(action) + " - Modification: " + requestLabel(action.getRequest()) + " - Motif: " + reason.trim()
+                    );
+                    return ResponseEntity.ok(enrichValidation(validation));
                 })
                 .orElse(ResponseEntity.status(403).<PhaseValidationRequest>build());
     }
@@ -227,7 +313,34 @@ public class PhaseValidationController {
         return action != null
                 && validation != null
                 && validation.getStatus() == PhaseValidationStatus.PENDING
-                && action.getValidationStatus() != ActionValidationStatus.APPROVED;
+                && action.getValidationStatus() == ActionValidationStatus.PENDING;
+    }
+
+    private boolean isOpenCurrentValidation(PhaseValidationRequest validation, Long requestId) {
+        return validation != null
+                && validation.getRequestId().equals(requestId)
+                && validation.getStatus() == PhaseValidationStatus.PENDING
+                && validation.getStage() == validation.getRequest().getCurrentStage();
+    }
+
+    private boolean canRequestActionValidation(AppUser user, EcrAction action) {
+        return accessControlService.isRequestPilot(user, action.getRequest())
+                || accessControlService.canCompleteAction(user, action);
+    }
+
+    private void notifyActionRejected(EcrRequest request, EcrStage stage, EcrAction action, String reason) {
+        Map<String, AppUser> recipients = new LinkedHashMap<>();
+        accessControlService.projectLeadFor(request)
+                .ifPresent(user -> recipients.put(normalizeEmail(user.getEmail()), user));
+        accessControlService.actionPilotFor(action)
+                .ifPresent(user -> recipients.put(normalizeEmail(user.getEmail()), user));
+        recipients.values().stream()
+                .filter(user -> user.getEmail() != null && !user.getEmail().trim().isEmpty())
+                .forEach(user -> accountMailService.sendActionRejectedEmail(request, stage, action, user, reason));
+    }
+
+    private String normalizeEmail(String email) {
+        return email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
     }
 
     private boolean allValidationActionsApproved(PhaseValidationRequest validation) {

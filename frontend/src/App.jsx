@@ -20,7 +20,8 @@ import {
   Search,
   Trash2,
   Upload,
-  X
+  X,
+  XCircle
 } from "lucide-react";
 import {
   createAction,
@@ -84,7 +85,9 @@ import {
   approvePhaseValidation,
   changeUserPassword,
   getPhaseValidations,
+  rejectActionValidation,
   rejectPhaseValidation,
+  requestActionValidation,
   requestPhaseValidation,
   uploadUserPhoto
 } from "./api";
@@ -128,6 +131,7 @@ const visibleAuditActionTypes = [
   "REOUVERTURE_PHASE",
   "ACTION_TERMINEE",
   "VALIDATION_ACTION",
+  "REFUS_VALIDATION_ACTION",
   "AJOUT_CLIENT",
   "AJOUT_PRODUIT",
   "AJOUT_PROJET",
@@ -628,7 +632,13 @@ function isUndefinedValidatorToken(value) {
 }
 
 function isActionAwaitingValidation(action, phaseValidation) {
-  return phaseValidation?.status === "PENDING" && action?.validationStatus !== "APPROVED";
+  return phaseValidation?.status === "PENDING" && action?.validationStatus === "PENDING";
+}
+
+function canRequestRejectedActionValidationForUser(user, action, request) {
+  return action?.validationStatus === "REJECTED"
+    && isActionDone(action)
+    && (isRequestPilot(user, request) || isActionPilotForUser(user, action));
 }
 
 function canToggleActionForUser(user, action, request) {
@@ -1120,6 +1130,10 @@ function App() {
 
   function handleUpdateDossierReview(request, dossierReview) {
     if (!request) return Promise.resolve();
+    if (!isAdminUser(currentUser) && !isRequestPilot(currentUser, request)) {
+      warningAlert("Lecture seule", "Seul le pilote de la modification ou l'admin peut modifier la revue dossier.");
+      return Promise.reject(new Error("Revue dossier en lecture seule."));
+    }
     const payload = {
       ...buildEcrPayload(requestToEcrForm(request)),
       dossierReview
@@ -1507,6 +1521,49 @@ function App() {
           return refreshSelectedData(selectedRequest.id, nextStage);
         })
       .catch((exception) => errorAlert(exception?.message || "Validation de l'action impossible."))
+      .finally(() => setSaving(false));
+  }
+
+  function handleRejectActionValidation(validation, action) {
+    if (!selectedRequest || !validation || !action) return;
+    Swal.fire({
+      ...swalButtons,
+      title: "Refuser l'action ?",
+      html: `<textarea id="action-refusal-reason" class="swal2-textarea" placeholder="Motif du refus"></textarea>`,
+      showCancelButton: true,
+      confirmButtonText: "Refuser",
+      cancelButtonText: "Annuler",
+      confirmButtonColor: "#b42318",
+      preConfirm: () => {
+        const reason = document.getElementById("action-refusal-reason")?.value.trim();
+        if (!reason) {
+          Swal.showValidationMessage("Indiquez le motif du refus.");
+          return false;
+        }
+        return { reason };
+      }
+    }).then((result) => {
+      if (!result.isConfirmed) return;
+      setSaving(true);
+      rejectActionValidation(selectedRequest.id, validation.id, action.id, result.value)
+        .then(() => {
+          successToast("Action refusee");
+          return refreshSelectedData(selectedRequest.id, selectedStage);
+        })
+        .catch((exception) => errorAlert(exception?.message || "Refus de l'action impossible."))
+        .finally(() => setSaving(false));
+    });
+  }
+
+  function handleRequestActionValidation(validation, action) {
+    if (!selectedRequest || !validation || !action) return;
+    setSaving(true);
+    requestActionValidation(selectedRequest.id, validation.id, action.id)
+      .then(() => {
+        successToast("Validation de l'action redemandee");
+        return refreshSelectedData(selectedRequest.id, selectedStage);
+      })
+      .catch((exception) => errorAlert(exception?.message || "Redemande de validation impossible. Verifiez que l'action est terminee."))
       .finally(() => setSaving(false));
   }
 
@@ -2270,6 +2327,8 @@ function App() {
             handleUploadEvidence={handleUploadEvidence}
             handleApprovePhase={handleApprovePhase}
             handleApproveActionValidation={handleApproveActionValidation}
+            handleRejectActionValidation={handleRejectActionValidation}
+            handleRequestActionValidation={handleRequestActionValidation}
             handleRejectPhase={handleRejectPhase}
             handleReopenPhase={handleReopenPhase}
             handleRequestPhaseValidation={handleRequestPhaseValidation}
@@ -2899,6 +2958,7 @@ function auditActionLabel(actionType) {
     REOUVERTURE_PHASE: "Reouverture d'une phase",
     ACTION_TERMINEE: "Action marquee terminee",
     VALIDATION_ACTION: "Validation d'une action",
+    REFUS_VALIDATION_ACTION: "Refus de validation d'une action",
     AJOUT_CLIENT: "Ajout d'un client",
     AJOUT_PRODUIT: "Ajout d'un produit",
     AJOUT_PROJET: "Ajout d'un projet",
@@ -2930,6 +2990,9 @@ function normalizeAuditLog(log) {
     normalizedTargetType = "phase";
   } else if (method === "POST" && path.match(/\/phase-validations\/\d+\/actions\/\d+\/approve$/)) {
     actionType = "VALIDATION_ACTION";
+    normalizedTargetType = "action";
+  } else if (method === "POST" && path.match(/\/phase-validations\/\d+\/actions\/\d+\/reject$/)) {
+    actionType = "REFUS_VALIDATION_ACTION";
     normalizedTargetType = "action";
   } else if (method === "PUT" && targetType === "actions") {
     actionType = "ACTION_TERMINEE";
@@ -2981,6 +3044,7 @@ function auditActionSentence(log) {
     REOUVERTURE_PHASE: "Reouverture d'une phase",
     ACTION_TERMINEE: "Action marquee comme terminee",
     VALIDATION_ACTION: "Validation d'une action",
+    REFUS_VALIDATION_ACTION: "Refus de validation d'une action",
     AJOUT_CLIENT: "Ajout d'un client",
     AJOUT_PRODUIT: "Ajout d'un produit",
     AJOUT_PROJET: "Ajout d'un projet",
@@ -3009,6 +3073,7 @@ function auditFriendlyDetail(log) {
     REOUVERTURE_PHASE: `Phase rouverte${target ? ` pour ${target}` : ""}.`,
     ACTION_TERMINEE: `Action terminee${target ? `: ${target}` : ""}.`,
     VALIDATION_ACTION: `Action validee${target ? `: ${target}` : ""}.`,
+    REFUS_VALIDATION_ACTION: `Action refusee${target ? `: ${target}` : ""}.`,
     AJOUT_CLIENT: "Nouveau client ajoute au referentiel.",
     AJOUT_PRODUIT: "Nouveau produit ajoute au referentiel.",
     AJOUT_PROJET: "Nouveau projet ajoute.",
@@ -3023,6 +3088,7 @@ function auditTargetSummary(log) {
     CREATION_MODIFICATION: "Modification",
     MODIFICATION_MODIFICATION: "Modification",
     VALIDATION_ACTION: "Action",
+    REFUS_VALIDATION_ACTION: "Action",
     AJOUT_CLIENT: "Client",
     AJOUT_PRODUIT: "Produit",
     AJOUT_PROJET: "Projet",
@@ -3040,7 +3106,7 @@ function auditTargetHint(log) {
 }
 
 function auditRelatedModification(log) {
-  if (!["ACTION_TERMINEE", "VALIDATION_PHASE", "REOUVERTURE_PHASE"].includes(log.actionType)) return "";
+  if (!["ACTION_TERMINEE", "VALIDATION_PHASE", "REOUVERTURE_PHASE", "REFUS_VALIDATION_ACTION"].includes(log.actionType)) return "";
   const detailModification = auditDetailSegment(log.details, "Modification");
   if (detailModification) return detailModification;
   return log.targetType === "modification" ? String(log.targetId || "").trim() : "";
@@ -3069,6 +3135,7 @@ function userFriendlyStoredAuditDetail(detail) {
     "Phase reouverte:",
     "Action marquee terminee:",
     "Validation de l'action:",
+    "Refus de validation de l'action:",
     "Ajout du client:",
     "Ajout du produit:",
     "Ajout du projet:",
@@ -4064,6 +4131,8 @@ function ModificationsPage(props) {
     handleUploadEvidence,
     handleApprovePhase,
     handleApproveActionValidation,
+    handleRejectActionValidation,
+    handleRequestActionValidation,
     handleRejectPhase,
     handleReopenPhase,
     handleRequestPhaseValidation,
@@ -4091,6 +4160,7 @@ function ModificationsPage(props) {
   const canAdmin = isAdminUser(currentUser);
   const canValidate = canValidatePhases(currentUser);
   const canRequestValidation = isRequestPilot(currentUser, selectedRequest);
+  const canManageDossierReview = canAdmin || canRequestValidation;
   const canExportGantt = canAdmin || canRequestValidation;
   const currentValidation = phaseValidations.find((validation) => validation.stage === selectedStage && validation.status === "PENDING");
   const latestStageValidation = phaseValidations.find((validation) => validation.stage === selectedStage);
@@ -4270,6 +4340,8 @@ function ModificationsPage(props) {
                   handleToggleAction={handleToggleAction}
 
                   handleApproveActionValidation={handleApproveActionValidation}
+                  handleRejectActionValidation={handleRejectActionValidation}
+                  handleRequestActionValidation={handleRequestActionValidation}
                   handleDeleteActionAsset={handleDeleteActionAsset}
                   handleUploadEvidence={handleUploadEvidence}
                   isCriticalAction={isCriticalAction}
@@ -4355,6 +4427,7 @@ function ModificationsPage(props) {
       )}
       {dossierDialogOpen && selectedRequest && (
         <DossierReviewDialog
+          canManage={canManageDossierReview}
           request={selectedRequest}
           saving={saving}
           onClose={() => setDossierDialogOpen(false)}
@@ -4365,20 +4438,26 @@ function ModificationsPage(props) {
   );
 }
 
-function DossierReviewDialog({ request, saving, onClose, onSubmit }) {
+function DossierReviewDialog({ canManage, request, saving, onClose, onSubmit }) {
   const [value, setValue] = useState(request.dossierReview || "");
   const fileBaseName = `revue-dossier-${fileNameToken(requestDisplayName(request))}`;
 
   function submit(event) {
     event.preventDefault();
+    if (!canManage) {
+      onClose();
+      return;
+    }
     onSubmit(value).then(() => onClose()).catch(() => {});
   }
 
   function exportTxt() {
+    if (!canManage) return;
     downloadTextFile(`${fileBaseName}.txt`, dossierReviewExportText(request, value));
   }
 
   function exportPdf() {
+    if (!canManage) return;
     const title = `Revue dossier - ${requestDisplayName(request)}`;
     const win = window.open("", "_blank");
     if (!win) return;
@@ -4404,7 +4483,7 @@ function DossierReviewDialog({ request, saving, onClose, onSubmit }) {
       >
         <header className="actions-dialog-header">
           <div>
-            <p className="eyebrow">Document modifiable</p>
+            <p className="eyebrow">{canManage ? "Document modifiable" : "Lecture seule"}</p>
             <h2 id="dossier-review-title">Revue dossier</h2>
             <span>{dossierReviewMetaLine(request)}</span>
           </div>
@@ -4412,21 +4491,25 @@ function DossierReviewDialog({ request, saving, onClose, onSubmit }) {
             <X size={18} />
           </button>
         </header>
-        <textarea className="dossier-review-editor" value={value} onChange={(event) => setValue(event.target.value)} placeholder="Ajouter les notes de revue, decisions, points ouverts, actions a suivre..." />
+        <textarea className="dossier-review-editor" readOnly={!canManage} value={value} onChange={(event) => setValue(event.target.value)} placeholder="Ajouter les notes de revue, decisions, points ouverts, actions a suivre..." />
         <div className="button-row dossier-review-actions">
-          <button className="primary-action" disabled={saving} type="submit">
-            <Save size={16} />
-            Enregistrer
-          </button>
-          <button className="secondary-action" type="button" onClick={exportTxt}>
-            <FileText size={16} />
-            Export TXT
-          </button>
-          <button className="secondary-action" type="button" onClick={exportPdf}>
-            <FileText size={16} />
-            Export PDF
-          </button>
-          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
+          {canManage && (
+            <>
+              <button className="primary-action" disabled={saving} type="submit">
+                <Save size={16} />
+                Enregistrer
+              </button>
+              <button className="secondary-action" type="button" onClick={exportTxt}>
+                <FileText size={16} />
+                Export TXT
+              </button>
+              <button className="secondary-action" type="button" onClick={exportPdf}>
+                <FileText size={16} />
+                Export PDF
+              </button>
+            </>
+          )}
+          <button className="secondary-action" type="button" onClick={onClose}>{canManage ? "Annuler" : "Fermer"}</button>
         </div>
       </form>
     </div>
@@ -4504,7 +4587,7 @@ function phaseValidationStatusLabel(status) {
   return "Phase refusee";
 }
 
-function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleToggleAction, handleApproveActionValidation, handleDeleteActionAsset, handleUploadEvidence, isCriticalAction, lateActions, phaseValidation, requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm }) {
+function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleToggleAction, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, isCriticalAction, lateActions, phaseValidation, requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm }) {
   const [expanded, setExpanded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const stageTitle = stageLabel(selectedStage, stageNewProject);
@@ -4543,6 +4626,8 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
         currentUser={currentUser}
         phaseValidation={phaseValidation}
         handleApproveActionValidation={handleApproveActionValidation}
+        handleRejectActionValidation={handleRejectActionValidation}
+        handleRequestActionValidation={handleRequestActionValidation}
         handleToggleAction={handleToggleAction}
         handleDeleteActionAsset={handleDeleteActionAsset}
         handleUploadEvidence={handleUploadEvidence}
@@ -4577,6 +4662,8 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
               currentUser={currentUser}
               phaseValidation={phaseValidation}
               handleApproveActionValidation={handleApproveActionValidation}
+              handleRejectActionValidation={handleRejectActionValidation}
+              handleRequestActionValidation={handleRequestActionValidation}
               expanded
               handleToggleAction={handleToggleAction}
               handleDeleteActionAsset={handleDeleteActionAsset}
@@ -4608,7 +4695,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
   );
 }
 
-function ActionList({ actions, currentUser, expanded = false, phaseValidation, handleToggleAction, handleApproveActionValidation, handleDeleteActionAsset, handleUploadEvidence, requiresEvidence, saving, selectedRequest }) {
+function ActionList({ actions, currentUser, expanded = false, phaseValidation, handleToggleAction, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, requiresEvidence, saving, selectedRequest }) {
   return (
     <>
       <div className={expanded ? "action-list expanded" : "action-list"}>
@@ -4673,16 +4760,29 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, h
                 {phaseValidation && (
                   <span className="action-validation-cell">
                     <em>Validation</em>
-                    <small className={`status ${action.validationStatus === "APPROVED" ? "done" : "in_progress"}`}>
-                      {action.validationStatus === "APPROVED" ? "Validee" : "En attente"}
+                    <small className={`status ${action.validationStatus === "APPROVED" ? "done" : action.validationStatus === "REJECTED" ? "late" : "in_progress"}`}>
+                      {action.validationStatus === "APPROVED" ? "Validee" : action.validationStatus === "REJECTED" ? "Refusee" : "En attente"}
                     </small>
                     {isActionAwaitingValidation(action, phaseValidation) && canValidateActionForUser(currentUser, action) && (
-                      <button className="primary-action compact-action action-validation-button" disabled={saving} type="button" onClick={() => handleApproveActionValidation(phaseValidation, action)}>
+                      <span className="action-validation-actions">
+                        <button className="secondary-action compact-action action-validation-button reject" disabled={saving} type="button" onClick={() => handleRejectActionValidation(phaseValidation, action)}>
+                          <XCircle size={14} />
+                          Refuser
+                        </button>
+                        <button className="primary-action compact-action action-validation-button" disabled={saving} type="button" onClick={() => handleApproveActionValidation(phaseValidation, action)}>
+                          <CheckCircle2 size={14} />
+                          Valider
+                        </button>
+                      </span>
+                    )}
+                    {canRequestRejectedActionValidationForUser(currentUser, action, selectedRequest) && phaseValidation?.status === "PENDING" && (
+                      <button className="primary-action compact-action action-validation-button" disabled={saving} type="button" onClick={() => handleRequestActionValidation(phaseValidation, action)}>
                         <CheckCircle2 size={14} />
-                        Valider
+                        Redemander validation
                       </button>
                     )}
                     {action.validationReviewedBy && <strong>{action.validationReviewedBy}</strong>}
+                    {action.validationRefusalReason && <strong className="action-refusal-reason">Motif: {action.validationRefusalReason}</strong>}
                   </span>
                 )}
               </div>

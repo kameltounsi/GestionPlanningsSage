@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001/api";
 const SESSION_KEY = "gestionPlanningSession";
 
 export function getStoredSession() {
@@ -150,6 +150,19 @@ export function rejectPhaseValidation(requestId, validationId, payload) {
 
 export function approveActionValidation(requestId, validationId, actionId) {
   return request(`/ecr-requests/${requestId}/phase-validations/${validationId}/actions/${actionId}/approve`, {
+    method: "POST"
+  });
+}
+
+export function rejectActionValidation(requestId, validationId, actionId, payload) {
+  return request(`/ecr-requests/${requestId}/phase-validations/${validationId}/actions/${actionId}/reject`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function requestActionValidation(requestId, validationId, actionId) {
+  return request(`/ecr-requests/${requestId}/phase-validations/${validationId}/actions/${actionId}/request`, {
     method: "POST"
   });
 }

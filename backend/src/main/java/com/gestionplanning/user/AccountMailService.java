@@ -44,7 +44,7 @@ public class AccountMailService {
                               @Value("${spring.mail.properties.mail.smtp.auth:true}") boolean smtpAuth,
                               @Value("${spring.mail.properties.mail.smtp.starttls.enable:true}") boolean startTlsEnabled,
                               @Value("${spring.mail.properties.mail.smtp.starttls.required:true}") boolean startTlsRequired,
-                              @Value("${app.frontend.url:http://192.168.1.117:3000}") String applicationUrl,
+                              @Value("${app.frontend.url:http://localhost:3000}") String applicationUrl,
                               @Value("${app.account.mail.enabled:true}") boolean accountMailEnabled,
                               @Value("${app.alert.mail.enabled:true}") boolean alertMailEnabled) {
         this.host = host;
@@ -168,6 +168,46 @@ public class AccountMailService {
         sendMessage(recipient.getEmail(), title, text, html, "action validation");
     }
 
+    public void sendActionRejectedEmail(EcrRequest request, EcrStage stage, EcrAction action, AppUser recipient, String reason) {
+        if (!alertMailEnabled) {
+            throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");
+        }
+        if (request == null || action == null) {
+            return;
+        }
+        if (recipient == null || isBlank(recipient.getEmail())) {
+            throw new MailDeliveryException("Le destinataire du refus d'action n'a pas d'adresse email renseignee.");
+        }
+        if (!isMailConfigured()) {
+            LOGGER.error("Action rejection email skipped because SMTP configuration is incomplete.");
+            throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
+        }
+        String phase = stage == null ? "-" : stage.getLabel(request.isNewVersion());
+        String modificationName = modificationName(request);
+        String title = "Action refusee - revision requise";
+        String text = "L'action " + value(action.getTitle())
+                + " a ete refusee et doit etre revisitee."
+                + "\nMotif du refus: " + value(reason)
+                + "\nModification: " + value(request.getModificationNumber())
+                + "\nNom de la modification: " + value(modificationName)
+                + "\nProjet: " + value(request.getModificationProject())
+                + "\nPhase: " + value(phase)
+                + "\nPilote action: " + value(action.getResponsible())
+                + "\nLien: " + value(applicationUrl);
+        String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
+                + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
+                + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
+                + "<div style=\"background:#7f1d1d;color:#ffffff;padding:24px 30px;\"><div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#fecaca;\">Gestion Planning Sage</div>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Action refusee</h1></div>"
+                + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
+                + "<p>L'action <strong>" + escape(value(action.getTitle())) + "</strong> a ete refusee et doit etre revisitee.</p>"
+                + "<p><strong>Motif du refus :</strong><br>" + escape(value(reason)).replace("\n", "<br>") + "</p>"
+                + "<p><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Phase :</strong> " + escape(value(phase)) + "<br><strong>Pilote action :</strong> " + escape(value(action.getResponsible())) + "</p>"
+                + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#b42318;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Revisiter l'action</a></div>"
+                + "</div></div></div></body></html>";
+        sendMessage(recipient.getEmail(), title, text, html, "action rejection");
+    }
+
     public void sendActionDeadlineEmail(EcrRequest request, EcrAction action, AppUser recipient, String timingLabel, String timingMessage) {
         if (!alertMailEnabled) {
             throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");
@@ -183,11 +223,13 @@ public class AccountMailService {
             throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
         }
         String phase = action.getStage() == null ? "-" : action.getStage().getLabel(request.isNewVersion());
+        String modificationName = modificationName(request);
         String title = "Alerte echeance action - " + value(timingLabel);
         String text = value(timingMessage)
                 + "\nAction: " + value(action.getTitle())
                 + "\nDate de fin: " + value(action.getEndDate() == null ? null : action.getEndDate().toString())
                 + "\nModification: " + value(request.getModificationNumber())
+                + "\nNom de la modification: " + value(modificationName)
                 + "\nProjet: " + value(request.getModificationProject())
                 + "\nPhase: " + value(phase)
                 + "\nPilote action: " + value(action.getResponsible())
@@ -199,7 +241,7 @@ public class AccountMailService {
                 + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Alerte echeance action</h1></div>"
                 + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
                 + "<p><strong>" + escape(value(timingLabel)) + "</strong> - " + escape(value(timingMessage)) + "</p>"
-                + "<p><strong>Action :</strong> " + escape(value(action.getTitle())) + "<br><strong>Date de fin :</strong> " + escape(value(action.getEndDate() == null ? null : action.getEndDate().toString())) + "<br><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Phase :</strong> " + escape(value(phase)) + "<br><strong>Pilote action :</strong> " + escape(value(action.getResponsible())) + "</p>"
+                + "<p><strong>Action :</strong> " + escape(value(action.getTitle())) + "<br><strong>Date de fin :</strong> " + escape(value(action.getEndDate() == null ? null : action.getEndDate().toString())) + "<br><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Phase :</strong> " + escape(value(phase)) + "<br><strong>Pilote action :</strong> " + escape(value(action.getResponsible())) + "</p>"
                 + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#4d7c0f;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
                 + "</div></div></div></body></html>";
         sendMessage(recipient.getEmail(), title, text, html, "action deadline");
@@ -382,6 +424,22 @@ public class AccountMailService {
         String safeName = value(fullName);
         int spaceIndex = safeName.indexOf(' ');
         return spaceIndex > 0 ? safeName.substring(0, spaceIndex) : safeName;
+    }
+
+    private String modificationName(EcrRequest request) {
+        if (request == null) {
+            return "-";
+        }
+        if (!isBlank(request.getModificationNumber())) {
+            return request.getModificationNumber();
+        }
+        if (!isBlank(request.getClient())) {
+            return request.getClient();
+        }
+        if (!isBlank(request.getProduct())) {
+            return request.getProduct();
+        }
+        return request.getId() == null ? "-" : "Modification " + request.getId();
     }
 
     private String value(Object value) {

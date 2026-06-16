@@ -191,6 +191,20 @@ public class AccessControlService {
         return defaultAdminFor(action.getRequest());
     }
 
+    public Optional<AppUser> actionPilotFor(EcrAction action) {
+        if (action == null) {
+            return Optional.empty();
+        }
+        String responsible = firstNonBlank(action.getResponsible());
+        if (responsible.isEmpty()) {
+            return Optional.empty();
+        }
+        return userRepository.findAll().stream()
+                .filter(AppUser::isEnabled)
+                .filter(user -> matchesActionAssignment(user, responsible))
+                .findFirst();
+    }
+
     private Optional<AppUser> defaultAdminFor(EcrRequest request) {
         Set<String> team = projectTeamTokens(request);
         Optional<AppUser> teamAdmin = userRepository.findAll().stream()

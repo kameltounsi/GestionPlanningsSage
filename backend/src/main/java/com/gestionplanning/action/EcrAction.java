@@ -102,6 +102,8 @@ public class EcrAction {
     private LocalDateTime validationRequestedAt;
     private LocalDateTime validationReviewedAt;
     private String validationReviewedBy;
+    @Column(length = 3000)
+    private String validationRefusalReason;
 
     @Column(length = 2000)
     private String comment;
@@ -467,6 +469,14 @@ public class EcrAction {
 
     public void setValidationReviewedBy(String validationReviewedBy) {
         this.validationReviewedBy = validationReviewedBy;
+    }
+
+    public String getValidationRefusalReason() {
+        return validationRefusalReason;
+    }
+
+    public void setValidationRefusalReason(String validationRefusalReason) {
+        this.validationRefusalReason = validationRefusalReason;
     }
 
     public String getComment() {

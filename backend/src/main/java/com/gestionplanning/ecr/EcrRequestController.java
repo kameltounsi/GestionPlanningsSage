@@ -24,6 +24,7 @@ import org.springframework.web.multipart.MultipartFile;
 import javax.validation.Valid;
 import java.net.URI;
 import java.util.List;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/ecr-requests")
@@ -111,6 +112,10 @@ public class EcrRequestController {
         return requestRepository.findById(id)
                 .filter(request -> accessControlService.canAccessRequest(user, request))
                 .map(request -> {
+                    if (dossierReviewChanged(request.getDossierReview(), updatedRequest.getDossierReview())
+                            && !canManageDossierReview(user, request)) {
+                        return ResponseEntity.status(403).<EcrRequest>build();
+                    }
                     request.setModificationNumber(updatedRequest.getModificationNumber());
                     request.setClient(updatedRequest.getClient());
                     request.setProduct(updatedRequest.getProduct());
@@ -288,6 +293,18 @@ public class EcrRequestController {
         return validationRepository.findFirstByRequest_IdAndStageOrderByRequestedAtDescIdDesc(request.getId(), stage)
                 .map(validation -> validation.getStatus() == PhaseValidationStatus.APPROVED)
                 .orElse(false);
+    }
+
+    private boolean canManageDossierReview(AppUser user, EcrRequest request) {
+        return accessControlService.isAdmin(user) || accessControlService.isRequestPilot(user, request);
+    }
+
+    private boolean dossierReviewChanged(String currentValue, String nextValue) {
+        return !Objects.equals(normalizeDossierReview(currentValue), normalizeDossierReview(nextValue));
+    }
+
+    private String normalizeDossierReview(String value) {
+        return value == null || value.trim().isEmpty() ? "" : value;
     }
 
     private void reopenApprovedStage(EcrRequest request, EcrStage stage, AppUser user) {

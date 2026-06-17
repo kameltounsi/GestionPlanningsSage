@@ -62,13 +62,50 @@ async function multipartRequest(path, formData) {
 }
 
 async function errorMessage(response) {
-  const fallback = `API error ${response.status}`;
+  const fallback = userMessageForStatus(response.status);
   try {
     const text = await response.text();
-    return text || fallback;
+    return cleanErrorText(text, response.status) || fallback;
   } catch {
     return fallback;
   }
+}
+
+function userMessageForStatus(status) {
+  if (status === 400) return "Les donnees saisies sont invalides.";
+  if (status === 401) return "Session expiree. Connectez-vous a nouveau.";
+  if (status === 403) return "Vous n'avez pas les droits pour effectuer cette action.";
+  if (status === 404) return "Element introuvable.";
+  if (status === 409) return "Cette reference existe deja.";
+  if (status >= 500) return "Une erreur serveur est survenue. Reessayez plus tard.";
+  return "Une erreur est survenue.";
+}
+
+function cleanErrorText(text, status) {
+  const value = String(text || "").trim();
+  if (!value) return "";
+  if (value.startsWith("{") || value.startsWith("[")) {
+    try {
+      const payload = JSON.parse(value);
+      if (payload.message && !isTechnicalMessage(payload.message)) return payload.message;
+      return userMessageForStatus(Number(payload.status) || status);
+    } catch {
+      return userMessageForStatus(status);
+    }
+  }
+  if (isTechnicalMessage(value)) return userMessageForStatus(status);
+  return value;
+}
+
+function isTechnicalMessage(value) {
+  const text = String(value || "").toLowerCase();
+  return text.includes("exception")
+    || text.includes("constraint")
+    || text.includes("sql")
+    || text.includes("internal server error")
+    || text.includes("api error")
+    || text.includes("\"timestamp\"")
+    || text.includes("\"path\"");
 }
 
 export function login(email, password) {

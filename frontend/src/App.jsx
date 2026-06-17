@@ -158,10 +158,33 @@ function successToast(title) {
   });
 }
 
+function friendlyErrorMessage(message) {
+  const text = String(message || "").trim();
+  if (!text) return "Une erreur est survenue.";
+  if (text.startsWith("{") || text.startsWith("[")) {
+    try {
+      const payload = JSON.parse(text);
+      if (payload.status === 400) return "Les donnees saisies sont invalides.";
+      if (payload.status === 401) return "Session expiree. Connectez-vous a nouveau.";
+      if (payload.status === 403) return "Vous n'avez pas les droits pour effectuer cette action.";
+      if (payload.status === 404) return "Element introuvable.";
+      if (payload.status === 409) return "Cette reference existe deja.";
+      return "Une erreur serveur est survenue. Reessayez plus tard.";
+    } catch {
+      return "Une erreur est survenue.";
+    }
+  }
+  const lower = text.toLowerCase();
+  if (lower.includes("exception") || lower.includes("constraint") || lower.includes("sql") || lower.includes("internal server error") || lower.includes("\"timestamp\"")) {
+    return "Une erreur serveur est survenue. Reessayez plus tard.";
+  }
+  return text;
+}
+
 function errorAlert(message) {
   return Swal.fire({
     title: "Erreur",
-    text: message,
+    text: friendlyErrorMessage(message),
     icon: "error",
     confirmButtonText: "OK",
     confirmButtonColor: "#2563eb"
@@ -1867,7 +1890,7 @@ function App() {
         successToast(isEdit ? "Produit fini modifie" : "Produit fini ajoute");
       })
       .catch((exception) => {
-        const message = exception?.message || "Sauvegarde du produit fini impossible. Verifiez les cles uniques.";
+        const message = friendlyErrorMessage(exception?.message || "Sauvegarde du produit fini impossible. Verifiez les cles uniques.");
         setError(message);
         errorAlert(message);
         throw exception;

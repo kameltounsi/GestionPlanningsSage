@@ -75,6 +75,11 @@ public class EcrAction {
     private String proofDocumentFileUrl;
     private String proofDocumentPublicId;
     private String proofDocumentResourceType;
+
+    @OneToMany(mappedBy = "action", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("uploadedAt DESC, id DESC")
+    private List<EcrActionProofDocument> proofDocuments = new ArrayList<>();
+
     private boolean checked;
     private LocalDate deadline;
     private LocalDate date1;
@@ -325,6 +330,14 @@ public class EcrAction {
 
     public void setProofDocumentResourceType(String proofDocumentResourceType) {
         this.proofDocumentResourceType = proofDocumentResourceType;
+    }
+
+    public List<EcrActionProofDocument> getProofDocuments() {
+        return proofDocuments;
+    }
+
+    public void setProofDocuments(List<EcrActionProofDocument> proofDocuments) {
+        this.proofDocuments = proofDocuments == null ? new ArrayList<>() : proofDocuments;
     }
 
     public boolean isChecked() {

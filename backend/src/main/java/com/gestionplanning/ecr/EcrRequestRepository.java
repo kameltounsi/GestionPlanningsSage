@@ -8,6 +8,8 @@ import java.util.List;
 public interface EcrRequestRepository extends JpaRepository<EcrRequest, Long> {
     List<EcrRequest> findAllByOrderByReceptionDateDescIdDesc();
 
+    List<EcrRequest> findByArchivedFalseOrderByReceptionDateDescIdDesc();
+
     @Query("select coalesce(max(request.accessInternalNumber), 0) from EcrRequest request")
     Integer findMaxAccessInternalNumber();
 }

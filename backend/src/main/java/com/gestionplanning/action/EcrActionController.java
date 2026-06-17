@@ -3,6 +3,8 @@ package com.gestionplanning.action;
 import com.gestionplanning.ecr.EcrRequestRepository;
 import com.gestionplanning.ecr.EcrStage;
 import com.gestionplanning.ecr.EcrTemplateService;
+import com.gestionplanning.ecr.PhaseValidationRequestRepository;
+import com.gestionplanning.ecr.PhaseValidationStatus;
 import com.gestionplanning.audit.AuditLogService;
 import com.gestionplanning.auth.AccessControlService;
 import com.gestionplanning.storage.CloudinaryStorageService;
@@ -32,6 +34,7 @@ public class EcrActionController {
     private final EcrActionRepository actionRepository;
     private final EcrActionEvidenceRepository evidenceRepository;
     private final EcrActionAssetRepository assetRepository;
+    private final EcrActionProofDocumentRepository proofDocumentRepository;
     private final EcrRequestRepository requestRepository;
     private final ActionPlanningService planningService;
     private final EcrTemplateService templateService;
@@ -40,16 +43,20 @@ public class EcrActionController {
     private final AccessControlService accessControlService;
     private final AuditLogService auditLogService;
     private final ActionStandardSuggestionRepository suggestionRepository;
+    private final PhaseValidationRequestRepository validationRepository;
 
     public EcrActionController(EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
                                EcrActionAssetRepository assetRepository,
+                               EcrActionProofDocumentRepository proofDocumentRepository,
                                EcrRequestRepository requestRepository, ActionPlanningService planningService,
                                EcrTemplateService templateService, CloudinaryStorageService storageService,
                                ActionAssigneeResolver assigneeResolver, AccessControlService accessControlService,
-                               AuditLogService auditLogService, ActionStandardSuggestionRepository suggestionRepository) {
+                               AuditLogService auditLogService, ActionStandardSuggestionRepository suggestionRepository,
+                               PhaseValidationRequestRepository validationRepository) {
         this.actionRepository = actionRepository;
         this.evidenceRepository = evidenceRepository;
         this.assetRepository = assetRepository;
+        this.proofDocumentRepository = proofDocumentRepository;
         this.requestRepository = requestRepository;
         this.planningService = planningService;
         this.templateService = templateService;
@@ -58,6 +65,7 @@ public class EcrActionController {
         this.accessControlService = accessControlService;
         this.auditLogService = auditLogService;
         this.suggestionRepository = suggestionRepository;
+        this.validationRepository = validationRepository;
     }
 
     @GetMapping("/actions")
@@ -268,8 +276,16 @@ public class EcrActionController {
         return actionRepository.findById(id)
                 .filter(action -> accessControlService.canManageAction(user, action))
                 .map(action -> {
-                    storageService.deleteQuietly(action.getProofDocumentPublicId(), action.getProofDocumentResourceType());
                     StoredAsset asset = storageService.upload(file, "gestion-planning/actions/" + id + "/proof-document");
+                    EcrActionProofDocument proofDocument = new EcrActionProofDocument();
+                    proofDocument.setAction(action);
+                    proofDocument.setFileName(asset.getFileName());
+                    proofDocument.setContentType(asset.getContentType());
+                    proofDocument.setFileSize(asset.getSize());
+                    proofDocument.setFileUrl(asset.getUrl());
+                    proofDocument.setPublicId(asset.getPublicId());
+                    proofDocument.setResourceType(asset.getResourceType());
+                    proofDocumentRepository.save(proofDocument);
                     action.setProofDocument(asset.getFileName());
                     action.setProofDocumentFileName(asset.getFileName());
                     action.setProofDocumentContentType(asset.getContentType());
@@ -324,14 +340,54 @@ public class EcrActionController {
         }).orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    @GetMapping("/action-proof-documents/{proofDocumentId}/download")
+    public ResponseEntity<?> downloadActionProofDocument(@PathVariable Long proofDocumentId) {
+        return proofDocumentRepository.findById(proofDocumentId)
+                .<ResponseEntity<?>>map(proofDocument -> {
+                    try {
+                        DownloadedAsset asset = storageService.download(proofDocument.getPublicId(), proofDocument.getResourceType(), proofDocument.getFileUrl(), proofDocument.getContentType());
+                        return ResponseEntity.ok()
+                                .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(proofDocument.getFileName(), asset.getContentType()))
+                                .contentType(MediaType.parseMediaType(asset.getContentType()))
+                                .body(asset.getData());
+                    } catch (RuntimeException exception) {
+                        return ResponseEntity.status(502)
+                                .contentType(MediaType.TEXT_PLAIN)
+                                .body("Telechargement impossible depuis Cloudinary. Activez la livraison des fichiers PDF/ZIP dans les parametres Security de Cloudinary, puis reessayez.");
+                    }
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
     @DeleteMapping("/actions/{id}/proof-document")
+    @Transactional
     public ResponseEntity<EcrAction> deleteProofDocument(@PathVariable Long id,
                                                          @RequestAttribute("authenticatedUser") AppUser user) {
         return actionRepository.findById(id)
                 .filter(action -> accessControlService.canManageAction(user, action))
                 .map(action -> {
                     storageService.deleteQuietly(action.getProofDocumentPublicId(), action.getProofDocumentResourceType());
+                    proofDocumentRepository.findByAction_IdOrderByUploadedAtDescIdDesc(id)
+                            .forEach(proofDocument -> storageService.deleteQuietly(proofDocument.getPublicId(), proofDocument.getResourceType()));
+                    proofDocumentRepository.deleteByAction_Id(id);
                     clearProofDocument(action);
+                    return ResponseEntity.ok(enrichAction(actionRepository.save(action)));
+                })
+                .orElse(ResponseEntity.status(403).build());
+    }
+
+    @DeleteMapping("/action-proof-documents/{proofDocumentId}")
+    @Transactional
+    public ResponseEntity<EcrAction> deleteActionProofDocument(@PathVariable Long proofDocumentId,
+                                                               @RequestAttribute("authenticatedUser") AppUser user) {
+        return proofDocumentRepository.findById(proofDocumentId)
+                .filter(proofDocument -> accessControlService.canManageAction(user, proofDocument.getAction()))
+                .map(proofDocument -> {
+                    EcrAction action = proofDocument.getAction();
+                    storageService.deleteQuietly(proofDocument.getPublicId(), proofDocument.getResourceType());
+                    proofDocumentRepository.delete(proofDocument);
+                    proofDocumentRepository.flush();
+                    syncLatestProofDocumentMetadata(action);
                     return ResponseEntity.ok(enrichAction(actionRepository.save(action)));
                 })
                 .orElse(ResponseEntity.status(403).build());
@@ -341,11 +397,15 @@ public class EcrActionController {
     public ResponseEntity<?> downloadActionAsset(@PathVariable Long assetId) {
         return assetRepository.findById(assetId)
                 .<ResponseEntity<?>>map(actionAsset -> {
-                    DownloadedAsset asset = storageService.download(actionAsset.getPublicId(), actionAsset.getResourceType(), actionAsset.getFileUrl(), actionAsset.getContentType());
-                    return ResponseEntity.ok()
-                            .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(actionAsset.getFileName(), asset.getContentType()))
-                            .contentType(MediaType.parseMediaType(asset.getContentType()))
-                            .body(asset.getData());
+                    try {
+                        DownloadedAsset asset = storageService.download(actionAsset.getPublicId(), actionAsset.getResourceType(), actionAsset.getFileUrl(), actionAsset.getContentType());
+                        return ResponseEntity.ok()
+                                .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(actionAsset.getFileName(), asset.getContentType()))
+                                .contentType(MediaType.parseMediaType(asset.getContentType()))
+                                .body(asset.getData());
+                    } catch (CloudinaryStorageService.DownloadException exception) {
+                        return cloudinaryDownloadError(exception);
+                    }
                 })
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
@@ -368,22 +428,43 @@ public class EcrActionController {
     }
 
     @DeleteMapping("/actions/{id}")
+    @Transactional
     public ResponseEntity<Void> delete(@PathVariable Long id, @RequestAttribute("authenticatedUser") AppUser user) {
-        if (!accessControlService.isAdmin(user)) {
-            return ResponseEntity.status(403).build();
-        }
         return actionRepository.findById(id).map(action -> {
+            if (!canDeleteAction(user, action)) {
+                return ResponseEntity.status(403).<Void>build();
+            }
             Long requestId = action.getRequestId();
             assetRepository.findByAction_IdOrderByUploadedAtDescIdDesc(id)
                     .forEach(asset -> storageService.deleteQuietly(asset.getPublicId(), asset.getResourceType()));
             storageService.deleteQuietly(action.getEvidencePublicId(), action.getEvidenceResourceType());
             storageService.deleteQuietly(action.getProofDocumentPublicId(), action.getProofDocumentResourceType());
+            proofDocumentRepository.findByAction_IdOrderByUploadedAtDescIdDesc(id)
+                    .forEach(proofDocument -> storageService.deleteQuietly(proofDocument.getPublicId(), proofDocument.getResourceType()));
             assetRepository.deleteByAction_Id(id);
+            proofDocumentRepository.deleteByAction_Id(id);
             deleteLocalEvidenceIfPresent(id);
             actionRepository.deleteById(id);
             requestRepository.findById(requestId).ifPresent(planningService::recalculateRequest);
             return ResponseEntity.noContent().<Void>build();
         }).orElse(ResponseEntity.notFound().build());
+    }
+
+    private boolean canDeleteAction(AppUser user, EcrAction action) {
+        if (accessControlService.isAdmin(user)) {
+            return true;
+        }
+        return accessControlService.isRequestPilot(user, action == null ? null : action.getRequest())
+                && !isActionPhaseApproved(action);
+    }
+
+    private boolean isActionPhaseApproved(EcrAction action) {
+        if (action == null || action.getRequestId() == null || action.getStage() == null) {
+            return false;
+        }
+        return validationRepository.findFirstByRequest_IdAndStageOrderByRequestedAtDescIdDesc(action.getRequestId(), action.getStage())
+                .map(validation -> validation.getStatus() == PhaseValidationStatus.APPROVED)
+                .orElse(false);
     }
 
     private void deleteLocalEvidenceIfPresent(Long actionId) {
@@ -395,6 +476,26 @@ public class EcrActionController {
     private boolean hasEvidence(EcrAction action) {
         return action.getEvidenceFileName() != null && !action.getEvidenceFileName().trim().isEmpty()
                 || action.getId() != null && !assetRepository.findByAction_IdOrderByUploadedAtDescIdDesc(action.getId()).isEmpty();
+    }
+
+    private void syncLatestProofDocumentMetadata(EcrAction action) {
+        if (action == null || action.getId() == null) {
+            return;
+        }
+        List<EcrActionProofDocument> remainingDocuments = proofDocumentRepository.findByAction_IdOrderByUploadedAtDescIdDesc(action.getId());
+        if (remainingDocuments.isEmpty()) {
+            clearProofDocument(action);
+            return;
+        }
+        EcrActionProofDocument latest = remainingDocuments.get(0);
+        action.setProofDocument(latest.getFileName());
+        action.setProofDocumentFileName(latest.getFileName());
+        action.setProofDocumentContentType(latest.getContentType());
+        action.setProofDocumentFileSize(latest.getFileSize());
+        action.setProofDocumentFileUrl(latest.getFileUrl());
+        action.setProofDocumentPublicId(latest.getPublicId());
+        action.setProofDocumentResourceType(latest.getResourceType());
+        action.setEvidenceRequired(true);
     }
 
     private void syncLatestEvidenceMetadata(EcrAction action) {
@@ -429,7 +530,9 @@ public class EcrActionController {
     }
 
     private boolean hasProofDocument(EcrAction action) {
-        return action != null && (hasText(action.getProofDocumentFileName()) || hasText(action.getProofDocumentFileUrl()));
+        return action != null && (hasText(action.getProofDocumentFileName())
+                || hasText(action.getProofDocumentFileUrl())
+                || action.getId() != null && !proofDocumentRepository.findByAction_IdOrderByUploadedAtDescIdDesc(action.getId()).isEmpty());
     }
 
     private boolean hasText(String value) {
@@ -653,5 +756,14 @@ public class EcrActionController {
                 ? "inline"
                 : "attachment";
         return disposition + "; filename=\"" + safeFileName(fileName) + "\"";
+    }
+
+    private ResponseEntity<String> cloudinaryDownloadError(CloudinaryStorageService.DownloadException exception) {
+        String message = exception.isNotFound()
+                ? "Fichier introuvable dans Cloudinary. Il a peut-etre ete supprime ou deplace."
+                : "Telechargement impossible depuis Cloudinary. Reessayez plus tard ou verifiez la configuration Cloudinary.";
+        return ResponseEntity.status(exception.isNotFound() ? 404 : 502)
+                .contentType(MediaType.TEXT_PLAIN)
+                .body(message);
     }
 }

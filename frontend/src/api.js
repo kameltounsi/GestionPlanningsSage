@@ -84,8 +84,9 @@ export function logout() {
   }).finally(clearSession);
 }
 
-export function getEcrRequests() {
-  return request("/ecr-requests");
+export function getEcrRequests(includeArchived = false) {
+  const query = includeArchived ? "?includeArchived=true" : "";
+  return request(`/ecr-requests${query}`);
 }
 
 export function createEcrRequest(payload) {
@@ -112,9 +113,9 @@ export function ecrRequestFileDownloadUrl(requestId, type) {
   return `${API_BASE}/ecr-requests/${requestId}/files/${type}/download`;
 }
 
-export function deleteEcrRequest(requestId) {
-  return request(`/ecr-requests/${requestId}`, {
-    method: "DELETE"
+export function archiveEcrRequest(requestId, archived = true) {
+  return request(`/ecr-requests/${requestId}/archive?archived=${encodeURIComponent(archived)}`, {
+    method: "PATCH"
   });
 }
 
@@ -248,6 +249,30 @@ export function deleteProductReference(id) {
   });
 }
 
+export function getFinishedProductReferences() {
+  return request("/preferentials/finished-products");
+}
+
+export function createFinishedProductReference(payload) {
+  return request("/preferentials/finished-products", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateFinishedProductReference(id, payload) {
+  return request(`/preferentials/finished-products/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteFinishedProductReference(id) {
+  return request(`/preferentials/finished-products/${id}`, {
+    method: "DELETE"
+  });
+}
+
 export function getRoleReferences() {
   return request("/preferentials/roles");
 }
@@ -333,6 +358,12 @@ export function deleteActionProofDocument(actionId) {
   });
 }
 
+export function deleteActionProofDocumentItem(proofDocumentId) {
+  return request(`/action-proof-documents/${proofDocumentId}`, {
+    method: "DELETE"
+  });
+}
+
 export function uploadActionEvidence(actionId, file) {
   const formData = new FormData();
   formData.append("file", file);
@@ -353,6 +384,10 @@ export function actionProofDocumentUrl(actionId) {
   return `${API_BASE}/actions/${actionId}/proof-document`;
 }
 
+export function actionProofDocumentDownloadUrl(proofDocumentId) {
+  return `${API_BASE}/action-proof-documents/${proofDocumentId}/download`;
+}
+
 export function uploadActionPlanningRuleProofDocument(ruleId, file) {
   const formData = new FormData();
   formData.append("file", file);
@@ -365,8 +400,18 @@ export function deleteActionPlanningRuleProofDocument(ruleId) {
   });
 }
 
+export function deleteActionPlanningRuleProofDocumentItem(proofDocumentId) {
+  return request(`/action-planning-rules/proof-documents/${proofDocumentId}`, {
+    method: "DELETE"
+  });
+}
+
 export function actionPlanningRuleProofDocumentUrl(ruleId) {
   return `${API_BASE}/action-planning-rules/${ruleId}/proof-document`;
+}
+
+export function actionPlanningRuleProofDocumentDownloadUrl(proofDocumentId) {
+  return `${API_BASE}/action-planning-rules/proof-documents/${proofDocumentId}/download`;
 }
 
 export function getActionStandardSuggestions() {

@@ -6,4 +6,6 @@ import java.util.List;
 
 public interface ClientReferenceRepository extends JpaRepository<ClientReference, Long> {
     List<ClientReference> findAllByOrderByNameAsc();
+
+    boolean existsByName(String name);
 }

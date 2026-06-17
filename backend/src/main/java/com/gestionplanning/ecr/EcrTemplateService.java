@@ -3,9 +3,11 @@ package com.gestionplanning.ecr;
 import com.gestionplanning.action.ActionStatus;
 import com.gestionplanning.action.ActionPlanningRule;
 import com.gestionplanning.action.ActionPlanningRuleRepository;
+import com.gestionplanning.action.ActionPlanningRuleProofDocument;
 import com.gestionplanning.action.ActionPlanningService;
 import com.gestionplanning.action.ActionAssigneeResolver;
 import com.gestionplanning.action.EcrAction;
+import com.gestionplanning.action.EcrActionProofDocument;
 import com.gestionplanning.action.EcrActionRepository;
 import org.springframework.stereotype.Service;
 
@@ -166,7 +168,7 @@ public class EcrTemplateService {
         action.setValidatorRole(rule.getValidator());
         action.setCriticality(rule.getCriticality());
         action.setExpectedEvidence(rule.getExpectedEvidence());
-        copyProofDocument(action, rule);
+        copyProofDocument(action, rule, true);
         action.setEvidenceRequired(rule.isEvidenceRequired()
                 || hasProofDocument(rule)
                 || String.valueOf(rule.getCriticality()).startsWith("1"));
@@ -177,7 +179,7 @@ public class EcrTemplateService {
                 .collect(Collectors.toMap(this::ruleKey, rule -> rule, (first, second) -> second));
         List<EcrAction> changedActions = actions.stream()
                 .filter(action -> rulesByKey.containsKey(actionKey(action)))
-                .peek(action -> applyRuleMetadata(request, action, rulesByKey.get(actionKey(action))))
+                .peek(action -> applyRuleMetadataWithoutReplacingProofDocuments(request, action, rulesByKey.get(actionKey(action))))
                 .collect(Collectors.toList());
         if (!changedActions.isEmpty()) {
             actionRepository.saveAll(changedActions);
@@ -204,7 +206,21 @@ public class EcrTemplateService {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
-    private void copyProofDocument(EcrAction action, ActionPlanningRule rule) {
+    private void applyRuleMetadataWithoutReplacingProofDocuments(EcrRequest request, EcrAction action, ActionPlanningRule rule) {
+        action.setStage(rule.getStage());
+        action.setTitle(rule.getActionTitle());
+        action.setTopicRisk(rule.getTopicRisk());
+        action.setResponsible(assigneeResolver.resolve(request, rule.getResponsible()));
+        action.setValidator(rule.getValidator());
+        action.setValidatorRole(rule.getValidator());
+        action.setCriticality(rule.getCriticality());
+        action.setExpectedEvidence(rule.getExpectedEvidence());
+        action.setEvidenceRequired(rule.isEvidenceRequired()
+                || hasProofDocument(rule)
+                || String.valueOf(rule.getCriticality()).startsWith("1"));
+    }
+
+    private void copyProofDocument(EcrAction action, ActionPlanningRule rule, boolean replaceDocumentItems) {
         action.setProofDocument(rule.getProofDocument());
         action.setProofDocumentFileName(rule.getProofDocumentFileName());
         action.setProofDocumentContentType(rule.getProofDocumentContentType());
@@ -212,10 +228,27 @@ public class EcrTemplateService {
         action.setProofDocumentFileUrl(rule.getProofDocumentFileUrl());
         action.setProofDocumentPublicId(null);
         action.setProofDocumentResourceType(rule.getProofDocumentResourceType());
+        if (!replaceDocumentItems) {
+            return;
+        }
+        action.getProofDocuments().clear();
+        for (ActionPlanningRuleProofDocument ruleDocument : rule.getProofDocuments()) {
+            EcrActionProofDocument actionDocument = new EcrActionProofDocument();
+            actionDocument.setAction(action);
+            actionDocument.setFileName(ruleDocument.getFileName());
+            actionDocument.setContentType(ruleDocument.getContentType());
+            actionDocument.setFileSize(ruleDocument.getFileSize());
+            actionDocument.setFileUrl(ruleDocument.getFileUrl());
+            actionDocument.setPublicId(null);
+            actionDocument.setResourceType(ruleDocument.getResourceType());
+            action.getProofDocuments().add(actionDocument);
+        }
     }
 
     private boolean hasProofDocument(ActionPlanningRule rule) {
-        return rule != null && (hasText(rule.getProofDocumentFileName()) || hasText(rule.getProofDocumentFileUrl()));
+        return rule != null && (hasText(rule.getProofDocumentFileName())
+                || hasText(rule.getProofDocumentFileUrl())
+                || !rule.getProofDocuments().isEmpty());
     }
 
     private boolean hasText(String value) {

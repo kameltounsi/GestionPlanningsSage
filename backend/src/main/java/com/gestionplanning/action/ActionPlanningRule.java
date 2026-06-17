@@ -5,6 +5,8 @@ import com.gestionplanning.ecr.EcrStage;
 import javax.persistence.*;
 import javax.validation.constraints.Min;
 import javax.validation.constraints.NotBlank;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "action_planning_rule")
@@ -48,6 +50,10 @@ public class ActionPlanningRule {
     private String proofDocumentFileUrl;
     private String proofDocumentPublicId;
     private String proofDocumentResourceType;
+
+    @OneToMany(mappedBy = "rule", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("uploadedAt DESC, id DESC")
+    private List<ActionPlanningRuleProofDocument> proofDocuments = new ArrayList<>();
 
     private boolean evidenceRequired;
 
@@ -191,6 +197,14 @@ public class ActionPlanningRule {
 
     public void setProofDocumentResourceType(String proofDocumentResourceType) {
         this.proofDocumentResourceType = proofDocumentResourceType;
+    }
+
+    public List<ActionPlanningRuleProofDocument> getProofDocuments() {
+        return proofDocuments;
+    }
+
+    public void setProofDocuments(List<ActionPlanningRuleProofDocument> proofDocuments) {
+        this.proofDocuments = proofDocuments == null ? new ArrayList<>() : proofDocuments;
     }
 
     public boolean isEvidenceRequired() {

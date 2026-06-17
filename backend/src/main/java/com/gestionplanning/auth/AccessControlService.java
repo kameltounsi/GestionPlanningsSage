@@ -96,7 +96,7 @@ public class AccessControlService {
             return false;
         }
         String pilot = normalize(request.getPilot());
-        return !pilot.isEmpty() && matchesUser(user, pilot);
+        return !pilot.isEmpty() && matchesActionAssignment(user, pilot);
     }
 
     public boolean canSeeAllActions(AppUser user, EcrRequest request) {
@@ -234,7 +234,7 @@ public class AccessControlService {
         if (!pilot.isEmpty()) {
             Optional<AppUser> pilotUser = userRepository.findAll().stream()
                     .filter(AppUser::isEnabled)
-                    .filter(user -> matchesUser(user, pilot))
+                    .filter(user -> matchesActionAssignment(user, pilot))
                     .findFirst();
             if (pilotUser.isPresent()) {
                 return pilotUser;

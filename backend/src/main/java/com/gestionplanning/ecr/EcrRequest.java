@@ -76,6 +76,8 @@ public class EcrRequest {
     private LocalDate closureDate;
     private boolean cancelledStatus;
     private LocalDate cancelledDate;
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean archived = false;
     private String accessProjectTimeline;
     private String accessProjectManagement;
     private String accessProductDevelopment;
@@ -481,6 +483,14 @@ public class EcrRequest {
 
     public void setCancelledDate(LocalDate cancelledDate) {
         this.cancelledDate = cancelledDate;
+    }
+
+    public boolean isArchived() {
+        return archived;
+    }
+
+    public void setArchived(boolean archived) {
+        this.archived = archived;
     }
 
     public String getAccessProjectTimeline() {

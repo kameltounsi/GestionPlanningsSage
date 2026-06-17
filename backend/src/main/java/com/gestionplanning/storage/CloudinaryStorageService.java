@@ -98,7 +98,7 @@ public class CloudinaryStorageService {
             connection.setReadTimeout(30000);
             int responseCode = connection.getResponseCode();
             if (responseCode < 200 || responseCode >= 300) {
-                throw new IOException("Cloudinary returned HTTP " + responseCode + " for " + fileUrl);
+                throw new DownloadException("Cloudinary returned HTTP " + responseCode + " for " + fileUrl, responseCode);
             }
             String contentType = connection.getContentType();
             if (contentType == null || contentType.trim().isEmpty()) {
@@ -109,7 +109,7 @@ public class CloudinaryStorageService {
             }
             return new DownloadedAsset(StreamUtils.copyToByteArray(connection.getInputStream()), contentType);
         } catch (IOException exception) {
-            throw new IllegalStateException("Impossible de telecharger le fichier depuis Cloudinary", exception);
+            throw new DownloadException("Impossible de telecharger le fichier depuis Cloudinary", exception);
         }
     }
 
@@ -152,6 +152,28 @@ public class CloudinaryStorageService {
 
         public String getContentType() {
             return contentType;
+        }
+    }
+
+    public static class DownloadException extends IllegalStateException {
+        private final Integer statusCode;
+
+        public DownloadException(String message, Integer statusCode) {
+            super(message);
+            this.statusCode = statusCode;
+        }
+
+        public DownloadException(String message, Throwable cause) {
+            super(message, cause);
+            this.statusCode = null;
+        }
+
+        public Integer getStatusCode() {
+            return statusCode;
+        }
+
+        public boolean isNotFound() {
+            return Integer.valueOf(404).equals(statusCode);
         }
     }
 

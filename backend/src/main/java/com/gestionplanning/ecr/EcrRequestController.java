@@ -1,23 +1,16 @@
 package com.gestionplanning.ecr;
 
-import com.gestionplanning.action.EcrAction;
-import com.gestionplanning.action.EcrActionAssetRepository;
-import com.gestionplanning.action.EcrActionEvidenceRepository;
-import com.gestionplanning.action.EcrActionRepository;
 import com.gestionplanning.action.ActionPlanningService;
 import com.gestionplanning.audit.AuditLogService;
 import com.gestionplanning.auth.AccessControlService;
-import com.gestionplanning.document.EcrDocument;
-import com.gestionplanning.document.EcrDocumentRepository;
-import com.gestionplanning.penalty.PenaltyRepository;
-import com.gestionplanning.storage.CloudinaryStorageService.DownloadedAsset;
 import com.gestionplanning.storage.CloudinaryStorageService;
+import com.gestionplanning.storage.CloudinaryStorageService.DownloadException;
+import com.gestionplanning.storage.CloudinaryStorageService.DownloadedAsset;
 import com.gestionplanning.storage.StoredAsset;
 import com.gestionplanning.user.AppUser;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -31,11 +24,6 @@ import java.util.Objects;
 public class EcrRequestController {
     private final EcrRequestRepository requestRepository;
     private final ChecklistItemRepository checklistItemRepository;
-    private final EcrActionRepository actionRepository;
-    private final EcrActionEvidenceRepository evidenceRepository;
-    private final EcrActionAssetRepository assetRepository;
-    private final EcrDocumentRepository documentRepository;
-    private final PenaltyRepository penaltyRepository;
     private final CloudinaryStorageService storageService;
     private final EcrTemplateService templateService;
     private final ActionPlanningService planningService;
@@ -44,19 +32,11 @@ public class EcrRequestController {
     private final AuditLogService auditLogService;
 
     public EcrRequestController(EcrRequestRepository requestRepository, ChecklistItemRepository checklistItemRepository,
-                                EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
-                                EcrActionAssetRepository assetRepository,
-                                EcrDocumentRepository documentRepository, PenaltyRepository penaltyRepository,
                                 CloudinaryStorageService storageService, EcrTemplateService templateService,
                                 ActionPlanningService planningService, AccessControlService accessControlService,
                                 PhaseValidationRequestRepository validationRepository, AuditLogService auditLogService) {
         this.requestRepository = requestRepository;
         this.checklistItemRepository = checklistItemRepository;
-        this.actionRepository = actionRepository;
-        this.evidenceRepository = evidenceRepository;
-        this.assetRepository = assetRepository;
-        this.documentRepository = documentRepository;
-        this.penaltyRepository = penaltyRepository;
         this.storageService = storageService;
         this.templateService = templateService;
         this.planningService = planningService;
@@ -66,11 +46,15 @@ public class EcrRequestController {
     }
 
     @GetMapping
-    public List<EcrRequest> list(@RequestAttribute("authenticatedUser") AppUser user) {
-        requestRepository.findAll().stream()
+    public List<EcrRequest> list(@RequestParam(defaultValue = "false") boolean includeArchived,
+                                 @RequestAttribute("authenticatedUser") AppUser user) {
+        requestRepository.findByArchivedFalseOrderByReceptionDateDescIdDesc().stream()
                 .filter(request -> request.getCurrentStage() != EcrStage.CLOSED && request.getCurrentStage() != EcrStage.CANCELLED)
                 .forEach(templateService::ensureMissingActionsFor);
-        return requestRepository.findAllByOrderByReceptionDateDescIdDesc().stream()
+        List<EcrRequest> requests = includeArchived && accessControlService.isAdmin(user)
+                ? requestRepository.findAllByOrderByReceptionDateDescIdDesc()
+                : requestRepository.findByArchivedFalseOrderByReceptionDateDescIdDesc();
+        return requests.stream()
                 .filter(request -> accessControlService.canAccessRequest(user, request))
                 .collect(java.util.stream.Collectors.toList());
     }
@@ -202,45 +186,41 @@ public class EcrRequestController {
                     if (file == null || file.url() == null || file.url().trim().isEmpty()) {
                         return ResponseEntity.notFound().build();
                     }
-                    DownloadedAsset asset = storageService.download(file.publicId(), file.resourceType(), file.url(), file.contentType());
-                    return ResponseEntity.ok()
-                            .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(file.fileName(), asset.getContentType()))
-                            .contentType(MediaType.parseMediaType(asset.getContentType()))
-                            .body(asset.getData());
+                    try {
+                        DownloadedAsset asset = storageService.download(file.publicId(), file.resourceType(), file.url(), file.contentType());
+                        return ResponseEntity.ok()
+                                .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(file.fileName(), asset.getContentType()))
+                                .contentType(MediaType.parseMediaType(asset.getContentType()))
+                                .body(asset.getData());
+                    } catch (DownloadException exception) {
+                        return ResponseEntity.status(502)
+                                .contentType(MediaType.TEXT_PLAIN)
+                                .body("Telechargement impossible depuis Cloudinary. Verifiez la connexion reseau ou reessayez plus tard.");
+                    }
                 })
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/{id}")
-    @Transactional
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        if (!requestRepository.existsById(id)) {
-            return ResponseEntity.notFound().build();
+    public ResponseEntity<Void> delete(@PathVariable Long id, @RequestAttribute("authenticatedUser") AppUser user) {
+        if (!accessControlService.isAdmin(user)) {
+            return ResponseEntity.status(403).build();
         }
-        List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(id);
-        assetRepository.findByAction_Request_Id(id)
-                .forEach(asset -> storageService.deleteQuietly(asset.getPublicId(), asset.getResourceType()));
-        actions.forEach(action -> storageService.deleteQuietly(action.getEvidencePublicId(), action.getEvidenceResourceType()));
-        actions.forEach(action -> {
-            if (evidenceRepository.existsById(action.getId())) {
-                evidenceRepository.deleteById(action.getId());
-            }
-        });
-
-        List<EcrDocument> documents = documentRepository.findByRequest_IdOrderByUploadedAtDescIdDesc(id);
-        documents.forEach(document -> storageService.deleteQuietly(document.getPublicId(), document.getResourceType()));
-
-        requestRepository.findById(id).ifPresent(request -> {
-            storageService.deleteQuietly(request.getBeforePhotoPublicId(), request.getBeforePhotoResourceType());
-            storageService.deleteQuietly(request.getAfterPhotoPublicId(), request.getAfterPhotoResourceType());
-        });
-
-        penaltyRepository.deleteByRequest_Id(id);
-        documentRepository.deleteByRequest_Id(id);
-        assetRepository.findByAction_Request_Id(id).forEach(asset -> assetRepository.deleteById(asset.getId()));
-        actionRepository.deleteByRequest_Id(id);
-        requestRepository.deleteById(id);
-        return ResponseEntity.noContent().build();
+        return requestRepository.findById(id)
+                .filter(request -> accessControlService.canAccessRequest(user, request))
+                .map(request -> {
+                    request.setArchived(true);
+                    EcrRequest saved = requestRepository.save(request);
+                    auditLogService.recordBusinessEvent(
+                            user,
+                            "ARCHIVAGE_MODIFICATION",
+                            "modification",
+                            requestLabel(saved),
+                            "Modification archivee: " + requestLabel(saved)
+                    );
+                    return ResponseEntity.noContent().<Void>build();
+                })
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @PatchMapping("/{id}/stage")
@@ -270,6 +250,29 @@ public class EcrRequestController {
                                 "Phase reouverte: " + stageLabel(stage) + " - Modification: " + requestLabel(saved)
                         );
                     }
+                    return ResponseEntity.ok(saved);
+                })
+                .orElse(ResponseEntity.status(403).build());
+    }
+
+    @PatchMapping("/{id}/archive")
+    public ResponseEntity<EcrRequest> updateArchiveStatus(@PathVariable Long id, @RequestParam(defaultValue = "true") boolean archived,
+                                                          @RequestAttribute("authenticatedUser") AppUser user) {
+        if (!accessControlService.isAdmin(user)) {
+            return ResponseEntity.status(403).build();
+        }
+        return requestRepository.findById(id)
+                .filter(request -> accessControlService.canAccessRequest(user, request))
+                .map(request -> {
+                    request.setArchived(archived);
+                    EcrRequest saved = requestRepository.save(request);
+                    auditLogService.recordBusinessEvent(
+                            user,
+                            archived ? "ARCHIVAGE_MODIFICATION" : "DESARCHIVAGE_MODIFICATION",
+                            "modification",
+                            requestLabel(saved),
+                            (archived ? "Modification archivee: " : "Modification desarchivee: ") + requestLabel(saved)
+                    );
                     return ResponseEntity.ok(saved);
                 })
                 .orElse(ResponseEntity.status(403).build());

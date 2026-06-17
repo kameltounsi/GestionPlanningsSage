@@ -5,6 +5,8 @@ import {
   CalendarDays,
   CheckCircle2,
   CircleAlert,
+  Archive,
+  ArchiveRestore,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -28,6 +30,7 @@ import {
   createActionPlanningRule,
   createClientReference,
   createEcrRequest,
+  createFinishedProductReference,
   createProductReference,
   createProject,
   createRoleReference,
@@ -35,11 +38,14 @@ import {
   clearSession,
   addActionSuggestionToDefaults,
   acknowledgeActionDeadlineAlerts,
+  archiveEcrRequest,
+  deleteAction,
   deleteActionPlanningRule,
   deleteActionAsset,
   deleteActionPlanningRuleProofDocument,
+  deleteActionPlanningRuleProofDocumentItem,
   deleteClientReference,
-  deleteEcrRequest,
+  deleteFinishedProductReference,
   deleteProductReference,
   deleteProject,
   deleteRoleReference,
@@ -53,6 +59,7 @@ import {
   getClientReferences,
   getCurrentUser,
   getEcrRequests,
+  getFinishedProductReferences,
   getAuditLogs,
   getPilots,
   getProductReferences,
@@ -69,6 +76,7 @@ import {
   updateClientReference,
   updateEcrRequest,
   updateEcrStage,
+  updateFinishedProductReference,
   updateProductReference,
   updateProject,
   updateRoleReference,
@@ -80,6 +88,7 @@ import {
   uploadEcrRequestImage,
   actionAssetDownloadUrl,
   actionEvidenceUrl,
+  actionProofDocumentDownloadUrl,
   actionProofDocumentUrl,
   approveActionValidation,
   approvePhaseValidation,
@@ -94,7 +103,7 @@ import {
 import { EmptyState } from "./components/common/EmptyState";
 import { PageHeader } from "./components/common/PageHeader";
 import { StatCard } from "./components/common/StatCard";
-import { emptyActionForm, emptyEcrForm, emptyPlanningRuleForm, emptyUserForm } from "./constants/forms";
+import { emptyActionForm, emptyEcrForm, emptyFinishedProductForm, emptyPlanningRuleForm, emptyUserForm } from "./constants/forms";
 import { userRoleOptions } from "./constants/roles";
 import { PlanningRulesAdmin } from "./features/actionRules/PlanningRulesAdmin";
 import { LoginPage } from "./features/auth/LoginPage";
@@ -132,6 +141,8 @@ const visibleAuditActionTypes = [
   "ACTION_TERMINEE",
   "VALIDATION_ACTION",
   "REFUS_VALIDATION_ACTION",
+  "ARCHIVAGE_MODIFICATION",
+  "DESARCHIVAGE_MODIFICATION",
   "AJOUT_CLIENT",
   "AJOUT_PRODUIT",
   "AJOUT_PROJET",
@@ -646,6 +657,15 @@ function canToggleActionForUser(user, action, request) {
   return !isActionDone(action) || action?.stage === request?.currentStage;
 }
 
+function isActionPhaseApproved(action, phaseValidations = []) {
+  return phaseValidations.find((validation) => validation.stage === action?.stage)?.status === "APPROVED";
+}
+
+function canDeleteActionForUser(user, action, request, phaseValidations = []) {
+  if (isAdminUser(user)) return true;
+  return isRequestPilot(user, request) && !isActionPhaseApproved(action, phaseValidations);
+}
+
 function blockingActionFor(action, actions = []) {
   if (!action?.dependsOnActionId) return null;
   return actions.find((item) => item.id === action.dependsOnActionId) || null;
@@ -660,7 +680,7 @@ function blockingActionLabel(action, actions = []) {
 function isRequestPilot(user, request) {
   const pilot = normalizeRoleToken(request?.pilot);
   if (!pilot) return false;
-  return [user?.fullName, user?.username, user?.email]
+  return [user?.fullName, user?.username, user?.email, user?.jobTitle, user?.role]
     .filter(Boolean)
     .some((value) => normalizeRoleToken(value) === pilot);
 }
@@ -690,6 +710,7 @@ function App() {
   const [projects, setProjects] = useState([]);
   const [clientReferences, setClientReferences] = useState([]);
   const [productReferences, setProductReferences] = useState([]);
+  const [finishedProductReferences, setFinishedProductReferences] = useState([]);
   const [roleReferences, setRoleReferences] = useState([]);
   const [planningRules, setPlanningRules] = useState([]);
   const [actionSuggestions, setActionSuggestions] = useState([]);
@@ -709,6 +730,7 @@ function App() {
   const [projectForm, setProjectForm] = useState({ name: "", projectTeam: "" });
   const [clientReferenceForm, setClientReferenceForm] = useState({ name: "" });
   const [productReferenceForm, setProductReferenceForm] = useState({ name: "" });
+  const [finishedProductReferenceForm, setFinishedProductReferenceForm] = useState(emptyFinishedProductForm);
   const [roleReferenceForm, setRoleReferenceForm] = useState({ name: "" });
   const [planningRuleForm, setPlanningRuleForm] = useState(emptyPlanningRuleForm);
   const [userForm, setUserForm] = useState(emptyUserForm);
@@ -721,10 +743,12 @@ function App() {
   const [editingEcrRequest, setEditingEcrRequest] = useState(null);
   const [editingClientReference, setEditingClientReference] = useState(null);
   const [editingProductReference, setEditingProductReference] = useState(null);
+  const [editingFinishedProductReference, setEditingFinishedProductReference] = useState(null);
   const [editingRoleReference, setEditingRoleReference] = useState(null);
   const [editingUser, setEditingUser] = useState(null);
   const [query, setQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
+  const [requestArchiveView, setRequestArchiveView] = useState("active");
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -738,6 +762,7 @@ function App() {
     const currentIndex = selectedStages.findIndex(([key]) => key === selectedRequest.currentStage);
     return selectedStages.filter((_, index) => currentIndex < 0 || index <= currentIndex);
   }, [currentUser, selectedRequest, selectedStages]);
+  const activeRequests = useMemo(() => requests.filter((request) => !request.archived), [requests]);
   const doneCount = actions.filter(isActionDone).length;
   const completion = actions.length ? Math.round((doneCount / actions.length) * 100) : 0;
   const lateActions = actions.filter((action) => action.late).length;
@@ -745,13 +770,14 @@ function App() {
   const filteredRequests = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return requests.filter((request) => {
+      if (request.archived && requestArchiveView !== "all") return false;
       const matchesProject = !projectFilter || request.modificationProject === projectFilter;
       const matchesSearch = !normalized || [request.client, request.product, request.modificationProject, request.modificationNumber, request.modificationReason, request.modificationDetail, request.dossierReview, request.pilot]
         .filter(Boolean)
         .some((value) => value.toLowerCase().includes(normalized));
       return matchesProject && matchesSearch;
     });
-  }, [requests, query, projectFilter]);
+  }, [requests, query, projectFilter, requestArchiveView]);
 
   const projectOptions = useMemo(() => {
     const names = [
@@ -777,10 +803,10 @@ function App() {
   );
 
   const dashboardStats = useMemo(() => {
-    const active = requests.filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED").length;
-    const closed = requests.filter((request) => request.currentStage === "CLOSED").length;
-    return { active, closed, projects: projects.length, requests: requests.length };
-  }, [requests, projects]);
+    const active = activeRequests.filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED").length;
+    const closed = activeRequests.filter((request) => request.currentStage === "CLOSED").length;
+    return { active, closed, projects: projects.length, requests: activeRequests.length };
+  }, [activeRequests, projects]);
 
   const filteredAuditLogs = useMemo(() => {
     const normalized = auditQuery.trim().toLowerCase();
@@ -895,13 +921,14 @@ function App() {
   }
 
   function loadInitialData() {
-    return Promise.all([getEcrRequests(), getPilots(), getProjects(), getClientReferences(), getProductReferences(), getRoleReferences(), getActionPlanningRules(), getUsers(), getCurrentUser()])
-      .then(([requestData, pilotData, projectData, clientReferenceData, productReferenceData, roleReferenceData, planningRuleData, userData, currentUserData]) => {
+    return Promise.all([getEcrRequests(), getPilots(), getProjects(), getClientReferences(), getProductReferences(), getFinishedProductReferences(), getRoleReferences(), getActionPlanningRules(), getUsers(), getCurrentUser()])
+      .then(([requestData, pilotData, projectData, clientReferenceData, productReferenceData, finishedProductReferenceData, roleReferenceData, planningRuleData, userData, currentUserData]) => {
         setRequests(requestData);
         setPilots(pilotData);
         setProjects(projectData);
         setClientReferences(clientReferenceData);
         setProductReferences(productReferenceData);
+        setFinishedProductReferences(finishedProductReferenceData);
         setRoleReferences(roleReferenceData);
         setPlanningRules(planningRuleData);
         setUsers(userData);
@@ -1000,7 +1027,19 @@ function App() {
   }
 
   function updateActionForm(field, value) {
-    setActionForm((form) => ({ ...form, [field]: value }));
+    setActionForm((form) => {
+      if (field === "proofDocumentFile") {
+        return { ...form, proofDocumentFile: mergeSelectedFiles(form.proofDocumentFile, value) };
+      }
+      return { ...form, [field]: value };
+    });
+  }
+
+  function removeActionProofDocumentFile(index) {
+    setActionForm((form) => ({
+      ...form,
+      proofDocumentFile: filesFromValue(form.proofDocumentFile).filter((_, fileIndex) => fileIndex !== index)
+    }));
   }
 
   function buildEcrPayload(form) {
@@ -1208,25 +1247,59 @@ function App() {
     setPage("modifications");
   }
 
-  function handleDeleteEcr(request) {
-    const label = requestDisplayName(request);
-    confirmDelete("Supprimer la modification ?", `La modification ${label} sera supprimee definitivement.`).then((result) => {
-      if (!result.isConfirmed) return;
-      setSaving(true);
-      setError("");
-      deleteEcrRequest(request.id)
-        .then(() => getEcrRequests())
-        .then((requestData) => {
-          setRequests(requestData);
-          if (selectedId === request.id) {
-            const nextRequest = requestData[0] || null;
+  function handleRequestArchiveViewChange(view) {
+    if (view === requestArchiveView) return;
+    setRequestArchiveView(view);
+    if (!isAdminUser(currentUser)) return;
+    const includeArchived = view === "all";
+    setSaving(true);
+    setError("");
+    getEcrRequests(includeArchived)
+      .then((requestData) => {
+        setRequests(requestData);
+        if (view === "active" && selectedId) {
+          const selectedStillVisible = requestData.some((item) => item.id === selectedId && !item.archived);
+          if (!selectedStillVisible) {
+            const nextRequest = requestData.find((item) => !item.archived) || null;
             setSelectedId(nextRequest?.id ?? null);
             setSelectedStage(nextRequest ? safeStage(nextRequest.currentStage, Boolean(nextRequest.newVersion)) : "FEASIBILITY_VALIDATION");
           }
-          successToast("Suppression effectuee");
+        }
+      })
+      .catch(() => {
+        const message = "Chargement des modifications impossible.";
+        setError(message);
+        errorAlert(message);
+      })
+      .finally(() => setSaving(false));
+  }
+
+  function handleArchiveEcr(request, archived = true) {
+    const label = requestDisplayName(request);
+    const title = archived ? "Archiver la modification ?" : "Desarchiver la modification ?";
+    const text = archived
+      ? `La modification ${label} ne sera plus affichee dans la liste des modifications actives.`
+      : `La modification ${label} reviendra dans la liste des modifications actives.`;
+    confirmDelete(title, text).then((result) => {
+      if (!result.isConfirmed) return;
+      const includeArchived = requestArchiveView === "all" && isAdminUser(currentUser);
+      setSaving(true);
+      setError("");
+      archiveEcrRequest(request.id, archived)
+        .then(() => getEcrRequests(includeArchived))
+        .then((requestData) => {
+          setRequests(requestData);
+          if (selectedId === request.id && archived && !includeArchived) {
+            const nextRequest = requestData.find((item) => !item.archived) || null;
+            setSelectedId(nextRequest?.id ?? null);
+            setSelectedStage(nextRequest ? safeStage(nextRequest.currentStage, Boolean(nextRequest.newVersion)) : "FEASIBILITY_VALIDATION");
+          }
+          successToast(archived ? "Modification archivee" : "Modification desarchivee");
         })
         .catch(() => {
-          const message = "Suppression de la modification impossible. Verifiez les droits ou les donnees liees.";
+          const message = archived
+            ? "Archivage de la modification impossible. Verifiez vos droits."
+            : "Desarchivage de la modification impossible. Verifiez vos droits.";
           setError(message);
           errorAlert(message);
         })
@@ -1276,7 +1349,7 @@ function App() {
   }
 
   function hasActionProofDocument(action) {
-    return Boolean(action?.proofDocumentFile) || Boolean(String(action?.proofDocumentFileName || action?.proofDocumentFileUrl || "").trim());
+    return filesFromValue(action?.proofDocumentFile).length > 0 || actionProofDocuments(action).length > 0;
   }
 
   function refreshCurrentActionsAndRequests() {
@@ -1294,7 +1367,7 @@ function App() {
       return Promise.reject(new Error("Action assignees required"));
     }
     const evidenceFiles = filesFromValue(actionForm.evidenceFile);
-    const proofDocumentFile = firstFileFromValue(actionForm.proofDocumentFile);
+    const proofDocumentFiles = filesFromValue(actionForm.proofDocumentFile);
     if (requiresEvidence(actionForm) && isActionDone(actionForm) && evidenceFiles.length === 0) {
       const message = "Ajoutez un asset avant de creer cette action comme terminee.";
       setError(message);
@@ -1304,15 +1377,15 @@ function App() {
     setSaving(true);
     setError("");
     const payload = actionFormPayload(actionForm, selectedStage);
-    const finalPayload = proofDocumentFile ? { ...payload, evidenceRequired: true } : payload;
-    const createBasePayload = proofDocumentFile ? { ...payload, evidenceRequired: actionForm.evidenceRequired || isCriticalAction(actionForm) } : payload;
-    const hasUploads = Boolean(proofDocumentFile) || evidenceFiles.length > 0;
+    const finalPayload = proofDocumentFiles.length > 0 ? { ...payload, evidenceRequired: true } : payload;
+    const createBasePayload = proofDocumentFiles.length > 0 ? { ...payload, evidenceRequired: actionForm.evidenceRequired || isCriticalAction(actionForm) } : payload;
+    const hasUploads = proofDocumentFiles.length > 0 || evidenceFiles.length > 0;
     const createPayload = hasUploads && isActionDone(finalPayload)
       ? { ...createBasePayload, checked: false, status: "TODO", closedDate: null, finalizationDate: null }
       : createBasePayload;
     return createAction(selectedRequest.id, createPayload)
       .then((savedAction) => {
-        const proofUpload = proofDocumentFile ? uploadActionProofDocument(savedAction.id, proofDocumentFile) : Promise.resolve(savedAction);
+        const proofUpload = proofDocumentFiles.length > 0 ? uploadActionProofDocumentFiles(savedAction.id, proofDocumentFiles) : Promise.resolve(savedAction);
         return proofUpload.then((actionWithProof) => {
           if (evidenceFiles.length > 0) {
             return uploadActionEvidenceFiles(actionWithProof.id, evidenceFiles)
@@ -1420,6 +1493,28 @@ function App() {
           setError(message);
           errorAlert(message);
         });
+    });
+  }
+
+  function handleDeleteAction(action) {
+    if (!selectedRequest || !action?.id) return;
+    confirmDelete("Supprimer l'action ?", `L'action ${action.title || "selectionnee"} sera supprimee. Le SOP et les dates des actions suivantes seront recalcules.`).then((result) => {
+      if (!result.isConfirmed) return;
+      setSaving(true);
+      setError("");
+      deleteAction(action.id)
+        .then(() => refreshSelectedData(selectedId, selectedStage))
+        .then(() => {
+          successToast("Action supprimee");
+        })
+        .catch((error) => {
+          const message = error.message?.includes("403")
+            ? "Suppression impossible: vous devez etre admin ou pilote de la modification, et la phase ne doit pas etre validee."
+            : "Suppression de l'action impossible. La phase est peut-etre deja validee.";
+          setError(message);
+          errorAlert(message);
+        })
+        .finally(() => setSaving(false));
     });
   }
 
@@ -1733,6 +1828,93 @@ function App() {
     });
   }
 
+  function finishedProductPayload(form) {
+    return {
+      client: form.client.trim(),
+      project: form.project.trim(),
+      partNumber: form.partNumber.trim(),
+      designation: form.designation.trim() || null,
+      customerPn: form.customerPn.trim() || null,
+      product: form.product.trim(),
+      coiffeIndex: form.coiffeIndex.trim() || null,
+      drawingIndex: form.drawingIndex.trim() || null,
+      reducedCode: form.reducedCode.trim(),
+      salePrice: form.salePrice === "" ? null : Number(form.salePrice),
+      productionIntegrationDate: form.productionIntegrationDate || null,
+      comments: form.comments.trim() || null
+    };
+  }
+
+  function handleSaveFinishedProductReference(event) {
+    event.preventDefault();
+    const payload = finishedProductPayload(finishedProductReferenceForm);
+    if (!payload.client || !payload.project || !payload.product || !payload.partNumber || !payload.reducedCode) {
+      warningAlert("Champs requis", "Renseignez client, projet, produit, part number et code reduit.");
+      return Promise.reject(new Error("Champs requis."));
+    }
+    setSaving(true);
+    setError("");
+    const isEdit = Boolean(editingFinishedProductReference);
+    const request = isEdit
+      ? updateFinishedProductReference(editingFinishedProductReference, payload)
+      : createFinishedProductReference(payload);
+    return request
+      .then((savedFinishedProduct) => {
+        setFinishedProductReferences((items) => [...items.filter((item) => item.id !== savedFinishedProduct.id), savedFinishedProduct]
+          .sort((a, b) => [a.project, a.product, a.partNumber].join("|").localeCompare([b.project, b.product, b.partNumber].join("|"))));
+        setFinishedProductReferenceForm(emptyFinishedProductForm);
+        setEditingFinishedProductReference(null);
+        successToast(isEdit ? "Produit fini modifie" : "Produit fini ajoute");
+      })
+      .catch((exception) => {
+        const message = exception?.message || "Sauvegarde du produit fini impossible. Verifiez les cles uniques.";
+        setError(message);
+        errorAlert(message);
+        throw exception;
+      })
+      .finally(() => setSaving(false));
+  }
+
+  function startFinishedProductReferenceEdit(finishedProduct) {
+    setEditingFinishedProductReference(finishedProduct.id);
+    setFinishedProductReferenceForm({
+      client: finishedProduct.client || "",
+      project: finishedProduct.project || "",
+      partNumber: finishedProduct.partNumber || "",
+      designation: finishedProduct.designation || "",
+      customerPn: finishedProduct.customerPn || "",
+      product: finishedProduct.product || "",
+      coiffeIndex: finishedProduct.coiffeIndex || "",
+      drawingIndex: finishedProduct.drawingIndex || "",
+      reducedCode: finishedProduct.reducedCode || "",
+      salePrice: finishedProduct.salePrice ?? "",
+      productionIntegrationDate: finishedProduct.productionIntegrationDate || "",
+      comments: finishedProduct.comments || ""
+    });
+  }
+
+  function handleDeleteFinishedProductReference(id) {
+    const finishedProduct = finishedProductReferences.find((item) => item.id === id);
+    setError("");
+    confirmDelete("Supprimer le produit fini ?", `Le produit fini ${finishedProduct?.partNumber || "selectionne"} sera supprime definitivement.`).then((result) => {
+      if (!result.isConfirmed) return;
+      deleteFinishedProductReference(id)
+        .then(() => {
+          setFinishedProductReferences((items) => items.filter((item) => item.id !== id));
+          if (editingFinishedProductReference === id) {
+            setEditingFinishedProductReference(null);
+            setFinishedProductReferenceForm(emptyFinishedProductForm);
+          }
+          successToast("Produit fini supprime");
+        })
+        .catch(() => {
+          const message = "Suppression produit fini impossible.";
+          setError(message);
+          errorAlert(message);
+        });
+    });
+  }
+
   function handleSaveRoleReference(event) {
     event.preventDefault();
     const name = roleReferenceForm.name.trim();
@@ -1788,7 +1970,7 @@ function App() {
   function handleSavePlanningRule(event) {
     event.preventDefault();
     if (!planningRuleForm.actionTitle.trim()) return;
-    const proofDocumentFile = firstFileFromValue(planningRuleForm.proofDocumentFile);
+    const proofDocumentFiles = filesFromValue(planningRuleForm.proofDocumentFile);
     setSaving(true);
     setError("");
     const payload = {
@@ -1799,7 +1981,7 @@ function App() {
       responsible: planningRuleForm.responsible.trim() || null,
       validator: planningRuleForm.validator.trim() || null,
       expectedEvidence: planningRuleForm.expectedEvidence.trim() || null,
-      evidenceRequired: planningRuleForm.evidenceRequired || Boolean(proofDocumentFile) || Boolean(planningRuleForm.proofDocumentFileName),
+      evidenceRequired: planningRuleForm.evidenceRequired || proofDocumentFiles.length > 0 || hasPlanningRuleProofDocument(planningRuleForm),
       dependencyActionTitle: planningRuleForm.dependencyActionTitle.trim() || null,
       dependencyAnchor: "OUTPUT",
       durationDays: Number(planningRuleForm.durationDays) || 0
@@ -1808,8 +1990,8 @@ function App() {
     const request = isEdit ? updateActionPlanningRule(editingPlanningRule, payload) : createActionPlanningRule(payload);
     request
       .then((savedRule) => {
-        if (!proofDocumentFile) return savedRule;
-        return uploadActionPlanningRuleProofDocument(savedRule.id, proofDocumentFile);
+        if (proofDocumentFiles.length === 0) return savedRule;
+        return uploadActionPlanningRuleProofDocumentFiles(savedRule.id, proofDocumentFiles);
       })
       .then((savedRule) => {
         setPlanningRules((items) => [...items.filter((item) => item.id !== savedRule.id), savedRule].sort(comparePlanningRules));
@@ -1851,8 +2033,30 @@ function App() {
             proofDocumentContentType: "",
             proofDocumentFileSize: null,
             proofDocumentPublicId: "",
-            proofDocumentResourceType: ""
+            proofDocumentResourceType: "",
+            proofDocuments: []
           }));
+          successToast("Element preuve supprime");
+        })
+        .catch(() => {
+          const message = "Suppression de l'element preuve impossible.";
+          setError(message);
+          errorAlert(message);
+        })
+        .finally(() => setSaving(false));
+    });
+  }
+
+  function handleDeletePlanningRuleProofDocumentItem(proofDocumentId) {
+    if (!proofDocumentId) return;
+    confirmDelete("Supprimer l'element preuve ?", "Le document sera supprime de cette action standard et de Cloudinary.").then((result) => {
+      if (!result.isConfirmed) return;
+      setSaving(true);
+      setError("");
+      deleteActionPlanningRuleProofDocumentItem(proofDocumentId)
+        .then((savedRule) => {
+          setPlanningRules((items) => [...items.filter((item) => item.id !== savedRule.id), savedRule].sort(comparePlanningRules));
+          setPlanningRuleForm((form) => form.id === savedRule.id ? { ...form, ...savedRule, proofDocumentFile: form.proofDocumentFile } : form);
           successToast("Element preuve supprime");
         })
         .catch(() => {
@@ -1910,6 +2114,7 @@ function App() {
       proofDocumentFileSize: rule.proofDocumentFileSize || null,
       proofDocumentPublicId: rule.proofDocumentPublicId || "",
       proofDocumentResourceType: rule.proofDocumentResourceType || "",
+      proofDocuments: rule.proofDocuments || [],
       evidenceRequired: Boolean(rule.evidenceRequired),
       dependencyActionTitle: rule.dependencyActionTitle || "",
       dependencyAnchor: rule.dependencyAnchor || "OUTPUT",
@@ -2208,7 +2413,6 @@ function App() {
             stats={dashboardStats}
             users={users}
             onCreateRequest={openCreateFlow}
-            onDeleteRequest={handleDeleteEcr}
             onOpenRequest={openRequest}
           />
         )}
@@ -2225,6 +2429,7 @@ function App() {
             }}
             onDeletePlanningRule={handleDeletePlanningRule}
             onDeletePlanningRuleProofDocument={handleDeletePlanningRuleProofDocument}
+            onDeletePlanningRuleProofDocumentItem={handleDeletePlanningRuleProofDocumentItem}
             onEditPlanningRule={startPlanningRuleEdit}
             onSubmitPlanningRule={handleSavePlanningRule}
             setPlanningRuleForm={setPlanningRuleForm}
@@ -2249,9 +2454,12 @@ function App() {
             clientForm={clientReferenceForm}
             clients={clientReferences}
             editingClient={editingClientReference}
+            editingFinishedProduct={editingFinishedProductReference}
             editingProduct={editingProductReference}
             editingProject={editingProject}
             editingRole={editingRoleReference}
+            finishedProductForm={finishedProductReferenceForm}
+            finishedProducts={finishedProductReferences}
             productForm={productReferenceForm}
             products={productReferences}
             projectForm={projectForm}
@@ -2263,6 +2471,10 @@ function App() {
             onCancelClientEdit={() => {
               setEditingClientReference(null);
               setClientReferenceForm({ name: "" });
+            }}
+            onCancelFinishedProductEdit={() => {
+              setEditingFinishedProductReference(null);
+              setFinishedProductReferenceForm(emptyFinishedProductForm);
             }}
             onCancelProductEdit={() => {
               setEditingProductReference(null);
@@ -2277,18 +2489,22 @@ function App() {
               setProjectForm({ name: "", projectTeam: "" });
             }}
             onDeleteClient={handleDeleteClientReference}
+            onDeleteFinishedProduct={handleDeleteFinishedProductReference}
             onDeleteProduct={handleDeleteProductReference}
             onDeleteProject={handleDeleteProject}
             onDeleteRole={handleDeleteRoleReference}
             onEditClient={startClientReferenceEdit}
+            onEditFinishedProduct={startFinishedProductReferenceEdit}
             onEditProduct={startProductReferenceEdit}
             onEditProject={startProjectEdit}
             onEditRole={startRoleReferenceEdit}
             onSubmitClient={handleSaveClientReference}
+            onSubmitFinishedProduct={handleSaveFinishedProductReference}
             onSubmitProduct={handleSaveProductReference}
             onSubmitProject={handleSaveProject}
             onSubmitRole={handleSaveRoleReference}
             setClientForm={setClientReferenceForm}
+            setFinishedProductForm={setFinishedProductReferenceForm}
             setProductForm={setProductReferenceForm}
             setProjectForm={setProjectForm}
             setRoleForm={setRoleReferenceForm}
@@ -2310,6 +2526,7 @@ function App() {
             projectFilter={projectFilter}
             projectOptions={projectOptions}
             query={query}
+            requestArchiveView={requestArchiveView}
             saving={saving}
             selectedId={selectedId}
             selectedRequest={selectedRequest}
@@ -2320,11 +2537,15 @@ function App() {
             setSelectedId={setSelectedId}
             setSelectedStage={setSelectedStage}
             setShowCreateForm={setShowCreateForm}
+            onRequestArchiveViewChange={handleRequestArchiveViewChange}
             handleCreateAction={handleCreateAction}
+            handleArchiveEcr={handleArchiveEcr}
+            handleDeleteAction={handleDeleteAction}
             handleStageChange={handleStageChange}
             handleToggleAction={handleToggleAction}
             handleDeleteActionAsset={handleDeleteActionAsset}
             handleUploadEvidence={handleUploadEvidence}
+            removeActionProofDocumentFile={removeActionProofDocumentFile}
             handleApprovePhase={handleApprovePhase}
             handleApproveActionValidation={handleApproveActionValidation}
             handleRejectActionValidation={handleRejectActionValidation}
@@ -2417,24 +2638,25 @@ function App() {
   );
 }
 
-function DashboardPage({ clients = [], currentUser, planningRules = [], products = [], projects, requests, roles = [], saving, stats, users = [], onCreateRequest, onDeleteRequest, onOpenRequest }) {
+function DashboardPage({ clients = [], currentUser, planningRules = [], products = [], projects, requests, roles = [], saving, stats, users = [], onCreateRequest, onOpenRequest }) {
   const allProjectsValue = "__ALL__";
   const [dossierProject, setDossierProject] = useState(allProjectsValue);
   const adminView = isAdminUser(currentUser);
-  const activeRequests = requests.filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED");
-  const closedRequests = requests.filter((request) => request.currentStage === "CLOSED");
-  const cancelledRequests = requests.filter((request) => request.currentStage === "CANCELLED");
+  const dashboardRequests = requests.filter((request) => !request.archived);
+  const activeRequests = dashboardRequests.filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED");
+  const closedRequests = dashboardRequests.filter((request) => request.currentStage === "CLOSED");
+  const cancelledRequests = dashboardRequests.filter((request) => request.currentStage === "CANCELLED");
   const lateRequests = activeRequests.filter((request) => {
     const sopDate = parseDateOnly(request.sopDate);
     return sopDate && sopDate < new Date();
   });
-  const newProjectRequests = requests.filter((request) => request.newVersion);
+  const newProjectRequests = dashboardRequests.filter((request) => request.newVersion);
   const stageEntries = getStages(true).map(([stage, label]) => {
-    const count = requests.filter((request) => request.currentStage === stage).length;
+    const count = dashboardRequests.filter((request) => request.currentStage === stage).length;
     return { stage, label, count };
   }).filter((entry) => entry.count > 0);
   const stageStatusMatrix = stageEntries.map((entry) => {
-    const phaseRequests = requests.filter((request) => request.currentStage === entry.stage);
+    const phaseRequests = dashboardRequests.filter((request) => request.currentStage === entry.stage);
     const phaseLate = phaseRequests.filter((request) => {
       const sopDate = parseDateOnly(request.sopDate);
       return sopDate && sopDate < new Date() && request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED";
@@ -2443,7 +2665,7 @@ function DashboardPage({ clients = [], currentUser, planningRules = [], products
     return { ...entry, active: Math.max(0, phaseRequests.length - phaseLate - phaseClosed), late: phaseLate, closed: phaseClosed };
   });
   const maxStageCount = Math.max(1, ...stageEntries.map((entry) => entry.count));
-  const projectLoad = Array.from(requests.reduce((map, request) => {
+  const projectLoad = Array.from(dashboardRequests.reduce((map, request) => {
     const projectName = request.modificationProject || "Projet non renseigne";
     const item = map.get(projectName) || { name: projectName, total: 0, active: 0, late: 0, representative: request };
     item.total += 1;
@@ -2467,30 +2689,30 @@ function DashboardPage({ clients = [], currentUser, planningRules = [], products
   const urgentRequests = [...lateRequests]
     .sort((first, second) => (parseDateOnly(first.sopDate) || new Date()) - (parseDateOnly(second.sopDate) || new Date()))
     .slice(0, 4);
-  const clientImpact = dashboardDistribution(requests, (request) => request.client || "Client non renseigne", 6);
-  const productImpact = dashboardDistribution(requests, (request) => request.product || "Produit non renseigne", 6);
-  const pilotLoad = dashboardDistribution(requests, (request) => request.pilot || "Pilote non renseigne", 6);
+  const clientImpact = dashboardDistribution(dashboardRequests, (request) => request.client || "Client non renseigne", 6);
+  const productImpact = dashboardDistribution(dashboardRequests, (request) => request.product || "Produit non renseigne", 6);
+  const pilotLoad = dashboardDistribution(dashboardRequests, (request) => request.pilot || "Pilote non renseigne", 6);
   const modificationTypes = [
-    { label: "Nouveau projet", count: requests.filter((request) => request.newVersion).length },
-    { label: "Digit change", count: requests.filter((request) => request.digitChange).length },
-    { label: "Component change", count: requests.filter((request) => request.componentChange).length },
-    { label: "Process change", count: requests.filter((request) => request.processChange).length },
-    { label: "Supplier change", count: requests.filter((request) => request.supplierChange).length }
+    { label: "Nouveau projet", count: dashboardRequests.filter((request) => request.newVersion).length },
+    { label: "Digit change", count: dashboardRequests.filter((request) => request.digitChange).length },
+    { label: "Component change", count: dashboardRequests.filter((request) => request.componentChange).length },
+    { label: "Process change", count: dashboardRequests.filter((request) => request.processChange).length },
+    { label: "Supplier change", count: dashboardRequests.filter((request) => request.supplierChange).length }
   ].filter((item) => item.count > 0);
   const maxTypeCount = Math.max(1, ...modificationTypes.map((item) => item.count));
   const rulesByPhase = dashboardDistribution(planningRules, (rule) => stageLabel(rule.stage, Boolean(rule.newProject)), 6);
   const enabledUsers = users.filter((user) => user.enabled !== false);
   const roleCoverage = dashboardDistribution(enabledUsers, (user) => userRoleLabel(user.role), 6);
-  const visibleRequests = requests
+  const visibleRequests = dashboardRequests
     .filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED")
     .slice(0, 5);
-  const recentRequests = visibleRequests.length > 0 ? visibleRequests : requests.slice(0, 5);
+  const recentRequests = visibleRequests.length > 0 ? visibleRequests : dashboardRequests.slice(0, 5);
   const projectOptions = useMemo(() => Array.from(new Set([
     ...projects.map((project) => project.name),
-    ...requests.map((request) => request.modificationProject)
-  ].filter(Boolean))).sort((first, second) => first.localeCompare(second, "fr", { sensitivity: "base" })), [projects, requests]);
+    ...dashboardRequests.map((request) => request.modificationProject)
+  ].filter(Boolean))).sort((first, second) => first.localeCompare(second, "fr", { sensitivity: "base" })), [projects, dashboardRequests]);
   const exportingAllProjects = dossierProject === allProjectsValue;
-  const dossierRequests = exportingAllProjects ? requests : requests.filter((request) => request.modificationProject === dossierProject);
+  const dossierRequests = exportingAllProjects ? dashboardRequests : dashboardRequests.filter((request) => request.modificationProject === dossierProject);
   const dossierExportLabel = exportingAllProjects ? "Tous les projets" : dossierProject;
 
   function exportProjectDossierReviews(format) {
@@ -3407,9 +3629,12 @@ function PreferentialsPage({
   clientForm,
   clients,
   editingClient,
+  editingFinishedProduct,
   editingProduct,
   editingProject,
   editingRole,
+  finishedProductForm,
+  finishedProducts,
   productForm,
   products,
   projectForm,
@@ -3419,22 +3644,27 @@ function PreferentialsPage({
   saving,
   users,
   onCancelClientEdit,
+  onCancelFinishedProductEdit,
   onCancelProductEdit,
   onCancelProjectEdit,
   onCancelRoleEdit,
   onDeleteClient,
+  onDeleteFinishedProduct,
   onDeleteProduct,
   onDeleteProject,
   onDeleteRole,
   onEditClient,
+  onEditFinishedProduct,
   onEditProduct,
   onEditProject,
   onEditRole,
   onSubmitClient,
+  onSubmitFinishedProduct,
   onSubmitProduct,
   onSubmitProject,
   onSubmitRole,
   setClientForm,
+  setFinishedProductForm,
   setProductForm,
   setProjectForm,
   setRoleForm
@@ -3444,6 +3674,7 @@ function PreferentialsPage({
     { key: "projects", label: "Projets", count: projects.length },
     { key: "clients", label: "Clients", count: clients.length },
     { key: "products", label: "Produits", count: products.length },
+    { key: "finished-products", label: "Produits finis", count: finishedProducts.length },
     { key: "roles", label: "Rôles d'action", count: roles.length }
   ];
 
@@ -3513,6 +3744,22 @@ function PreferentialsPage({
           setForm={setProductForm}
         />
           )}
+          {activePreferential === "finished-products" && (
+        <FinishedProductPreferentialPanel
+          clients={clients}
+          editing={editingFinishedProduct}
+          form={finishedProductForm}
+          products={products}
+          projects={projects}
+          references={finishedProducts}
+          saving={saving}
+          onCancelEdit={onCancelFinishedProductEdit}
+          onDelete={onDeleteFinishedProduct}
+          onEdit={onEditFinishedProduct}
+          onSubmit={onSubmitFinishedProduct}
+          setForm={setFinishedProductForm}
+        />
+          )}
           {activePreferential === "roles" && (
         <PreferentialPanel
           count={roles.length}
@@ -3531,6 +3778,152 @@ function PreferentialsPage({
         />
           )}
         </div>
+      </div>
+    </section>
+  );
+}
+
+function FinishedProductPreferentialPanel({ clients = [], editing, form, products, projects, references, saving, onCancelEdit, onDelete, onEdit, onSubmit, setForm }) {
+  const [searchTerm, setSearchTerm] = useState("");
+  const clientNames = uniqueSorted(clients.map((client) => client.name));
+  const projectNames = uniqueSorted(projects.map((project) => project.name));
+  const productNames = uniqueSorted(products.map((product) => product.name));
+  const filteredReferences = useFilteredItems(references, searchTerm, (reference) => [
+    reference.client,
+    reference.project,
+    reference.partNumber,
+    reference.designation,
+    reference.customerPn,
+    reference.product,
+    reference.coiffeIndex,
+    reference.drawingIndex,
+    reference.reducedCode,
+    reference.comments
+  ]);
+  const { currentPage, pageCount, pagedItems, setCurrentPage } = usePaginatedItems(filteredReferences, PREFERENTIAL_PAGE_SIZE);
+
+  return (
+    <section className="panel preferential-panel">
+      <form className="form-page compact-preferential-form finished-product-form" onSubmit={onSubmit}>
+        <div className="section-title">
+          <div>
+            <h2>Produits finis</h2>
+            <span>{references.length} element{references.length > 1 ? "s" : ""}</span>
+          </div>
+        </div>
+        <div className="finished-product-grid">
+          <label>
+            Client
+            <select required value={form.client} onChange={(event) => setForm((current) => ({ ...current, client: event.target.value }))}>
+              <option value="">Selectionner un client</option>
+              {includeCurrentOption(clientNames, form.client).map((client) => <option key={client} value={client}>{client}</option>)}
+            </select>
+          </label>
+          <label>
+            Projet
+            <select required value={form.project} onChange={(event) => setForm((current) => ({ ...current, project: event.target.value }))}>
+              <option value="">Selectionner un projet</option>
+              {projectNames.map((project) => <option key={project} value={project}>{project}</option>)}
+            </select>
+          </label>
+          <label>
+            Part number
+            <input required value={form.partNumber} onChange={(event) => setForm((current) => ({ ...current, partNumber: event.target.value }))} />
+          </label>
+          <label>
+            Designation
+            <input value={form.designation} onChange={(event) => setForm((current) => ({ ...current, designation: event.target.value }))} />
+          </label>
+          <label>
+            Customer PN
+            <input value={form.customerPn} onChange={(event) => setForm((current) => ({ ...current, customerPn: event.target.value }))} />
+          </label>
+          <label>
+            Produit
+            <select required value={form.product} onChange={(event) => setForm((current) => ({ ...current, product: event.target.value }))}>
+              <option value="">Selectionner un produit</option>
+              {productNames.map((product) => <option key={product} value={product}>{product}</option>)}
+            </select>
+          </label>
+          <label>
+            Indice coiffe
+            <input value={form.coiffeIndex} onChange={(event) => setForm((current) => ({ ...current, coiffeIndex: event.target.value }))} />
+          </label>
+          <label>
+            Indice drawing
+            <input value={form.drawingIndex} onChange={(event) => setForm((current) => ({ ...current, drawingIndex: event.target.value }))} />
+          </label>
+          <label>
+            Code reduit
+            <input required value={form.reducedCode} onChange={(event) => setForm((current) => ({ ...current, reducedCode: event.target.value }))} />
+          </label>
+          <label>
+            Prix vente
+            <input min="0" step="0.001" type="number" value={form.salePrice} onChange={(event) => setForm((current) => ({ ...current, salePrice: event.target.value }))} />
+          </label>
+          <label>
+            Date integration production
+            <input type="date" value={form.productionIntegrationDate} onChange={(event) => setForm((current) => ({ ...current, productionIntegrationDate: event.target.value }))} />
+          </label>
+          <label className="finished-product-comments">
+            Commentaires
+            <textarea value={form.comments} onChange={(event) => setForm((current) => ({ ...current, comments: event.target.value }))} />
+          </label>
+        </div>
+        <div className="button-row">
+          <button className="primary-action" disabled={saving || clientNames.length === 0 || projectNames.length === 0 || productNames.length === 0} type="submit">
+            <Save size={16} />
+            Enregistrer
+          </button>
+          {editing && <button className="secondary-action" type="button" onClick={onCancelEdit}>Annuler</button>}
+        </div>
+        {clientNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un client.</p>}
+        {projectNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un projet.</p>}
+        {productNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un produit.</p>}
+      </form>
+      <label className="preferential-search">
+        Rechercher
+        <div className="input-with-icon">
+          <Search size={16} />
+          <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Rechercher dans les produits finis" />
+        </div>
+      </label>
+      <div className="table-list">
+        {references.length === 0 ? (
+          <EmptyState title="Aucun produit fini" text="Ajoutez les produits finis par projet et produit." compact />
+        ) : filteredReferences.length === 0 ? (
+          <EmptyState title="Aucun resultat" text="Essayez un autre terme de recherche." compact />
+        ) : (
+          <>
+            {pagedItems.map((reference) => (
+              <article className="project-table-row preferential-table-row finished-product-row" key={reference.id}>
+                <div>
+                  <strong>{reference.partNumber}</strong>
+                  <span>{reference.project} | {reference.product} | Code reduit: {reference.reducedCode}</span>
+                  <small>{[reference.client, reference.designation, reference.customerPn].filter(Boolean).join(" | ") || "Details non renseignes"}</small>
+                </div>
+                <div className="finished-product-meta">
+                  <span>{reference.salePrice != null ? `${reference.salePrice} EUR` : "-"}</span>
+                  <span>{reference.productionIntegrationDate || "-"}</span>
+                </div>
+                <div className="row-actions">
+                  <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(reference)} aria-label={`Modifier ${reference.partNumber}`} title="Modifier">
+                    <Pencil size={15} />
+                  </button>
+                  <button className="ghost-icon" type="button" onClick={() => onDelete(reference.id)} title="Supprimer">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </article>
+            ))}
+            <PaginationControls
+              currentPage={currentPage}
+              pageCount={pageCount}
+              totalCount={filteredReferences.length}
+              onPageChange={setCurrentPage}
+            />
+          </>
+        )}
       </div>
     </section>
   );
@@ -3809,6 +4202,7 @@ function ProjectsPage({
   onCancelPlanningRuleEdit,
   onDeletePlanningRule,
   onDeletePlanningRuleProofDocument,
+  onDeletePlanningRuleProofDocumentItem,
   onEditPlanningRule,
   onSubmitPlanningRule,
   setPlanningRuleForm
@@ -3824,6 +4218,7 @@ function ProjectsPage({
         onCancelEdit={onCancelPlanningRuleEdit}
         onDelete={onDeletePlanningRule}
         onDeleteProofDocument={onDeletePlanningRuleProofDocument}
+        onDeleteProofDocumentItem={onDeletePlanningRuleProofDocumentItem}
         onEdit={onEditPlanningRule}
         onSubmit={onSubmitPlanningRule}
         setForm={setPlanningRuleForm}
@@ -3992,6 +4387,21 @@ function filesFromValue(value) {
   return [value].filter(Boolean);
 }
 
+function fileIdentity(file) {
+  return [file?.name, file?.size, file?.lastModified].join("::");
+}
+
+function mergeSelectedFiles(currentValue, nextValue) {
+  const files = [...filesFromValue(currentValue), ...filesFromValue(nextValue)];
+  const seen = new Set();
+  return files.filter((file) => {
+    const key = fileIdentity(file);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function firstFileFromValue(value) {
   return filesFromValue(value)[0] || null;
 }
@@ -4000,7 +4410,7 @@ function fileNamesLabel(value, fallback) {
   const files = filesFromValue(value);
   if (files.length === 0) return fallback;
   if (files.length === 1) return files[0].name;
-  return `${files.length} assets sélectionnés`;
+  return `${files.length} fichiers selectionnes`;
 }
 
 function uploadActionEvidenceFiles(actionId, files) {
@@ -4008,6 +4418,38 @@ function uploadActionEvidenceFiles(actionId, files) {
     (promise, file) => promise.then(() => uploadActionEvidence(actionId, file)),
     Promise.resolve(null)
   );
+}
+
+function uploadActionProofDocumentFiles(actionId, files) {
+  return files.reduce(
+    (promise, file) => promise.then(() => uploadActionProofDocument(actionId, file)),
+    Promise.resolve(null)
+  );
+}
+
+function uploadActionPlanningRuleProofDocumentFiles(ruleId, files) {
+  return files.reduce(
+    (promise, file) => promise.then(() => uploadActionPlanningRuleProofDocument(ruleId, file)),
+    Promise.resolve(null)
+  );
+}
+
+function hasPlanningRuleProofDocument(rule) {
+  return filesFromValue(rule?.proofDocumentFile).length > 0
+    || Boolean(String(rule?.proofDocumentFileName || rule?.proofDocumentFileUrl || "").trim())
+    || (Array.isArray(rule?.proofDocuments) && rule.proofDocuments.length > 0);
+}
+
+function actionProofDocuments(action) {
+  const documents = Array.isArray(action?.proofDocuments) ? action.proofDocuments : [];
+  if (documents.length > 0) return documents;
+  if (!action?.proofDocumentFileName && !action?.proofDocumentFileUrl) return [];
+  return [{
+    id: `legacy-proof-${action.id}`,
+    legacy: true,
+    fileName: action.proofDocumentFileName || action.proofDocument || "Element preuve",
+    fileUrl: actionProofDocumentUrl(action.id)
+  }];
 }
 
 function actionAssets(action) {
@@ -4027,11 +4469,15 @@ function hasActionAsset(action) {
 }
 
 function hasActionProofDocument(action) {
-  return Boolean(action?.proofDocumentFile) || Boolean(String(action?.proofDocumentFileName || action?.proofDocumentFileUrl || "").trim());
+  return filesFromValue(action?.proofDocumentFile).length > 0 || actionProofDocuments(action).length > 0;
 }
 
 function actionAssetUrl(action, asset) {
   return asset?.legacy ? actionEvidenceUrl(action.id) : actionAssetDownloadUrl(asset.id);
+}
+
+function actionProofDocumentItemUrl(action, proofDocument) {
+  return proofDocument?.legacy ? actionProofDocumentUrl(action.id) : actionProofDocumentDownloadUrl(proofDocument.id);
 }
 
 function modificationTypesLabel(request) {
@@ -4124,11 +4570,14 @@ function ModificationsPage(props) {
     currentUser,
     doneCount,
     filteredRequests,
+    handleArchiveEcr,
     handleCreateAction,
+    handleDeleteAction,
     handleStageChange,
     handleToggleAction,
     handleDeleteActionAsset,
     handleUploadEvidence,
+    removeActionProofDocumentFile,
     handleApprovePhase,
     handleApproveActionValidation,
     handleRejectActionValidation,
@@ -4142,7 +4591,9 @@ function ModificationsPage(props) {
     projectFilter,
     projectOptions,
     query,
+    requestArchiveView,
     onEditRequest,
+    onRequestArchiveViewChange,
     onUpdateDossierReview,
     saving,
     selectedId,
@@ -4211,6 +4662,26 @@ function ModificationsPage(props) {
           <ClipboardList size={16} />
           Liste modifications
         </button>
+        {canAdmin && (
+          <div className="request-archive-toggle" aria-label="Filtrer les modifications archivees">
+            <button
+              className={requestArchiveView === "active" ? "active" : ""}
+              disabled={saving}
+              onClick={() => onRequestArchiveViewChange("active")}
+              type="button"
+            >
+              Actives
+            </button>
+            <button
+              className={requestArchiveView === "all" ? "active" : ""}
+              disabled={saving}
+              onClick={() => onRequestArchiveViewChange("all")}
+              type="button"
+            >
+              Toutes
+            </button>
+          </div>
+        )}
         <button className="primary-action" type="button" onClick={() => {
           setShowCreateForm(true);
         }} disabled={!canAdmin}>
@@ -4337,6 +4808,7 @@ function ModificationsPage(props) {
                   currentUser={currentUser}
                   doneCount={doneCount}
                   handleCreateAction={handleCreateAction}
+                  handleDeleteAction={handleDeleteAction}
                   handleToggleAction={handleToggleAction}
 
                   handleApproveActionValidation={handleApproveActionValidation}
@@ -4351,10 +4823,12 @@ function ModificationsPage(props) {
                   saving={saving}
                   selectedRequest={selectedRequest}
                   phaseValidation={currentValidation}
+                  phaseValidations={phaseValidations}
                   stageNewProject={Boolean(selectedRequest.newVersion)}
                   selectedStages={selectedStages}
                   selectedStage={selectedStage}
                   updateActionForm={updateActionForm}
+                  removeActionProofDocumentFile={removeActionProofDocumentFile}
                 />
                 <ChecklistPanel checklist={checklist} />
               </section>
@@ -4387,15 +4861,31 @@ function ModificationsPage(props) {
               {filteredRequests.length === 0 ? (
                 <EmptyState title="Aucun résultat" text="Essayez un client, un projet, un produit ou un pilote." compact />
               ) : filteredRequests.map((request) => (
+                <article className="request-card-row" key={request.id}>
                 <button
                   className={request.id === selectedId ? "request-card active" : "request-card"}
-                  key={request.id}
                   onClick={() => selectRequest(request)}
+                  type="button"
                 >
                   <span className="request-title">{request.modificationNumber || request.client}</span>
                   <span>{request.modificationProject || request.product || "Projet non renseigné"}</span>
-                  <strong className={`stage-pill ${stageColorClass(request.currentStage, Boolean(request.newVersion))}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</strong>
+                  <div className="request-card-status">
+                    <strong className={`stage-pill ${stageColorClass(request.currentStage, Boolean(request.newVersion))}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</strong>
+                    {request.archived && <span className="archive-badge">Archivee</span>}
+                  </div>
                 </button>
+                  {canAdmin && (
+                    <button
+                      className="ghost-icon archive-request-action"
+                      disabled={saving}
+                      type="button"
+                      onClick={() => handleArchiveEcr(request, !request.archived)}
+                      title={request.archived ? "Desarchiver la modification" : "Archiver la modification"}
+                    >
+                      {request.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+                    </button>
+                  )}
+                </article>
               ))}
             </div>
           </section>
@@ -4587,7 +5077,7 @@ function phaseValidationStatusLabel(status) {
   return "Phase refusee";
 }
 
-function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleToggleAction, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, isCriticalAction, lateActions, phaseValidation, requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm }) {
+function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleDeleteAction, handleToggleAction, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, isCriticalAction, lateActions, phaseValidation, phaseValidations = [], requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm, removeActionProofDocumentFile }) {
   const [expanded, setExpanded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const stageTitle = stageLabel(selectedStage, stageNewProject);
@@ -4628,12 +5118,14 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
         handleApproveActionValidation={handleApproveActionValidation}
         handleRejectActionValidation={handleRejectActionValidation}
         handleRequestActionValidation={handleRequestActionValidation}
+        handleDeleteAction={handleDeleteAction}
         handleToggleAction={handleToggleAction}
         handleDeleteActionAsset={handleDeleteActionAsset}
         handleUploadEvidence={handleUploadEvidence}
         canAdmin={canAdmin}
         isCriticalAction={isCriticalAction}
         requiresEvidence={requiresEvidence}
+        phaseValidations={phaseValidations}
         saving={saving}
         selectedRequest={selectedRequest}
       />
@@ -4664,6 +5156,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
               handleApproveActionValidation={handleApproveActionValidation}
               handleRejectActionValidation={handleRejectActionValidation}
               handleRequestActionValidation={handleRequestActionValidation}
+              handleDeleteAction={handleDeleteAction}
               expanded
               handleToggleAction={handleToggleAction}
               handleDeleteActionAsset={handleDeleteActionAsset}
@@ -4671,6 +5164,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
               canAdmin={canAdmin}
               isCriticalAction={isCriticalAction}
               requiresEvidence={requiresEvidence}
+              phaseValidations={phaseValidations}
               saving={saving}
               selectedRequest={selectedRequest}
             />
@@ -4689,13 +5183,14 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
           onClose={() => setCreateOpen(false)}
           onSubmit={submitCreateAction}
           updateActionForm={updateActionForm}
+          removeActionProofDocumentFile={removeActionProofDocumentFile}
         />
       )}
     </section>
   );
 }
 
-function ActionList({ actions, currentUser, expanded = false, phaseValidation, handleToggleAction, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, requiresEvidence, saving, selectedRequest }) {
+function ActionList({ actions, currentUser, expanded = false, phaseValidation, phaseValidations = [], handleToggleAction, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteAction, handleDeleteActionAsset, handleUploadEvidence, requiresEvidence, saving, selectedRequest }) {
   return (
     <>
       <div className={expanded ? "action-list expanded" : "action-list"}>
@@ -4705,6 +5200,7 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, h
           actions.map((action) => {
             const blockingAction = blockingActionFor(action, actions);
             const isBlocked = Boolean(action.dependsOnActionId && (!blockingAction || !isActionDone(blockingAction)));
+            const canDeleteAction = canDeleteActionForUser(currentUser, action, selectedRequest, phaseValidations);
 
             return (
             <article className={action.late ? "action-row late" : "action-row"} key={action.id}>
@@ -4728,11 +5224,13 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, h
                 <span className="evidence-meta">
                   <em>Element preuve</em>
                   <strong className="asset-link-list">
-                    {hasActionProofDocument(action) ? (
-                      <a className="file-link" href={actionProofDocumentUrl(action.id)} target="_blank" rel="noreferrer">
-                        {action.proofDocumentFileName || action.proofDocument || "Element preuve"}
-                      </a>
-                    ) : "-"}
+                    {actionProofDocuments(action).length > 0 ? actionProofDocuments(action).map((proofDocument) => (
+                      <span className="asset-link-item" key={proofDocument.id || proofDocument.fileName}>
+                        <a className="file-link" href={actionProofDocumentItemUrl(action, proofDocument)} target="_blank" rel="noreferrer">
+                          {proofDocument.fileName || "Element preuve"}
+                        </a>
+                      </span>
+                    )) : "-"}
                   </strong>
                 </span>
                 <span className="evidence-meta">
@@ -4753,10 +5251,22 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, h
                   </strong>
                   <label className={canManageActionForUser(currentUser, action) ? "row-upload asset-upload-action" : "row-upload asset-upload-action disabled"} title="Affecter un asset">
                     <Upload size={15} />
-                    <input disabled={saving || !canManageActionForUser(currentUser, action)} multiple type="file" onChange={(event) => handleUploadEvidence(action, event.target.files)} />
+                    <input disabled={saving || !canManageActionForUser(currentUser, action)} multiple type="file" onChange={(event) => {
+                      const selectedFiles = Array.from(event.currentTarget.files || []);
+                      handleUploadEvidence(action, selectedFiles);
+                      event.currentTarget.value = "";
+                    }} />
                   </label>
                 </span>
                 <span><em>Status</em><small className={`status ${statusClass(action.status)}`}>{readableStatus(action.status)}</small></span>
+                {canDeleteAction && (
+                  <span className="action-row-actions">
+                    <em>Action</em>
+                    <button className="ghost-icon action-delete-action" disabled={saving} type="button" onClick={() => handleDeleteAction(action)} title="Supprimer l'action">
+                      <Trash2 size={14} />
+                    </button>
+                  </span>
+                )}
                 {phaseValidation && (
                   <span className="action-validation-cell">
                     <em>Validation</em>
@@ -4862,12 +5372,21 @@ function ActionRoleSelect({ options = [], placeholder = "Selectionner un role", 
   );
 }
 
-function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCriticalAction, saving, selectedStages = [], stageNewProject, onClose, onSubmit, updateActionForm }) {
+function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCriticalAction, saving, selectedStages = [], stageNewProject, onClose, onSubmit, updateActionForm, removeActionProofDocumentFile }) {
   const selectedActionStage = actionForm.stage || selectedStages[0]?.[0] || "";
+  const selectedProofDocumentFiles = filesFromValue(actionForm.proofDocumentFile);
   const dependencyOptions = actions
     .filter((action) => action.stage === selectedActionStage)
     .filter((action) => action.id)
     .sort((first, second) => String(first.title || "").localeCompare(String(second.title || "")));
+
+  function addProofDocumentFiles(event) {
+    const selectedFiles = Array.from(event.currentTarget.files || []);
+    if (selectedFiles.length > 0) {
+      updateActionForm("proofDocumentFile", selectedFiles);
+    }
+    event.currentTarget.value = "";
+  }
 
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
@@ -4935,15 +5454,30 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
             Jours de travail
             <input min="0" type="number" value={actionForm.workDurationDays} onChange={(event) => updateActionForm("workDurationDays", event.target.value)} />
           </label>
-          <label className="file-picker">
-            <FileText size={15} />
-            <span>{fileNamesLabel(actionForm.proofDocumentFile, "Element preuve")}</span>
-            <input type="file" onChange={(event) => updateActionForm("proofDocumentFile", event.target.files?.[0] || null)} />
-          </label>
+          <div className="proof-document-picker-field">
+            <label className="file-picker proof-document-picker">
+              <FileText size={15} />
+              <span>{selectedProofDocumentFiles.length > 0 ? "Ajouter un autre element preuve" : "Element preuve"}</span>
+              <input multiple type="file" onChange={addProofDocumentFiles} />
+            </label>
+            {selectedProofDocumentFiles.length > 0 && (
+              <div className="selected-file-list">
+                {selectedProofDocumentFiles.map((file, index) => (
+                  <span className="selected-file-item" key={`${file.name}-${file.size}-${file.lastModified}-${index}`}>
+                    <FileText size={14} />
+                    <strong>{file.name}</strong>
+                    <button className="ghost-icon" type="button" onClick={() => removeActionProofDocumentFile(index)} title="Retirer ce fichier">
+                      <X size={14} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
           <label className="asset-required-field user-enabled-field">
             <input
-              checked={actionForm.evidenceRequired || Boolean(actionForm.proofDocumentFile) || isCriticalAction(actionForm)}
-              disabled={Boolean(actionForm.proofDocumentFile) || isCriticalAction(actionForm)}
+              checked={actionForm.evidenceRequired || selectedProofDocumentFiles.length > 0 || isCriticalAction(actionForm)}
+              disabled={selectedProofDocumentFiles.length > 0 || isCriticalAction(actionForm)}
               type="checkbox"
               onChange={(event) => updateActionForm("evidenceRequired", event.target.checked)}
             />

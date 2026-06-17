@@ -65,6 +65,21 @@ export const emptyPlanningRuleForm = {
   durationDays: 1
 };
 
+export const emptyFinishedProductForm = {
+  client: "",
+  project: "",
+  partNumber: "",
+  designation: "",
+  customerPn: "",
+  product: "",
+  coiffeIndex: "",
+  drawingIndex: "",
+  reducedCode: "",
+  salePrice: "",
+  productionIntegrationDate: "",
+  comments: ""
+};
+
 export const emptyUserForm = {
   fullName: "",
   username: "",

@@ -9,6 +9,7 @@ import com.gestionplanning.storage.StoredAsset;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -24,15 +25,18 @@ public class ActionPlanningRuleController {
     private final ActionPlanningService planningService;
     private final EcrTemplateService templateService;
     private final CloudinaryStorageService storageService;
+    private final ActionPlanningRuleProofDocumentRepository proofDocumentRepository;
 
     public ActionPlanningRuleController(ActionPlanningRuleRepository ruleRepository, EcrRequestRepository requestRepository,
                                         ActionPlanningService planningService, EcrTemplateService templateService,
-                                        CloudinaryStorageService storageService) {
+                                        CloudinaryStorageService storageService,
+                                        ActionPlanningRuleProofDocumentRepository proofDocumentRepository) {
         this.ruleRepository = ruleRepository;
         this.requestRepository = requestRepository;
         this.planningService = planningService;
         this.templateService = templateService;
         this.storageService = storageService;
+        this.proofDocumentRepository = proofDocumentRepository;
     }
 
     @GetMapping
@@ -88,8 +92,16 @@ public class ActionPlanningRuleController {
         }
         return ruleRepository.findById(id)
                 .map(rule -> {
-                    storageService.deleteQuietly(rule.getProofDocumentPublicId(), rule.getProofDocumentResourceType());
                     StoredAsset asset = storageService.upload(file, "gestion-planning/action-planning-rules/" + id + "/proof-document");
+                    ActionPlanningRuleProofDocument proofDocument = new ActionPlanningRuleProofDocument();
+                    proofDocument.setRule(rule);
+                    proofDocument.setFileName(asset.getFileName());
+                    proofDocument.setContentType(asset.getContentType());
+                    proofDocument.setFileSize(asset.getSize());
+                    proofDocument.setFileUrl(asset.getUrl());
+                    proofDocument.setPublicId(asset.getPublicId());
+                    proofDocument.setResourceType(asset.getResourceType());
+                    proofDocumentRepository.save(proofDocument);
                     rule.setProofDocument(asset.getFileName());
                     rule.setProofDocumentFileName(asset.getFileName());
                     rule.setProofDocumentContentType(asset.getContentType());
@@ -103,6 +115,23 @@ public class ActionPlanningRuleController {
                     return ResponseEntity.ok(savedRule);
                 })
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/proof-documents/{proofDocumentId}/download")
+    public ResponseEntity<?> downloadProofDocumentItem(@PathVariable Long proofDocumentId) {
+        return proofDocumentRepository.findById(proofDocumentId).<ResponseEntity<?>>map(proofDocument -> {
+            try {
+                DownloadedAsset asset = storageService.download(proofDocument.getPublicId(), proofDocument.getResourceType(), proofDocument.getFileUrl(), proofDocument.getContentType());
+                return ResponseEntity.ok()
+                        .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(proofDocument.getFileName(), asset.getContentType()))
+                        .contentType(MediaType.parseMediaType(asset.getContentType()))
+                        .body(asset.getData());
+            } catch (RuntimeException exception) {
+                return ResponseEntity.status(502)
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .body("Telechargement impossible depuis Cloudinary. Activez la livraison des fichiers PDF/ZIP dans les parametres Security de Cloudinary, puis reessayez.");
+            }
+        }).orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/{id}/proof-document")
@@ -126,10 +155,14 @@ public class ActionPlanningRuleController {
     }
 
     @DeleteMapping("/{id}/proof-document")
+    @Transactional
     public ResponseEntity<ActionPlanningRule> deleteProofDocument(@PathVariable Long id) {
         return ruleRepository.findById(id)
                 .map(rule -> {
                     storageService.deleteQuietly(rule.getProofDocumentPublicId(), rule.getProofDocumentResourceType());
+                    proofDocumentRepository.findByRule_IdOrderByUploadedAtDescIdDesc(id)
+                            .forEach(proofDocument -> storageService.deleteQuietly(proofDocument.getPublicId(), proofDocument.getResourceType()));
+                    proofDocumentRepository.deleteByRule_Id(id);
                     clearProofDocument(rule);
                     ActionPlanningRule savedRule = ruleRepository.save(rule);
                     recalculateAllRequests();
@@ -138,11 +171,32 @@ public class ActionPlanningRuleController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @DeleteMapping("/proof-documents/{proofDocumentId}")
+    @Transactional
+    public ResponseEntity<ActionPlanningRule> deleteProofDocumentItem(@PathVariable Long proofDocumentId) {
+        return proofDocumentRepository.findById(proofDocumentId)
+                .map(proofDocument -> {
+                    ActionPlanningRule rule = proofDocument.getRule();
+                    storageService.deleteQuietly(proofDocument.getPublicId(), proofDocument.getResourceType());
+                    proofDocumentRepository.delete(proofDocument);
+                    proofDocumentRepository.flush();
+                    syncLatestProofDocumentMetadata(rule);
+                    ActionPlanningRule savedRule = ruleRepository.save(rule);
+                    recalculateAllRequests();
+                    return ResponseEntity.ok(savedRule);
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @DeleteMapping("/{id}")
+    @Transactional
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         return ruleRepository.findById(id)
                 .map(rule -> {
                     storageService.deleteQuietly(rule.getProofDocumentPublicId(), rule.getProofDocumentResourceType());
+                    proofDocumentRepository.findByRule_IdOrderByUploadedAtDescIdDesc(id)
+                            .forEach(proofDocument -> storageService.deleteQuietly(proofDocument.getPublicId(), proofDocument.getResourceType()));
+                    proofDocumentRepository.deleteByRule_Id(id);
                     ruleRepository.delete(rule);
                     recalculateAllRequests();
                     return ResponseEntity.noContent().<Void>build();
@@ -215,6 +269,26 @@ public class ActionPlanningRuleController {
         rule.setProofDocumentFileUrl(null);
         rule.setProofDocumentPublicId(null);
         rule.setProofDocumentResourceType(null);
+    }
+
+    private void syncLatestProofDocumentMetadata(ActionPlanningRule rule) {
+        if (rule == null || rule.getId() == null) {
+            return;
+        }
+        List<ActionPlanningRuleProofDocument> documents = proofDocumentRepository.findByRule_IdOrderByUploadedAtDescIdDesc(rule.getId());
+        if (documents.isEmpty()) {
+            clearProofDocument(rule);
+            return;
+        }
+        ActionPlanningRuleProofDocument latest = documents.get(0);
+        rule.setProofDocument(latest.getFileName());
+        rule.setProofDocumentFileName(latest.getFileName());
+        rule.setProofDocumentContentType(latest.getContentType());
+        rule.setProofDocumentFileSize(latest.getFileSize());
+        rule.setProofDocumentFileUrl(latest.getFileUrl());
+        rule.setProofDocumentPublicId(latest.getPublicId());
+        rule.setProofDocumentResourceType(latest.getResourceType());
+        rule.setEvidenceRequired(true);
     }
 
     private String safeFileName(String fileName) {

@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { FileText, Pencil, Plus, Save, Trash2, X } from "lucide-react";
-import { actionPlanningRuleProofDocumentUrl } from "../../api";
+import { actionPlanningRuleProofDocumentDownloadUrl, actionPlanningRuleProofDocumentUrl } from "../../api";
 import { EmptyState } from "../../components/common/EmptyState";
 import { emptyPlanningRuleForm } from "../../constants/forms";
 import { stageDefinitions } from "../../constants/stages";
 import { criticalityClass } from "../../utils/status";
 import { stageColorClass, stageLabel } from "../../utils/stages";
 
-export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving, onCancelEdit, onDelete, onDeleteProofDocument, onEdit, onSubmit, setForm }) {
+export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving, onCancelEdit, onDelete, onDeleteProofDocument, onDeleteProofDocumentItem, onEdit, onSubmit, setForm }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [showNewProjectStages, setShowNewProjectStages] = useState(false);
   const visibleStages = useMemo(
@@ -115,11 +115,11 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
                 <span className="planning-rule-evidence">
                   <em>Element preuve</em>
                   <strong>
-                    {rule.proofDocumentFileName ? (
-                      <a className="file-link" href={actionPlanningRuleProofDocumentUrl(rule.id)} target="_blank" rel="noreferrer">
-                        {rule.proofDocumentFileName}
+                    {planningRuleProofDocuments(rule).length > 0 ? planningRuleProofDocuments(rule).map((proofDocument) => (
+                      <a className="file-link" href={planningRuleProofDocumentItemUrl(rule, proofDocument)} key={proofDocument.id || proofDocument.fileName} target="_blank" rel="noreferrer">
+                        {proofDocument.fileName || "Element preuve"}
                       </a>
-                    ) : "Non uploade"}
+                    )) : "Non uploade"}
                   </strong>
                 </span>
               </div>
@@ -153,6 +153,7 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
           stageNewProject={showNewProjectStages}
           onClose={closeDialog}
           onDeleteProofDocument={onDeleteProofDocument}
+          onDeleteProofDocumentItem={onDeleteProofDocumentItem}
           onSubmit={submitDialog}
           setForm={setForm}
         />
@@ -231,7 +232,7 @@ function previousDependencyOptions(rules, form) {
   return candidates;
 }
 
-function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNewProject, onClose, onDeleteProofDocument, onSubmit, setForm }) {
+function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNewProject, onClose, onDeleteProofDocument, onDeleteProofDocumentItem, onSubmit, setForm }) {
   const phaseActions = rules
     .filter((rule) => rule.stage === form.stage)
     .filter((rule) => (
@@ -240,6 +241,23 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
     ))
     .sort(sortActionRules);
   const dependencyOptions = previousDependencyOptions(rules, form);
+  const selectedProofDocumentFiles = filesFromValue(form.proofDocumentFile);
+  const savedProofDocuments = planningRuleProofDocuments(form);
+
+  function addProofDocumentFiles(event) {
+    const selectedFiles = Array.from(event.currentTarget.files || []);
+    if (selectedFiles.length > 0) {
+      setForm((current) => ({ ...current, proofDocumentFile: mergeSelectedFiles(current.proofDocumentFile, selectedFiles) }));
+    }
+    event.currentTarget.value = "";
+  }
+
+  function removeSelectedProofDocumentFile(index) {
+    setForm((current) => ({
+      ...current,
+      proofDocumentFile: filesFromValue(current.proofDocumentFile).filter((_, fileIndex) => fileIndex !== index)
+    }));
+  }
 
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
@@ -333,31 +351,49 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
             Jours de travail
             <input min="0" type="number" value={form.durationDays} onChange={(event) => setForm((current) => ({ ...current, durationDays: event.target.value }))} />
           </label>
-          <label className="file-picker">
-            <FileText size={15} />
-            <span>{fileNamesLabel(form.proofDocumentFile, form.proofDocumentFileName || "Element preuve")}</span>
-            <input type="file" onChange={(event) => setForm((current) => ({ ...current, proofDocumentFile: event.target.files?.[0] || null }))} />
-          </label>
-          {(form.proofDocumentFileName || form.proofDocumentFile) && (
-            <div className="proof-document-actions">
-              {form.id && form.proofDocumentFileName && (
-                <a className="file-link" href={actionPlanningRuleProofDocumentUrl(form.id)} target="_blank" rel="noreferrer">
-                  {form.proofDocumentFileName}
-                </a>
-              )}
-              <button
-                className="ghost-icon"
-                disabled={saving}
-                type="button"
-                onClick={() => (form.proofDocumentFile ? setForm((current) => ({ ...current, proofDocumentFile: null })) : onDeleteProofDocument(form.id))}
-                title="Supprimer l'element preuve"
-              >
-                <Trash2 size={15} />
-              </button>
-            </div>
-          )}
+          <div className="proof-document-picker-field">
+            <label className="file-picker proof-document-picker">
+              <FileText size={15} />
+              <span>{selectedProofDocumentFiles.length > 0 || savedProofDocuments.length > 0 ? "Ajouter un autre element preuve" : "Element preuve"}</span>
+              <input multiple type="file" onChange={addProofDocumentFiles} />
+            </label>
+            {selectedProofDocumentFiles.length > 0 && (
+              <div className="selected-file-list">
+                {selectedProofDocumentFiles.map((file, index) => (
+                  <span className="selected-file-item" key={`${file.name}-${file.size}-${file.lastModified}-${index}`}>
+                    <FileText size={14} />
+                    <strong>{file.name}</strong>
+                    <button className="ghost-icon" type="button" onClick={() => removeSelectedProofDocumentFile(index)} title="Retirer ce fichier">
+                      <X size={14} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {savedProofDocuments.length > 0 && (
+              <div className="selected-file-list saved-file-list">
+                {savedProofDocuments.map((proofDocument) => (
+                  <span className="selected-file-item" key={proofDocument.id || proofDocument.fileName}>
+                    <FileText size={14} />
+                    <a className="file-link" href={planningRuleProofDocumentItemUrl(form, proofDocument)} target="_blank" rel="noreferrer">
+                      {proofDocument.fileName || "Element preuve"}
+                    </a>
+                    <button
+                      className="ghost-icon"
+                      disabled={saving}
+                      type="button"
+                      onClick={() => (proofDocument.legacy ? onDeleteProofDocument(form.id) : onDeleteProofDocumentItem(proofDocument.id))}
+                      title="Supprimer l'element preuve"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
           <label className="asset-required-field user-enabled-field">
-            <input checked={form.evidenceRequired || Boolean(form.proofDocumentFile || form.proofDocumentFileName)} disabled={Boolean(form.proofDocumentFile || form.proofDocumentFileName)} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, evidenceRequired: event.target.checked }))} />
+            <input checked={form.evidenceRequired || selectedProofDocumentFiles.length > 0 || savedProofDocuments.length > 0} disabled={selectedProofDocumentFiles.length > 0 || savedProofDocuments.length > 0} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, evidenceRequired: event.target.checked }))} />
             Asset obligatoire
           </label>
         </div>
@@ -378,6 +414,36 @@ function filesFromValue(value) {
   if (Array.isArray(value)) return value.filter(Boolean);
   if (typeof FileList !== "undefined" && value instanceof FileList) return Array.from(value);
   return [value].filter(Boolean);
+}
+
+function fileIdentity(file) {
+  return [file?.name, file?.size, file?.lastModified].join("::");
+}
+
+function mergeSelectedFiles(currentValue, nextValue) {
+  const files = [...filesFromValue(currentValue), ...filesFromValue(nextValue)];
+  const seen = new Set();
+  return files.filter((file) => {
+    const key = fileIdentity(file);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function planningRuleProofDocuments(rule) {
+  const documents = Array.isArray(rule?.proofDocuments) ? rule.proofDocuments : [];
+  if (documents.length > 0) return documents;
+  if (!rule?.proofDocumentFileName && !rule?.proofDocumentFileUrl) return [];
+  return [{
+    id: `legacy-proof-${rule.id}`,
+    legacy: true,
+    fileName: rule.proofDocumentFileName || rule.proofDocument || "Element preuve"
+  }];
+}
+
+function planningRuleProofDocumentItemUrl(rule, proofDocument) {
+  return proofDocument?.legacy ? actionPlanningRuleProofDocumentUrl(rule.id) : actionPlanningRuleProofDocumentDownloadUrl(proofDocument.id);
 }
 
 function fileNamesLabel(value, fallback) {

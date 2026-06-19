@@ -372,7 +372,7 @@ public class PhaseValidationController {
         List<EcrStage> stages = EcrStage.allowedStages(request.isNewVersion());
         int index = stages.indexOf(currentStage);
         if (index < 0 || index + 1 >= stages.size()) {
-            return currentStage;
+            return EcrStage.CLOSED;
         }
         return stages.get(index + 1);
     }

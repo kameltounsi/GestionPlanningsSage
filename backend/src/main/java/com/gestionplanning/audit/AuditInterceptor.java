@@ -1,6 +1,6 @@
 package com.gestionplanning.audit;
 
-import com.gestionplanning.user.AppUser;
+import com.gestionplanning.realtime.RealtimeUpdateService;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
@@ -13,15 +13,20 @@ import javax.servlet.http.HttpServletResponse;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class AuditInterceptor implements HandlerInterceptor {
-    private final AuditLogService auditLogService;
+    private final RealtimeUpdateService realtimeUpdateService;
 
-    public AuditInterceptor(AuditLogService auditLogService) {
-        this.auditLogService = auditLogService;
+    public AuditInterceptor(RealtimeUpdateService realtimeUpdateService) {
+        this.realtimeUpdateService = realtimeUpdateService;
     }
 
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
-        return;
+        if (shouldSkip(request)) {
+            return;
+        }
+        if (ex == null && response.getStatus() >= 200 && response.getStatus() < 300) {
+            realtimeUpdateService.publishPlanningUpdated(request.getRequestURI());
+        }
     }
 
     private boolean shouldSkip(HttpServletRequest request) {

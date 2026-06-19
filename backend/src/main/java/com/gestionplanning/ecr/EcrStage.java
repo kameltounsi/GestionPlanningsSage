@@ -20,8 +20,7 @@ public enum EcrStage {
             PRODUCT_DEVELOPMENT,
             CUSTOMER_VALIDATION,
             PPAP_SOP_PREPARATION,
-            CLOSED,
-            CANCELLED
+            CLOSED
     );
 
     private static final List<EcrStage> NEW_PROJECT_STAGES = Arrays.asList(
@@ -31,7 +30,7 @@ public enum EcrStage {
             PROCESS_DEVELOPMENT,
             PPAP_SOP_PREPARATION,
             LAUNCH,
-            CANCELLED
+            CLOSED
     );
 
     private final String modificationLabel;
@@ -55,7 +54,7 @@ public enum EcrStage {
     }
 
     public static boolean isAllowed(EcrStage stage, boolean newProject) {
-        return allowedStages(newProject).contains(stage);
+        return stage == CANCELLED || allowedStages(newProject).contains(stage);
     }
 
     public static EcrStage firstAllowed(boolean newProject) {

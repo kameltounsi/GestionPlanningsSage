@@ -35,6 +35,7 @@ import {
   createProject,
   createRoleReference,
   createUser,
+  cancelEcrRequest,
   clearSession,
   addActionSuggestionToDefaults,
   acknowledgeActionDeadlineAlerts,
@@ -70,6 +71,7 @@ import {
   ignoreActionSuggestion,
   login,
   logout,
+  planningEventsUrl,
   storeSession,
   updateAction,
   updateActionPlanningRule,
@@ -132,6 +134,25 @@ const pageTitles = {
   users: "Utilisateurs",
   profile: "Profil"
 };
+const pageRoutes = {
+  dashboard: "/dashboard",
+  modifications: "/modifications",
+  projects: "/actions",
+  traceability: "/tracabilite",
+  preferentials: "/preferentiels",
+  users: "/utilisateurs",
+  profile: "/profil"
+};
+const routePages = Object.fromEntries(Object.entries(pageRoutes).map(([key, route]) => [route, key]));
+
+function pageFromPath(pathname = window.location.pathname) {
+  const normalized = pathname.replace(/\/+$/, "") || "/";
+  return routePages[normalized] || (normalized === "/" ? "dashboard" : "dashboard");
+}
+
+function routeForPage(page) {
+  return pageRoutes[page] || pageRoutes.dashboard;
+}
 
 const visibleAuditActionTypes = [
   "CREATION_MODIFICATION",
@@ -141,6 +162,7 @@ const visibleAuditActionTypes = [
   "ACTION_TERMINEE",
   "VALIDATION_ACTION",
   "REFUS_VALIDATION_ACTION",
+  "ANNULATION_MODIFICATION",
   "ARCHIVAGE_MODIFICATION",
   "DESARCHIVAGE_MODIFICATION",
   "AJOUT_CLIENT",
@@ -726,7 +748,7 @@ function isValidPhone(value) {
 function App() {
   const [authSession, setAuthSession] = useState(getStoredSession());
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
-  const [page, setPage] = useState("dashboard");
+  const [page, setPage] = useState(pageFromPath());
   const [menuCollapsed, setMenuCollapsed] = useState(false);
   const [requests, setRequests] = useState([]);
   const [pilots, setPilots] = useState([]);
@@ -777,9 +799,15 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const realtimeRefreshTimer = useRef(null);
 
   const selectedRequest = requests.find((request) => request.id === selectedId);
-  const selectedStages = getStages(Boolean(selectedRequest?.newVersion));
+  const selectedStages = useMemo(() => {
+    if (selectedRequest?.currentStage === "CANCELLED") {
+      return [["CANCELLED", stageLabel("CANCELLED", Boolean(selectedRequest.newVersion))]];
+    }
+    return getStages(Boolean(selectedRequest?.newVersion));
+  }, [selectedRequest]);
   const visibleStages = useMemo(() => {
     if (!selectedRequest || isAdminUser(currentUser)) return selectedStages;
     const currentIndex = selectedStages.findIndex(([key]) => key === selectedRequest.currentStage);
@@ -859,6 +887,18 @@ function App() {
   useEffect(() => {
     document.title = authSession?.token ? pageTitles[page] || "Application ECR" : "Connexion";
   }, [authSession?.token, page]);
+
+  useEffect(() => {
+    function syncPageFromLocation() {
+      setPage(pageFromPath());
+      setShowCreateForm(false);
+      setShowEditForm(false);
+      setEditingEcrRequest(null);
+    }
+
+    window.addEventListener("popstate", syncPageFromLocation);
+    return () => window.removeEventListener("popstate", syncPageFromLocation);
+  }, []);
 
   useEffect(() => {
     if (page !== "traceability" || !isAdminUser(currentUser)) return;
@@ -976,6 +1016,47 @@ function App() {
       return actionData;
     });
   }
+
+  function refreshRealtimeData() {
+    const requestId = selectedId;
+    const stage = selectedStage;
+    const includeArchived = requestArchiveView === "all";
+    const baseRequests = getEcrRequests(includeArchived).then((requestData) => {
+      setRequests(requestData);
+      return requestData;
+    });
+    const currentDetails = requestId
+      ? Promise.all([getChecklist(requestId, stage), getActions(requestId, stage), getPhaseValidations(requestId)])
+          .then(([checklistData, actionData, validationData]) => {
+            setChecklist(checklistData);
+            setActions(actionData);
+            setPhaseValidations(validationData);
+          })
+      : Promise.resolve();
+    const adminData = isAdminUser(currentUser)
+      ? Promise.all([getActionStandardSuggestions(), page === "traceability" ? getAuditLogs() : Promise.resolve(auditLogs)])
+          .then(([suggestionData, auditData]) => {
+            setActionSuggestions(suggestionData);
+            if (Array.isArray(auditData)) setAuditLogs(auditData);
+          })
+      : Promise.resolve();
+    return Promise.all([baseRequests, currentDetails, adminData]).catch(() => {});
+  }
+
+  useEffect(() => {
+    if (!authSession?.token || !currentUser) return undefined;
+    const events = new EventSource(planningEventsUrl(authSession.token));
+    events.addEventListener("planning-updated", () => {
+      window.clearTimeout(realtimeRefreshTimer.current);
+      realtimeRefreshTimer.current = window.setTimeout(refreshRealtimeData, 250);
+    });
+    events.onerror = () => {};
+    return () => {
+      window.clearTimeout(realtimeRefreshTimer.current);
+      events.close();
+    };
+  }, [authSession?.token, currentUser, selectedId, selectedStage, requestArchiveView, page]);
+
   useEffect(() => {
     if (!authSession?.token) {
       setLoading(false);
@@ -1037,9 +1118,21 @@ function App() {
 
   useEffect(() => {
     if (currentUser && !isAdminUser(currentUser) && ["projects", "traceability", "preferentials", "users"].includes(page)) {
-      setPage("modifications");
+      navigateToPage("modifications", { replace: true });
     }
   }, [currentUser, page]);
+
+  function navigateToPage(nextPage, options = {}) {
+    const nextRoute = routeForPage(nextPage);
+    if (window.location.pathname !== nextRoute) {
+      if (options.replace) {
+        window.history.replaceState(null, "", nextRoute);
+      } else {
+        window.history.pushState(null, "", nextRoute);
+      }
+    }
+    setPage(nextPage);
+  }
 
   function updateEcrForm(field, value) {
     setEcrForm((form) => updateEcrFormState(form, field, value, projects));
@@ -1115,7 +1208,7 @@ function App() {
         setSelectedId(savedRequest.id);
         setSelectedStage(savedRequest.currentStage);
         setShowCreateForm(false);
-        setPage("modifications");
+        navigateToPage("modifications");
         successToast("Modification creee");
         return refreshSelectedData(
             savedRequest.id,
@@ -1224,6 +1317,10 @@ function App() {
       warningAlert("Action reservee", "Seul l'admin peut rouvrir ou modifier la phase courante.");
       return;
     }
+    if (stage === selectedRequest.currentStage) {
+      setSelectedStage(stage);
+      return;
+    }
     const latestValidation = phaseValidations.find((validation) => validation.stage === stage);
     if (stage !== selectedRequest.currentStage && latestValidation?.status === "APPROVED") {
       setSelectedStage(stage);
@@ -1267,7 +1364,7 @@ function App() {
     setSelectedStage(safeStage(request.currentStage, Boolean(request.newVersion)));
     setShowCreateForm(false);
     setShowEditForm(false);
-    setPage("modifications");
+    navigateToPage("modifications");
   }
 
   function handleRequestArchiveViewChange(view) {
@@ -1323,6 +1420,52 @@ function App() {
           const message = archived
             ? "Archivage de la modification impossible. Verifiez vos droits."
             : "Desarchivage de la modification impossible. Verifiez vos droits.";
+          setError(message);
+          errorAlert(message);
+        })
+        .finally(() => setSaving(false));
+    });
+  }
+
+  function handleCancelEcr(request) {
+    if (!request) return;
+    if (!isAdminUser(currentUser) && !isRequestPilot(currentUser, request)) {
+      warningAlert("Action reservee", "Seul le chef de modification peut annuler cette modification.");
+      return;
+    }
+    if (request.currentStage === "CANCELLED") {
+      warningAlert("Modification annulee", "Cette modification est deja annulee.");
+      return;
+    }
+    const label = requestDisplayName(request);
+    Swal.fire({
+      ...swalButtons,
+      title: "Annuler la modification ?",
+      text: `La modification ${label} passera immediatement en phase Cancelled.`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Annuler la modification",
+      cancelButtonText: "Retour",
+      confirmButtonColor: "#b42318"
+    }).then((result) => {
+      if (!result.isConfirmed) return;
+      const includeArchived = requestArchiveView === "all" && isAdminUser(currentUser);
+      setSaving(true);
+      setError("");
+      cancelEcrRequest(request.id)
+        .then((updatedRequest) => {
+          setRequests((items) => items.map((item) => (item.id === updatedRequest.id ? updatedRequest : item)));
+          setSelectedId(updatedRequest.id);
+          setSelectedStage("CANCELLED");
+          return getEcrRequests(includeArchived);
+        })
+        .then((requestData) => {
+          setRequests(requestData);
+          successToast("Modification annulee");
+          return refreshSelectedData(request.id, "CANCELLED");
+        })
+        .catch((exception) => {
+          const message = exception?.message || "Annulation de la modification impossible. Verifiez vos droits.";
           setError(message);
           errorAlert(message);
         })
@@ -1397,6 +1540,12 @@ function App() {
       warningAlert("Asset requis", message);
       return Promise.reject(new Error("Evidence required"));
     }
+    if (isActionDone(actionForm) && !isActionPilotForUser(currentUser, actionForm)) {
+      const message = "Seul le pilote responsable de l'action peut la creer directement comme terminee.";
+      setError(message);
+      warningAlert("Action reservee", message);
+      return Promise.reject(new Error("Action completion forbidden"));
+    }
     setSaving(true);
     setError("");
     const payload = actionFormPayload(actionForm, selectedStage);
@@ -1424,9 +1573,11 @@ function App() {
         successToast("Action creee");
       })
       .catch((error) => {
-        if (error.message === "Evidence required") throw error;
+        if (error.message === "Evidence required" || error.message === "Action completion forbidden") throw error;
         const message = error.message?.includes("422")
           ? "La date de debut de l'action ne peut pas etre apres le debut d'une phase suivante."
+          : error.message?.includes("403")
+          ? "Action creee, mais seuls le responsable de l'action ou un profil autorise peuvent la marquer terminee."
           : "Creation action impossible.";
         setError(message);
         errorAlert(message);
@@ -1467,8 +1618,10 @@ function App() {
         .then(() => {
           successToast(completed ? "Action terminee" : "Action reouverte");
       })
-      .catch(() => {
-        const message = "Impossible de mettre a jour l'action.";
+      .catch((error) => {
+        const message = error.message?.includes("403")
+          ? "Seul le responsable de l'action peut la marquer terminee."
+          : "Impossible de mettre a jour l'action.";
         setError(message);
         errorAlert(message);
       });
@@ -2351,20 +2504,26 @@ function App() {
           setCurrentUser(null);
           setRequests([]);
           setUsers([]);
-          setPage("dashboard");
+          navigateToPage("dashboard", { replace: true });
           successToast("Deconnexion effectuee");
         });
     });
   }
 
   function openCreateFlow() {
-    setPage("modifications");
+    navigateToPage("modifications");
     setShowEditForm(false);
     setEditingEcrRequest(null);
     setShowCreateForm(true);
   }
 
-  function handleNavigate(nextPage) {
+  function handleNavigate(nextPage, event) {
+    if (event) {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      event.preventDefault();
+    }
     if (nextPage === "modifications") {
       const request = selectedRequest || requests.find((item) => item.id === selectedId) || requests[0];
       if (request) {
@@ -2372,7 +2531,7 @@ function App() {
         setSelectedStage(safeStage(request.currentStage, Boolean(request.newVersion)));
       }
     }
-    setPage(nextPage);
+    navigateToPage(nextPage);
     setShowCreateForm(false);
     setShowEditForm(false);
     setEditingEcrRequest(null);
@@ -2401,6 +2560,7 @@ function App() {
           canAdmin={isAdminUser(currentUser)}
           currentUser={currentUser}
           page={page}
+          pageHref={routeForPage}
           onCollapseToggle={() => setMenuCollapsed((collapsed) => !collapsed)}
           onLogout={handleLogout}
           onNavigate={handleNavigate}
@@ -2563,6 +2723,7 @@ function App() {
             onRequestArchiveViewChange={handleRequestArchiveViewChange}
             handleCreateAction={handleCreateAction}
             handleArchiveEcr={handleArchiveEcr}
+            handleCancelEcr={handleCancelEcr}
             handleDeleteAction={handleDeleteAction}
             handleStageChange={handleStageChange}
             handleToggleAction={handleToggleAction}
@@ -3201,6 +3362,7 @@ function auditActionLabel(actionType) {
     MODIFICATION_MODIFICATION: "Modification d'une modification",
     VALIDATION_PHASE: "Validation d'une phase",
     REOUVERTURE_PHASE: "Reouverture d'une phase",
+    ANNULATION_MODIFICATION: "Annulation d'une modification",
     ACTION_TERMINEE: "Action marquee terminee",
     VALIDATION_ACTION: "Validation d'une action",
     REFUS_VALIDATION_ACTION: "Refus de validation d'une action",
@@ -3287,6 +3449,7 @@ function auditActionSentence(log) {
     MODIFICATION_MODIFICATION: "Modification d'une modification",
     VALIDATION_PHASE: "Validation d'une phase",
     REOUVERTURE_PHASE: "Reouverture d'une phase",
+    ANNULATION_MODIFICATION: "Annulation d'une modification",
     ACTION_TERMINEE: "Action marquee comme terminee",
     VALIDATION_ACTION: "Validation d'une action",
     REFUS_VALIDATION_ACTION: "Refus de validation d'une action",
@@ -3314,6 +3477,7 @@ function auditFriendlyDetail(log) {
   const labels = {
     CREATION_MODIFICATION: `Nouvelle demande creee${target ? `: ${target}` : ""}.`,
     MODIFICATION_MODIFICATION: `Demande mise a jour${target ? `: ${target}` : ""}.`,
+    ANNULATION_MODIFICATION: `Demande annulee${target ? `: ${target}` : ""}.`,
     VALIDATION_PHASE: `Phase validee${target ? ` pour ${target}` : ""}.`,
     REOUVERTURE_PHASE: `Phase rouverte${target ? ` pour ${target}` : ""}.`,
     ACTION_TERMINEE: `Action terminee${target ? `: ${target}` : ""}.`,
@@ -4594,6 +4758,7 @@ function ModificationsPage(props) {
     doneCount,
     filteredRequests,
     handleArchiveEcr,
+    handleCancelEcr,
     handleCreateAction,
     handleDeleteAction,
     handleStageChange,
@@ -4636,6 +4801,7 @@ function ModificationsPage(props) {
   const canRequestValidation = isRequestPilot(currentUser, selectedRequest);
   const canManageDossierReview = canAdmin || canRequestValidation;
   const canExportGantt = canAdmin || canRequestValidation;
+  const canCancelRequest = (canAdmin || canRequestValidation) && selectedRequest?.currentStage !== "CANCELLED";
   const currentValidation = phaseValidations.find((validation) => validation.stage === selectedStage && validation.status === "PENDING");
   const latestStageValidation = phaseValidations.find((validation) => validation.stage === selectedStage);
   const stageActionsDone = actions.length > 0 && actions.every(isActionDone);
@@ -4735,6 +4901,19 @@ function ModificationsPage(props) {
                 >
                   <Pencil size={18} />
                 </button>
+                {canCancelRequest && (
+                  <button
+                    className="details-cancel-button"
+                    disabled={saving}
+                    type="button"
+                    onClick={() => handleCancelEcr(selectedRequest)}
+                    title="Annuler la modification"
+                    aria-label="Annuler la modification"
+                  >
+                    <XCircle size={18} />
+                    <span>Annuler la modification</span>
+                  </button>
+                )}
                 <button
                   className="ghost-icon details-toggle-button"
                   type="button"

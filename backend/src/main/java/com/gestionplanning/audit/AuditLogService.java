@@ -68,7 +68,7 @@ public class AuditLogService {
     }
 
     private String targetType(String actionType) {
-        if ("CREATION_MODIFICATION".equals(actionType) || "MODIFICATION_MODIFICATION".equals(actionType)) return "modification";
+        if ("CREATION_MODIFICATION".equals(actionType) || "MODIFICATION_MODIFICATION".equals(actionType) || "ANNULATION_MODIFICATION".equals(actionType)) return "modification";
         if ("VALIDATION_PHASE".equals(actionType) || "REOUVERTURE_PHASE".equals(actionType)) return "phase";
         if ("ACTION_TERMINEE".equals(actionType) || "VALIDATION_ACTION".equals(actionType) || "REFUS_VALIDATION_ACTION".equals(actionType)) return "action";
         if ("AJOUT_CLIENT".equals(actionType)) return "client";
@@ -104,6 +104,7 @@ public class AuditLogService {
     private String readableAction(String actionType) {
         if ("CREATION_MODIFICATION".equals(actionType)) return "Creation d'une modification";
         if ("MODIFICATION_MODIFICATION".equals(actionType)) return "Modification d'une modification";
+        if ("ANNULATION_MODIFICATION".equals(actionType)) return "Annulation d'une modification";
         if ("VALIDATION_PHASE".equals(actionType)) return "Validation d'une phase";
         if ("REOUVERTURE_PHASE".equals(actionType)) return "Reouverture d'une phase";
         if ("ACTION_TERMINEE".equals(actionType)) return "Action marquee terminee";

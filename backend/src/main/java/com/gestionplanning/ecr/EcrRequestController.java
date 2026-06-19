@@ -121,8 +121,9 @@ public class EcrRequestController {
                     request.setProcessChange(updatedRequest.isProcessChange());
                     request.setSupplierChange(updatedRequest.isSupplierChange());
                     request.setNewVersion(updatedRequest.isNewVersion());
-                    EcrStage nextStage = EcrStage.isAllowed(updatedRequest.getCurrentStage(), updatedRequest.isNewVersion())
-                            ? updatedRequest.getCurrentStage()
+                    EcrStage updatedStage = updatedRequest.getCurrentStage();
+                    EcrStage nextStage = updatedStage == EcrStage.CANCELLED || EcrStage.isAllowed(updatedStage, updatedRequest.isNewVersion())
+                            ? updatedStage
                             : EcrStage.firstAllowed(updatedRequest.isNewVersion());
                     if (nextStage != request.getCurrentStage() && !accessControlService.isAdmin(user)) {
                         return ResponseEntity.status(403).<EcrRequest>build();
@@ -232,7 +233,7 @@ public class EcrRequestController {
         return requestRepository.findById(id)
                 .filter(request -> accessControlService.canAccessRequest(user, request))
                 .map(request -> {
-                    if (!EcrStage.isAllowed(stage, request.isNewVersion())) {
+                    if (!EcrStage.isAllowed(stage, request.isNewVersion()) || stage == EcrStage.CANCELLED) {
                         return ResponseEntity.badRequest().<EcrRequest>build();
                     }
                     boolean reopeningApprovedStage = isApprovedStage(request, stage) && stage != request.getCurrentStage();
@@ -250,6 +251,31 @@ public class EcrRequestController {
                                 "Phase reouverte: " + stageLabel(stage) + " - Modification: " + requestLabel(saved)
                         );
                     }
+                    return ResponseEntity.ok(saved);
+                })
+                .orElse(ResponseEntity.status(403).build());
+    }
+
+    @PatchMapping("/{id}/cancel")
+    public ResponseEntity<EcrRequest> cancel(@PathVariable Long id,
+                                             @RequestAttribute("authenticatedUser") AppUser user) {
+        return requestRepository.findById(id)
+                .filter(request -> accessControlService.canAccessRequest(user, request))
+                .filter(request -> accessControlService.canCancelRequest(user, request))
+                .map(request -> {
+                    if (request.getCurrentStage() == EcrStage.CANCELLED) {
+                        return ResponseEntity.badRequest().<EcrRequest>build();
+                    }
+                    request.setCurrentStage(EcrStage.CANCELLED);
+                    request.setCancelledDate(java.time.LocalDate.now());
+                    EcrRequest saved = requestRepository.save(request);
+                    auditLogService.recordBusinessEvent(
+                            user,
+                            "ANNULATION_MODIFICATION",
+                            "modification",
+                            requestLabel(saved),
+                            "Modification annulee: " + requestLabel(saved)
+                    );
                     return ResponseEntity.ok(saved);
                 })
                 .orElse(ResponseEntity.status(403).build());

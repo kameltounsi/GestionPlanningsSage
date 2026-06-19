@@ -129,6 +129,9 @@ public class EcrActionController {
                     }
                     action.setRequest(request);
                     action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
+                    if (isDone(action) && !accessControlService.canCompleteAction(user, action)) {
+                        return ResponseEntity.status(403).<EcrAction>build();
+                    }
                     action.setValidatorRole(action.getValidator());
                     action.setValidator(action.getValidator());
                     syncFinalizationDate(action, action);

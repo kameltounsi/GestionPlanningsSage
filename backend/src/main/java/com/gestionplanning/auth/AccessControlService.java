@@ -91,6 +91,10 @@ public class AccessControlService {
         return isRequestPilot(user, request);
     }
 
+    public boolean canCancelRequest(AppUser user, EcrRequest request) {
+        return isAdmin(user) || isRequestPilot(user, request);
+    }
+
     public boolean isRequestPilot(AppUser user, EcrRequest request) {
         if (user == null || request == null) {
             return false;

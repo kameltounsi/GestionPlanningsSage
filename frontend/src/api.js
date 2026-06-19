@@ -9,6 +9,10 @@ export function getStoredSession() {
   }
 }
 
+export function planningEventsUrl(token) {
+  return `${API_BASE}/events?token=${encodeURIComponent(token || "")}`;
+}
+
 export function storeSession(session) {
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
@@ -158,6 +162,12 @@ export function archiveEcrRequest(requestId, archived = true) {
 
 export function updateEcrStage(requestId, stage) {
   return request(`/ecr-requests/${requestId}/stage?stage=${encodeURIComponent(stage)}`, {
+    method: "PATCH"
+  });
+}
+
+export function cancelEcrRequest(requestId) {
+  return request(`/ecr-requests/${requestId}/cancel`, {
     method: "PATCH"
   });
 }

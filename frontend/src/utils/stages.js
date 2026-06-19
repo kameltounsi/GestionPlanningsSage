@@ -11,7 +11,7 @@ export function firstStage(newProject) {
 }
 
 export function isStageAllowed(stage, newProject) {
-  return getStages(newProject).some(([key]) => key === stage);
+  return stage === "CANCELLED" || getStages(newProject).some(([key]) => key === stage);
 }
 
 export function safeStage(stage, newProject) {

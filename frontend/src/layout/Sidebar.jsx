@@ -11,7 +11,7 @@ const navItems = [
   ["profile", "Profil", UserCircle]
 ];
 
-export function Sidebar({ canAdmin, collapsed, currentUser, page, onCollapseToggle, onLogout, onNavigate }) {
+export function Sidebar({ canAdmin, collapsed, currentUser, page, pageHref, onCollapseToggle, onLogout, onNavigate }) {
   const visibleItems = navItems.filter(([key]) => canAdmin || ["dashboard", "modifications", "profile"].includes(key));
 
   return (
@@ -52,17 +52,16 @@ export function Sidebar({ canAdmin, collapsed, currentUser, page, onCollapseTogg
           </div>
 
           {visibleItems.map(([key, label, Icon]) => (
-              <button
+              <a
                   key={key}
                   className={page === key ? "menu-item active" : "menu-item"}
-                  onClick={() => onNavigate(key)}
-                  type="button"
+                  href={pageHref(key)}
+                  onClick={(event) => onNavigate(key, event)}
                   title={label}
-                  href={label}
               >
                 <Icon size={18}/>
                 <span>{label}</span>
-              </button>
+              </a>
           ))}
 
           <button

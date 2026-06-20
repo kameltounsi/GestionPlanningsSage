@@ -19,7 +19,9 @@ import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeBodyPart;
 import javax.mail.internet.MimeMultipart;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.Properties;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -61,7 +63,7 @@ public class AccountMailService {
 
     public void sendAccountCreatedEmail(AppUser user, String temporaryPassword) {
         if (!accountMailEnabled) {
-            throw new MailDeliveryException("L'envoi email est desactive par APP_ACCOUNT_MAIL_ENABLED.");
+            throw new MailDeliveryException("L'envoi email est désactivé par APP_ACCOUNT_MAIL_ENABLED.");
         }
         sendAccountCreatedEmailQuietly(user, temporaryPassword);
     }
@@ -75,27 +77,27 @@ public class AccountMailService {
             return;
         }
         if (!isMailConfigured()) {
-            LOGGER.error("Account creation email skipped because SMTP configuration is incomplete.");
-            throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
+            LOGGER.error("Account creation email skipped because SMTP configuration is incomplète.");
+            throw new MailDeliveryException("Configuration SMTP incomplète: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
         }
 
         try {
             MimeMessage message = new MimeMessage(mailSession());
             message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(user.getEmail()));
             message.setFrom(new InternetAddress(fromAddress));
-            message.setSubject("Vos acces Gestion Planning Sage", "UTF-8");
+            message.setSubject("Vos accès Gestion Planning Sage", "UTF-8");
             message.setContent(buildContent(user, temporaryPassword));
             Transport.send(message);
             LOGGER.info("Account creation email sent to {}", user.getEmail());
         } catch (MessagingException | RuntimeException exception) {
             LOGGER.error("Unable to send account creation email to {}", user.getEmail(), exception);
-            throw new MailDeliveryException("Echec d'envoi email: " + rootMessage(exception), exception);
+            throw new MailDeliveryException("Échec d'envoi email: " + rootMessage(exception), exception);
         }
     }
 
     public void sendPhaseReadyEmail(EcrRequest request, EcrStage stage, Collection<AppUser> recipients) {
         if (!alertMailEnabled) {
-            throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");
+            throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
         }
         if (request == null) {
             return;
@@ -109,25 +111,25 @@ public class AccountMailService {
                 .distinct()
                 .collect(Collectors.joining(","));
         if (isBlank(to)) {
-            throw new MailDeliveryException("Les validateurs/managers n'ont pas d'adresse email renseignee.");
+            throw new MailDeliveryException("Les validateurs/managers n'ont pas d'adresse email renseignée.");
         }
         if (!isMailConfigured()) {
-            LOGGER.error("Phase validation email skipped because SMTP configuration is incomplete.");
-            throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
+            LOGGER.error("Phase validation email skipped because SMTP configuration is incomplète.");
+            throw new MailDeliveryException("Configuration SMTP incomplète: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
         }
-        String title = "Phase prete a valider";
+        String title = "Phase prête à valider";
         String text = "La phase " + value(stage == null ? null : stage.getLabel(request.isNewVersion()))
                 + " de la modification " + value(request.getModificationNumber())
-                + " est prete a etre validee.\nProjet: " + value(request.getModificationProject())
-                + "\nLien: " + value(applicationUrl);
+                + " est prête à être validée.\nProjet : " + value(request.getModificationProject())
+                + "\nLien : " + value(applicationUrl);
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
                 + "<div style=\"background:#111827;color:#ffffff;padding:24px 30px;\">"
                 + "<div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#bfdbfe;\">Gestion Planning Sage</div>"
-                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Phase prete a valider</h1>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Phase prête à valider</h1>"
                 + "</div><div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
-                + "<p>La phase <strong>" + escape(stage == null ? "-" : stage.getLabel(request.isNewVersion())) + "</strong> de la modification <strong>" + escape(value(request.getModificationNumber())) + "</strong> est prete pour validation.</p>"
+                + "<p>La phase <strong>" + escape(stage == null ? "-" : stage.getLabel(request.isNewVersion())) + "</strong> de la modification <strong>" + escape(value(request.getModificationNumber())) + "</strong> est prête pour validation.</p>"
                 + "<p><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Client :</strong> " + escape(value(request.getClient())) + "<br><strong>Produit :</strong> " + escape(value(request.getProduct())) + "</p>"
                 + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
                 + "</div></div></div></body></html>";
@@ -136,32 +138,32 @@ public class AccountMailService {
 
     public void sendActionValidationEmail(EcrRequest request, EcrStage stage, EcrAction action, AppUser recipient) {
         if (!alertMailEnabled) {
-            throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");
+            throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
         }
         if (request == null || action == null) {
             return;
         }
         if (recipient == null || isBlank(recipient.getEmail())) {
-            throw new MailDeliveryException("Le destinataire de validation n'a pas d'adresse email renseignee.");
+            throw new MailDeliveryException("Le destinataire de validation n'a pas d'adresse email renseignée.");
         }
         if (!isMailConfigured()) {
-            LOGGER.error("Action validation email skipped because SMTP configuration is incomplete.");
-            throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
+            LOGGER.error("Action validation email skipped because SMTP configuration is incomplète.");
+            throw new MailDeliveryException("Configuration SMTP incomplète: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
         }
-        String title = "Action prete a valider";
+        String title = "Action prête à valider";
         String text = "L'action " + value(action.getTitle())
                 + " de la phase " + value(stage == null ? null : stage.getLabel(request.isNewVersion()))
-                + " est prete a etre validee.\nModification: " + value(request.getModificationNumber())
-                + "\nProjet: " + value(request.getModificationProject())
-                + "\nLien: " + value(applicationUrl);
+                + " est prête à être validée.\nModification : " + value(request.getModificationNumber())
+                + "\nProjet : " + value(request.getModificationProject())
+                + "\nLien : " + value(applicationUrl);
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
                 + "<div style=\"background:#111827;color:#ffffff;padding:24px 30px;\">"
                 + "<div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#bfdbfe;\">Gestion Planning Sage</div>"
-                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Action prete a valider</h1>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Action prête à valider</h1>"
                 + "</div><div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
-                + "<p>L'action <strong>" + escape(value(action.getTitle())) + "</strong> est prete pour validation.</p>"
+                + "<p>L'action <strong>" + escape(value(action.getTitle())) + "</strong> est prête pour validation.</p>"
                 + "<p><strong>Phase :</strong> " + escape(stage == null ? "-" : stage.getLabel(request.isNewVersion())) + "<br><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "</p>"
                 + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
                 + "</div></div></div></body></html>";
@@ -170,37 +172,37 @@ public class AccountMailService {
 
     public void sendActionRejectedEmail(EcrRequest request, EcrStage stage, EcrAction action, AppUser recipient, String reason) {
         if (!alertMailEnabled) {
-            throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");
+            throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
         }
         if (request == null || action == null) {
             return;
         }
         if (recipient == null || isBlank(recipient.getEmail())) {
-            throw new MailDeliveryException("Le destinataire du refus d'action n'a pas d'adresse email renseignee.");
+            throw new MailDeliveryException("Le destinataire du refus d'action n'a pas d'adresse email renseignée.");
         }
         if (!isMailConfigured()) {
-            LOGGER.error("Action rejection email skipped because SMTP configuration is incomplete.");
-            throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
+            LOGGER.error("Action rejection email skipped because SMTP configuration is incomplète.");
+            throw new MailDeliveryException("Configuration SMTP incomplète: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
         }
         String phase = stage == null ? "-" : stage.getLabel(request.isNewVersion());
         String modificationName = modificationName(request);
-        String title = "Action refusee - revision requise";
+        String title = "Action refusée - révision requise";
         String text = "L'action " + value(action.getTitle())
-                + " a ete refusee et doit etre revisitee."
-                + "\nMotif du refus: " + value(reason)
-                + "\nModification: " + value(request.getModificationNumber())
-                + "\nNom de la modification: " + value(modificationName)
-                + "\nProjet: " + value(request.getModificationProject())
-                + "\nPhase: " + value(phase)
-                + "\nPilote action: " + value(action.getResponsible())
-                + "\nLien: " + value(applicationUrl);
+                + " a été refusée et doit être revisitée."
+                + "\nMotif du refus : " + value(reason)
+                + "\nModification : " + value(request.getModificationNumber())
+                + "\nNom de la modification : " + value(modificationName)
+                + "\nProjet : " + value(request.getModificationProject())
+                + "\nPhase : " + value(phase)
+                + "\nPilote action : " + value(action.getResponsible())
+                + "\nLien : " + value(applicationUrl);
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
                 + "<div style=\"background:#7f1d1d;color:#ffffff;padding:24px 30px;\"><div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#fecaca;\">Gestion Planning Sage</div>"
-                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Action refusee</h1></div>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Action refusée</h1></div>"
                 + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
-                + "<p>L'action <strong>" + escape(value(action.getTitle())) + "</strong> a ete refusee et doit etre revisitee.</p>"
+                + "<p>L'action <strong>" + escape(value(action.getTitle())) + "</strong> a été refusée et doit être revisitée.</p>"
                 + "<p><strong>Motif du refus :</strong><br>" + escape(value(reason)).replace("\n", "<br>") + "</p>"
                 + "<p><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Phase :</strong> " + escape(value(phase)) + "<br><strong>Pilote action :</strong> " + escape(value(action.getResponsible())) + "</p>"
                 + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#b42318;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Revisiter l'action</a></div>"
@@ -209,91 +211,201 @@ public class AccountMailService {
     }
 
     public void sendActionDeadlineEmail(EcrRequest request, EcrAction action, AppUser recipient, String timingLabel, String timingMessage) {
+        sendActionDeadlineEmail(request, action, recipient, null, timingLabel, timingMessage);
+    }
+
+    public void sendActionDeadlineEmail(EcrRequest request, EcrAction action, AppUser recipient, Collection<AppUser> ccRecipients, String timingLabel, String timingMessage) {
         if (!alertMailEnabled) {
-            throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");
+            throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
         }
         if (request == null || action == null) {
             return;
         }
         if (recipient == null || isBlank(recipient.getEmail())) {
-            throw new MailDeliveryException("Le pilote destinataire n'a pas d'adresse email renseignee.");
+            throw new MailDeliveryException("Le pilote destinataire n'a pas d'adresse email renseignée.");
         }
         if (!isMailConfigured()) {
-            LOGGER.error("Action deadline email skipped because SMTP configuration is incomplete.");
-            throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
+            LOGGER.error("Action deadline email skipped because SMTP configuration is incomplète.");
+            throw new MailDeliveryException("Configuration SMTP incomplète: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
         }
         String phase = action.getStage() == null ? "-" : action.getStage().getLabel(request.isNewVersion());
         String modificationName = modificationName(request);
-        String title = "Alerte echeance action - " + value(timingLabel);
+        String title = "Alerte échéance action - " + value(timingLabel);
         String text = value(timingMessage)
-                + "\nAction: " + value(action.getTitle())
-                + "\nDate de fin: " + value(action.getEndDate() == null ? null : action.getEndDate().toString())
-                + "\nModification: " + value(request.getModificationNumber())
-                + "\nNom de la modification: " + value(modificationName)
-                + "\nProjet: " + value(request.getModificationProject())
-                + "\nPhase: " + value(phase)
-                + "\nPilote action: " + value(action.getResponsible())
-                + "\nLien: " + value(applicationUrl);
+                + "\nAction : " + value(action.getTitle())
+                + "\nDate de fin : " + value(action.getEndDate() == null ? null : action.getEndDate().toString())
+                + "\nModification : " + value(request.getModificationNumber())
+                + "\nNom de la modification : " + value(modificationName)
+                + "\nProjet : " + value(request.getModificationProject())
+                + "\nPhase : " + value(phase)
+                + "\nPilote action : " + value(action.getResponsible())
+                + "\nLien : " + value(applicationUrl);
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
                 + "<div style=\"background:#3f6212;color:#ffffff;padding:24px 30px;\"><div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#d9f99d;\">Gestion Planning Sage</div>"
-                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Alerte echeance action</h1></div>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Alerte échéance action</h1></div>"
                 + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
                 + "<p><strong>" + escape(value(timingLabel)) + "</strong> - " + escape(value(timingMessage)) + "</p>"
                 + "<p><strong>Action :</strong> " + escape(value(action.getTitle())) + "<br><strong>Date de fin :</strong> " + escape(value(action.getEndDate() == null ? null : action.getEndDate().toString())) + "<br><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Phase :</strong> " + escape(value(phase)) + "<br><strong>Pilote action :</strong> " + escape(value(action.getResponsible())) + "</p>"
                 + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#4d7c0f;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
                 + "</div></div></div></body></html>";
-        sendMessage(recipient.getEmail(), title, text, html, "action deadline");
+        sendMessage(recipient.getEmail(), ccRecipients, title, text, html, "action deadline");
     }
 
     public void sendPhaseRejectedEmail(EcrRequest request, EcrStage stage, AppUser recipient, String reason, String actionsToRevisit) {
         if (!alertMailEnabled) {
-            throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");
+            throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
         }
         if (request == null) {
             return;
         }
         if (recipient == null || isBlank(recipient.getEmail())) {
-            throw new MailDeliveryException("Le chef de projet destinataire n'a pas d'adresse email renseignee.");
+            throw new MailDeliveryException("Le chef de projet destinataire n'a pas d'adresse email renseignée.");
         }
         if (!isMailConfigured()) {
-            LOGGER.error("Phase rejection email skipped because SMTP configuration is incomplete.");
-            throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
+            LOGGER.error("Phase rejection email skipped because SMTP configuration is incomplète.");
+            throw new MailDeliveryException("Configuration SMTP incomplète: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
         }
-        String title = "Phase refusee - actions a revisiter";
+        String title = "Phase refusée - actions à revisiter";
         String text = "La phase " + value(stage == null ? null : stage.getLabel(request.isNewVersion()))
                 + " de la modification " + value(request.getModificationNumber())
-                + " a ete refusee.\nRaison: " + value(reason)
-                + "\nActions a revisiter: " + value(actionsToRevisit)
-                + "\nLien: " + value(applicationUrl);
+                + " a été refusée.\nRaison : " + value(reason)
+                + "\nActions à revisiter: " + value(actionsToRevisit)
+                + "\nLien : " + value(applicationUrl);
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
                 + "<div style=\"background:#7f1d1d;color:#ffffff;padding:24px 30px;\"><div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#fecaca;\">Gestion Planning Sage</div>"
-                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Phase refusee</h1></div>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Phase refusée</h1></div>"
                 + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
-                + "<p>La phase <strong>" + escape(stage == null ? "-" : stage.getLabel(request.isNewVersion())) + "</strong> de la modification <strong>" + escape(value(request.getModificationNumber())) + "</strong> necessite une reprise.</p>"
+                + "<p>La phase <strong>" + escape(stage == null ? "-" : stage.getLabel(request.isNewVersion())) + "</strong> de la modification <strong>" + escape(value(request.getModificationNumber())) + "</strong> nécessite une reprise.</p>"
                 + "<p><strong>Raison :</strong><br>" + escape(value(reason)) + "</p>"
-                + "<p><strong>Actions a revisiter :</strong><br>" + escape(value(actionsToRevisit)).replace("\n", "<br>") + "</p>"
+                + "<p><strong>Actions à revisiter :</strong><br>" + escape(value(actionsToRevisit)).replace("\n", "<br>") + "</p>"
                 + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#b42318;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
                 + "</div></div></div></body></html>";
         sendMessage(recipient.getEmail(), title, text, html, "phase rejection");
     }
 
+    public void sendModificationCompletedEmail(EcrRequest request, Collection<AppUser> recipients) {
+        if (!alertMailEnabled) {
+            throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
+        }
+        if (request == null) {
+            return;
+        }
+        if (recipients == null || recipients.isEmpty()) {
+            throw new MailDeliveryException("Aucun pilote/admin destinataire pour l'email de clôture.");
+        }
+        String to = recipients.stream()
+                .map(AppUser::getEmail)
+                .filter(email -> !isBlank(email))
+                .distinct()
+                .collect(Collectors.joining(","));
+        if (isBlank(to)) {
+            throw new MailDeliveryException("Le pilote et les admins n'ont pas d'adresse email renseignée.");
+        }
+        if (!isMailConfigured()) {
+            LOGGER.error("Modification completion email skipped because SMTP configuration is incomplète.");
+            throw new MailDeliveryException("Configuration SMTP incomplète: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
+        }
+        String modificationName = modificationName(request);
+        String title = "Modification marquée terminée";
+        String text = "La modification " + value(request.getModificationNumber())
+                + " est marquée comme terminée."
+                + "\nNom de la modification : " + value(modificationName)
+                + "\nProjet : " + value(request.getModificationProject())
+                + "\nClient : " + value(request.getClient())
+                + "\nProduit : " + value(request.getProduct())
+                + "\nDate de clôture : " + value(request.getClosureDate() == null ? null : request.getClosureDate().toString())
+                + "\nLien : " + value(applicationUrl);
+        String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
+                + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
+                + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
+                + "<div style=\"background:#14532d;color:#ffffff;padding:24px 30px;\"><div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#bbf7d0;\">Gestion Planning Sage</div>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Modification terminée</h1></div>"
+                + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
+                + "<p>La modification <strong>" + escape(value(request.getModificationNumber())) + "</strong> est maintenant marquée comme <strong>terminée</strong>.</p>"
+                + "<p><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Client :</strong> " + escape(value(request.getClient())) + "<br><strong>Produit :</strong> " + escape(value(request.getProduct())) + "<br><strong>Date de clôture :</strong> " + escape(value(request.getClosureDate() == null ? null : request.getClosureDate().toString())) + "</p>"
+                + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#15803d;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
+                + "</div></div></div></body></html>";
+        sendMessage(to, title, text, html, "modification completion");
+    }
+
+    public void sendPasswordResetCodeEmail(AppUser user, String code) {
+        if (!accountMailEnabled) {
+            throw new MailDeliveryException("L'envoi email est désactivé par APP_ACCOUNT_MAIL_ENABLED.");
+        }
+        if (user == null || isBlank(user.getEmail())) {
+            return;
+        }
+        if (isBlank(code)) {
+            throw new MailDeliveryException("Code de récupération manquant.");
+        }
+        if (!isMailConfigured()) {
+            LOGGER.error("Password reset email skipped because SMTP configuration is incomplète.");
+            throw new MailDeliveryException("Configuration SMTP incomplète: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
+        }
+        String title = "Code de récupération mot de passe";
+        String text = "Bonjour " + value(user.getFullName()) + ","
+                + "\n\nVotre code de récupération Gestion Planning Sage est: " + value(code)
+                + "\nCe code expire dans 10 minutes."
+                + "\n\nSi vous n'avez pas demandé cette récupération, ignorez cet email.";
+        String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
+                + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
+                + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
+                + "<div style=\"background:#111827;color:#ffffff;padding:24px 30px;\"><div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#bfdbfe;\">Gestion Planning Sage</div>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Récupération du mot de passe</h1></div>"
+                + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
+                + "<p>Bonjour <strong>" + escape(value(user.getFullName())) + "</strong>, utilisez le code ci-dessous pour vérifier votre identité.</p>"
+                + "<div style=\"font-size:32px;letter-spacing:.35em;font-weight:800;text-align:center;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:18px 20px;margin:22px 0;color:#111827;\">" + escape(value(code)) + "</div>"
+                + "<p>Ce code expire dans <strong>10 minutes</strong>. Si vous n'avez pas demandé cette récupération, ignorez cet email.</p>"
+                + "</div></div></div></body></html>";
+        sendMessage(user.getEmail(), title, text, html, "password reset");
+    }
+
     private void sendMessage(String to, String subject, String plainText, String html, String logContext) {
+        sendMessage(to, null, subject, plainText, html, logContext);
+    }
+
+    private void sendMessage(String to, Collection<AppUser> ccRecipients, String subject, String plainText, String html, String logContext) {
         try {
             MimeMessage message = new MimeMessage(mailSession());
             message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(to));
+            String cc = ccAddresses(ccRecipients, to);
+            if (!isBlank(cc)) {
+                message.setRecipients(Message.RecipientType.CC, InternetAddress.parse(cc));
+            }
             message.setFrom(new InternetAddress(fromAddress));
             message.setSubject(subject, "UTF-8");
             message.setContent(buildContent(plainText, html));
             Transport.send(message);
-            LOGGER.info("{} email sent to {}", logContext, to);
+            LOGGER.info("{} email sent to {}{}", logContext, to, isBlank(cc) ? "" : " cc " + cc);
         } catch (MessagingException | RuntimeException exception) {
             LOGGER.error("Unable to send {} email to {}", logContext, to, exception);
-            throw new MailDeliveryException("Echec d'envoi email: " + rootMessage(exception), exception);
+            throw new MailDeliveryException("Échec d'envoi email: " + rootMessage(exception), exception);
         }
+    }
+
+    private String ccAddresses(Collection<AppUser> ccRecipients, String to) {
+        if (ccRecipients == null || ccRecipients.isEmpty()) {
+            return "";
+        }
+        Set<String> excluded = new LinkedHashSet<>();
+        if (!isBlank(to)) {
+            for (String email : to.split(",")) {
+                if (!isBlank(email)) {
+                    excluded.add(email.trim().toLowerCase());
+                }
+            }
+        }
+        Set<String> addresses = ccRecipients.stream()
+                .map(AppUser::getEmail)
+                .filter(email -> !isBlank(email))
+                .map(email -> email.trim().toLowerCase())
+                .filter(email -> !excluded.contains(email))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        return String.join(",", addresses);
     }
 
     private Session mailSession() {
@@ -356,17 +468,17 @@ public class AccountMailService {
     private String buildPlainText(AppUser user, String temporaryPassword) {
         StringBuilder text = new StringBuilder();
         text.append("Bonjour ").append(value(user.getFullName())).append(",\n\n");
-        text.append("Votre compte Gestion Planning Sage a ete cree.\n\n");
-        text.append("Lien d'acces: ").append(value(applicationUrl)).append("\n");
+        text.append("Votre compte Gestion Planning Sage a été créé.\n\n");
+        text.append("Lien d'accès: ").append(value(applicationUrl)).append("\n");
         text.append("Nom complet: ").append(value(user.getFullName())).append("\n");
         text.append("Identifiant: ").append(value(user.getUsername())).append("\n");
         text.append("Email: ").append(value(user.getEmail())).append("\n");
         text.append("Mot de passe: ").append(value(temporaryPassword)).append("\n");
-        text.append("Role: ").append(value(user.getRole())).append("\n");
+        text.append("Rôle: ").append(value(user.getRole())).append("\n");
         text.append("Poste: ").append(value(user.getJobTitle())).append("\n");
-        text.append("Telephone: ").append(value(user.getPhone())).append("\n");
+        text.append("Téléphone: ").append(value(user.getPhone())).append("\n");
         text.append("Statut: ").append(user.isEnabled() ? "Actif" : "Inactif").append("\n\n");
-        text.append("Pour votre securite, changez votre mot de passe apres la premiere connexion.\n");
+        text.append("Pour votre sécurité, changez votre mot de passe après la première connexion.\n");
         return text.toString();
     }
 
@@ -379,20 +491,20 @@ public class AccountMailService {
                 + "<div style=\"background:#111827;padding:28px 34px;color:#ffffff;\">"
                 + "<div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#c7d2fe;\">Gestion Planning Sage</div>"
                 + "<h1 style=\"margin:10px 0 0;font-size:26px;line-height:1.25;font-weight:700;\">Bienvenue, " + escape(firstName) + "</h1>"
-                + "<p style=\"margin:10px 0 0;color:#d1d5db;font-size:15px;line-height:1.6;\">Votre compte a ete cree avec succes. Voici vos coordonnees d'acces.</p>"
+                + "<p style=\"margin:10px 0 0;color:#d1d5db;font-size:15px;line-height:1.6;\">Votre compte a été créé avec succès. Voici vos coordonnées d'accès.</p>"
                 + "</div>"
                 + "<div style=\"padding:30px 34px;\">"
-                + "<p style=\"margin:0 0 22px;font-size:15px;line-height:1.7;\">Bonjour <strong>" + escape(user.getFullName()) + "</strong>, vous pouvez maintenant acceder a la plateforme Gestion Planning Sage avec les informations ci-dessous.</p>"
+                + "<p style=\"margin:0 0 22px;font-size:15px;line-height:1.7;\">Bonjour <strong>" + escape(user.getFullName()) + "</strong>, vous pouvez maintenant accéder à la plateforme Gestion Planning Sage avec les informations ci-dessous.</p>"
                 + credentialsTable(user, temporaryPassword)
                 + "<div style=\"text-align:center;margin:30px 0 24px;\">"
-                + "<a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:13px 24px;border-radius:10px;font-weight:700;font-size:14px;\">Acceder a mon compte</a>"
+                + "<a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:13px 24px;border-radius:10px;font-weight:700;font-size:14px;\">Accéder à mon compte</a>"
                 + "</div>"
                 + "<div style=\"background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px 18px;color:#475569;font-size:14px;line-height:1.6;\">"
-                + "<strong style=\"color:#111827;\">Conseil securite :</strong> changez votre mot de passe apres votre premiere connexion et conservez ces informations dans un endroit confidentiel."
+                + "<strong style=\"color:#111827;\">Conseil sécurité :</strong> changez votre mot de passe après votre première connexion et conservez ces informations dans un endroit confidentiel."
                 + "</div>"
                 + "</div>"
                 + "<div style=\"border-top:1px solid #e5e7eb;padding:18px 34px;color:#64748b;font-size:12px;line-height:1.6;background:#fbfdff;\">"
-                + "Cet email a ete envoye automatiquement par Gestion Planning Sage. Merci de ne pas y repondre directement."
+                + "Cet email a été envoyé automatiquement par Gestion Planning Sage. Merci de ne pas y répondre directement."
                 + "</div>"
                 + "</div>"
                 + "</div>"
@@ -405,9 +517,9 @@ public class AccountMailService {
                 + credentialRow("Identifiant", user.getUsername(), false)
                 + credentialRow("Email", user.getEmail(), true)
                 + credentialRow("Mot de passe", temporaryPassword, false)
-                + credentialRow("Role", user.getRole(), true)
+                + credentialRow("Rôle", user.getRole(), true)
                 + credentialRow("Poste", user.getJobTitle(), false)
-                + credentialRow("Telephone", user.getPhone(), true)
+                + credentialRow("Téléphone", user.getPhone(), true)
                 + credentialRow("Statut", user.isEnabled() ? "Actif" : "Inactif", false)
                 + "</table>";
     }

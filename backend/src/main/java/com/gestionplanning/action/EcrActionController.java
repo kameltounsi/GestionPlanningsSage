@@ -21,11 +21,13 @@ import org.springframework.web.multipart.MultipartFile;
 import javax.validation.Valid;
 import java.net.URI;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @RestController
@@ -95,8 +97,7 @@ public class EcrActionController {
             templateService.ensureActionsFor(request);
             planningService.recalculateRequest(request);
             List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(requestId);
-            if (!accessControlService.canSeeAllActions(user, request)
-                    && !(stage == null && accessControlService.isRequestPilot(user, request))) {
+            if (!accessControlService.canSeeAllActions(user, request)) {
                 actions = visibleActionsForUser(actions, user);
             }
             if (stage != null) {
@@ -118,6 +119,10 @@ public class EcrActionController {
                     if (!admin && !pilot) {
                         return ResponseEntity.status(403).<EcrAction>build();
                     }
+                    EcrStage actionStage = action.getStage() == null ? request.getCurrentStage() : action.getStage();
+                    if (isPhaseApproved(requestId, actionStage)) {
+                        return ResponseEntity.status(403).<EcrAction>build();
+                    }
                     if (isDone(action) && requiresEvidence(action)) {
                         return ResponseEntity.badRequest().<EcrAction>build();
                     }
@@ -128,6 +133,7 @@ public class EcrActionController {
                         return ResponseEntity.status(422).<EcrAction>build();
                     }
                     action.setRequest(request);
+                    action.setStage(actionStage);
                     action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
                     if (isDone(action) && !accessControlService.canCompleteAction(user, action)) {
                         return ResponseEntity.status(403).<EcrAction>build();
@@ -150,13 +156,19 @@ public class EcrActionController {
     public ResponseEntity<EcrAction> update(@PathVariable Long id, @Valid @RequestBody EcrAction updatedAction,
                                             @RequestAttribute("authenticatedUser") AppUser user) {
         return actionRepository.findById(id)
-                .filter(action -> accessControlService.canManageAction(user, action))
+                .filter(this::canMutateAction)
+                .filter(action -> accessControlService.canManageAction(user, action) || canUpdateDuration(user, action))
                 .map(action -> {
                     boolean completingAction = isCompletingAction(action, updatedAction);
+                    Integer previousDuration = action.getWorkDurationDays();
+                    LocalDate previousEndDate = action.getEndDate();
                     if (completingAction && !accessControlService.canCompleteAction(user, action)) {
                         return ResponseEntity.status(403).<EcrAction>build();
                     }
                     if (!accessControlService.isAdmin(user)) {
+                        if (!accessControlService.canManageAction(user, action) && canUpdateDuration(user, action)) {
+                            return updateActionDuration(action, updatedAction);
+                        }
                         return updateActionProgress(action, updatedAction, user);
                     }
                     if (isReopeningAction(action, updatedAction) && !isActionInCurrentPhase(action)) {
@@ -203,7 +215,7 @@ public class EcrActionController {
                     action.setComment(updatedAction.getComment());
                     action.setDossierReview(updatedAction.getDossierReview());
                     EcrAction saved = actionRepository.save(action);
-                    planningService.recalculateRequest(saved.getRequest());
+                    recalculateAfterActionChange(saved, previousDuration, previousEndDate);
                     if (completingAction) {
                         recordActionCompleted(user, saved);
                     }
@@ -214,6 +226,8 @@ public class EcrActionController {
 
     private ResponseEntity<EcrAction> updateActionProgress(EcrAction action, EcrAction updatedAction, AppUser user) {
         boolean completingAction = isCompletingAction(action, updatedAction);
+        Integer previousDuration = action.getWorkDurationDays();
+        LocalDate previousEndDate = action.getEndDate();
         if (completingAction && !accessControlService.canCompleteAction(user, action)) {
             return ResponseEntity.status(403).build();
         }
@@ -229,14 +243,37 @@ public class EcrActionController {
         action.setChecked(updatedAction.isChecked());
         action.setStatus(updatedAction.getStatus());
         action.setComment(updatedAction.getComment());
+        if (canUpdateDuration(user, action)) {
+            action.setWorkDurationDays(defaultDuration(updatedAction.getWorkDurationDays()));
+        }
         syncFinalizationDate(action, updatedAction);
         syncValidationAfterProgressChange(action);
         EcrAction saved = actionRepository.save(action);
-        planningService.recalculateRequest(saved.getRequest());
+        recalculateAfterActionChange(saved, previousDuration, previousEndDate);
         if (completingAction) {
             recordActionCompleted(user, saved);
         }
         return ResponseEntity.ok(enrichAction(saved));
+    }
+
+    private ResponseEntity<EcrAction> updateActionDuration(EcrAction action, EcrAction updatedAction) {
+        if (!canChangeDuration(action)) {
+            return ResponseEntity.badRequest().build();
+        }
+        Integer previousDuration = action.getWorkDurationDays();
+        LocalDate previousEndDate = action.getEndDate();
+        action.setWorkDurationDays(defaultDuration(updatedAction.getWorkDurationDays()));
+        EcrAction saved = actionRepository.save(action);
+        planningService.recalculateAfterDurationChange(saved, previousDuration, previousEndDate);
+        return ResponseEntity.ok(enrichAction(saved));
+    }
+
+    private void recalculateAfterActionChange(EcrAction saved, Integer previousDuration, LocalDate previousEndDate) {
+        if (!Objects.equals(defaultDuration(previousDuration), defaultDuration(saved.getWorkDurationDays()))) {
+            planningService.recalculateAfterDurationChange(saved, previousDuration, previousEndDate);
+            return;
+        }
+        planningService.recalculateRequest(saved.getRequest());
     }
 
     @PostMapping(value = "/actions/{id}/evidence", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -246,7 +283,7 @@ public class EcrActionController {
             return ResponseEntity.badRequest().build();
         }
         return actionRepository.findById(id)
-                .filter(action -> accessControlService.canManageAction(user, action))
+                .filter(action -> accessControlService.canManageAction(user, action) && canMutateAction(action))
                 .map(action -> {
                     StoredAsset asset = storageService.upload(file, "gestion-planning/actions/" + id);
                     EcrActionAsset actionAsset = new EcrActionAsset();
@@ -277,7 +314,7 @@ public class EcrActionController {
             return ResponseEntity.badRequest().build();
         }
         return actionRepository.findById(id)
-                .filter(action -> accessControlService.canManageAction(user, action))
+                .filter(action -> accessControlService.canManageAction(user, action) && canMutateAction(action))
                 .map(action -> {
                     StoredAsset asset = storageService.upload(file, "gestion-planning/actions/" + id + "/proof-document");
                     EcrActionProofDocument proofDocument = new EcrActionProofDocument();
@@ -338,7 +375,7 @@ public class EcrActionController {
             } catch (RuntimeException exception) {
                 return ResponseEntity.status(502)
                         .contentType(MediaType.TEXT_PLAIN)
-                        .body("Telechargement impossible depuis Cloudinary. Activez la livraison des fichiers PDF/ZIP dans les parametres Security de Cloudinary, puis reessayez.");
+                        .body("Téléchargement impossible depuis Cloudinary. Activez la livraison des fichiers PDF/ZIP dans les paramètres Security de Cloudinary, puis réessayez.");
             }
         }).orElseGet(() -> ResponseEntity.notFound().build());
     }
@@ -356,7 +393,7 @@ public class EcrActionController {
                     } catch (RuntimeException exception) {
                         return ResponseEntity.status(502)
                                 .contentType(MediaType.TEXT_PLAIN)
-                                .body("Telechargement impossible depuis Cloudinary. Activez la livraison des fichiers PDF/ZIP dans les parametres Security de Cloudinary, puis reessayez.");
+                                .body("Téléchargement impossible depuis Cloudinary. Activez la livraison des fichiers PDF/ZIP dans les paramètres Security de Cloudinary, puis réessayez.");
                     }
                 })
                 .orElseGet(() -> ResponseEntity.notFound().build());
@@ -367,7 +404,7 @@ public class EcrActionController {
     public ResponseEntity<EcrAction> deleteProofDocument(@PathVariable Long id,
                                                          @RequestAttribute("authenticatedUser") AppUser user) {
         return actionRepository.findById(id)
-                .filter(action -> accessControlService.canManageAction(user, action))
+                .filter(action -> accessControlService.canManageAction(user, action) && canMutateAction(action))
                 .map(action -> {
                     storageService.deleteQuietly(action.getProofDocumentPublicId(), action.getProofDocumentResourceType());
                     proofDocumentRepository.findByAction_IdOrderByUploadedAtDescIdDesc(id)
@@ -384,7 +421,7 @@ public class EcrActionController {
     public ResponseEntity<EcrAction> deleteActionProofDocument(@PathVariable Long proofDocumentId,
                                                                @RequestAttribute("authenticatedUser") AppUser user) {
         return proofDocumentRepository.findById(proofDocumentId)
-                .filter(proofDocument -> accessControlService.canManageAction(user, proofDocument.getAction()))
+                .filter(proofDocument -> accessControlService.canManageAction(user, proofDocument.getAction()) && canMutateAction(proofDocument.getAction()))
                 .map(proofDocument -> {
                     EcrAction action = proofDocument.getAction();
                     storageService.deleteQuietly(proofDocument.getPublicId(), proofDocument.getResourceType());
@@ -418,7 +455,7 @@ public class EcrActionController {
     public ResponseEntity<EcrAction> deleteActionAsset(@PathVariable Long assetId,
                                                        @RequestAttribute("authenticatedUser") AppUser user) {
         return assetRepository.findById(assetId)
-                .filter(asset -> accessControlService.canManageAction(user, asset.getAction()))
+                .filter(asset -> accessControlService.canManageAction(user, asset.getAction()) && canMutateAction(asset.getAction()))
                 .map(asset -> {
                     EcrAction action = asset.getAction();
                     storageService.deleteQuietly(asset.getPublicId(), asset.getResourceType());
@@ -454,20 +491,51 @@ public class EcrActionController {
     }
 
     private boolean canDeleteAction(AppUser user, EcrAction action) {
+        if (!canMutateAction(action)) {
+            return false;
+        }
         if (accessControlService.isAdmin(user)) {
             return true;
         }
         return accessControlService.isRequestPilot(user, action == null ? null : action.getRequest())
-                && !isActionPhaseApproved(action);
+                && canMutateAction(action);
+    }
+
+    private boolean canMutateAction(EcrAction action) {
+        return !isActionPhaseApproved(action);
     }
 
     private boolean isActionPhaseApproved(EcrAction action) {
         if (action == null || action.getRequestId() == null || action.getStage() == null) {
             return false;
         }
-        return validationRepository.findFirstByRequest_IdAndStageOrderByRequestedAtDescIdDesc(action.getRequestId(), action.getStage())
+        return isPhaseApproved(action.getRequestId(), action.getStage());
+    }
+
+    private boolean isPhaseApproved(Long requestId, EcrStage stage) {
+        if (requestId == null || stage == null) {
+            return false;
+        }
+        return validationRepository.findFirstByRequest_IdAndStageOrderByRequestedAtDescIdDesc(requestId, stage)
                 .map(validation -> validation.getStatus() == PhaseValidationStatus.APPROVED)
                 .orElse(false);
+    }
+
+    private boolean canUpdateDuration(AppUser user, EcrAction action) {
+        return accessControlService.isRequestPilot(user, action == null ? null : action.getRequest())
+                && canChangeDuration(action);
+    }
+
+    private boolean canChangeDuration(EcrAction action) {
+        return action != null
+                && action.getRequest() != null
+                && action.getRequest().getCurrentStage() != EcrStage.CLOSED
+                && action.getRequest().getCurrentStage() != EcrStage.CANCELLED
+                && !isActionPhaseApproved(action);
+    }
+
+    private int defaultDuration(Integer duration) {
+        return duration == null ? 1 : Math.max(0, duration);
     }
 
     private void deleteLocalEvidenceIfPresent(Long actionId) {
@@ -632,7 +700,7 @@ public class EcrActionController {
                 "ACTION_TERMINEE",
                 "modification",
                 modificationName,
-                "Action marquee terminee: " + actionTitle + " - Modification: " + modificationName + " - Projet: " + projectName
+                "Action marquée terminée: " + actionTitle + " - Modification: " + modificationName + " - Projet: " + projectName
         );
     }
 
@@ -742,8 +810,32 @@ public class EcrActionController {
     }
 
     private List<EcrAction> visibleActionsForUser(List<EcrAction> actions, AppUser user) {
-        return actions.stream()
-                .filter(action -> accessControlService.canViewAction(user, enrichAction(action)))
+        List<EcrAction> enrichedActions = enrichActions(actions);
+        Set<Long> visibleIds = enrichedActions.stream()
+                .filter(action -> accessControlService.canViewAction(user, action))
+                .map(EcrAction::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(HashSet::new));
+        boolean changed;
+        do {
+            changed = false;
+            Set<Long> currentVisibleIds = new HashSet<>(visibleIds);
+            for (EcrAction action : enrichedActions) {
+                Long actionId = action.getId();
+                Long dependencyId = action.getDependsOnActionId();
+                if (actionId == null || dependencyId == null) {
+                    continue;
+                }
+                if (currentVisibleIds.contains(actionId) && visibleIds.add(dependencyId)) {
+                    changed = true;
+                }
+                if (currentVisibleIds.contains(dependencyId) && visibleIds.add(actionId)) {
+                    changed = true;
+                }
+            }
+        } while (changed);
+        return enrichedActions.stream()
+                .filter(action -> action.getId() != null && visibleIds.contains(action.getId()))
                 .collect(Collectors.toList());
     }
 
@@ -763,8 +855,8 @@ public class EcrActionController {
 
     private ResponseEntity<String> cloudinaryDownloadError(CloudinaryStorageService.DownloadException exception) {
         String message = exception.isNotFound()
-                ? "Fichier introuvable dans Cloudinary. Il a peut-etre ete supprime ou deplace."
-                : "Telechargement impossible depuis Cloudinary. Reessayez plus tard ou verifiez la configuration Cloudinary.";
+                ? "Fichier introuvable dans Cloudinary. Il a peut-être été supprimé ou déplacé."
+                : "Téléchargement impossible depuis Cloudinary. Réessayez plus tard ou vérifiez la configuration Cloudinary.";
         return ResponseEntity.status(exception.isNotFound() ? 404 : 502)
                 .contentType(MediaType.TEXT_PLAIN)
                 .body(message);

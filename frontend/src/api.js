@@ -77,11 +77,11 @@ async function errorMessage(response) {
 
 function userMessageForStatus(status) {
   if (status === 400) return "Les donnees saisies sont invalides.";
-  if (status === 401) return "Session expiree. Connectez-vous a nouveau.";
+  if (status === 401) return "Session expirée. Connectez-vous à nouveau.";
   if (status === 403) return "Vous n'avez pas les droits pour effectuer cette action.";
   if (status === 404) return "Element introuvable.";
-  if (status === 409) return "Cette reference existe deja.";
-  if (status >= 500) return "Une erreur serveur est survenue. Reessayez plus tard.";
+  if (status === 409) return "Cette référence existe déjà.";
+  if (status >= 500) return "Une erreur serveur est survenue. Réessayez plus tard.";
   return "Une erreur est survenue.";
 }
 
@@ -119,14 +119,42 @@ export function login(email, password) {
   });
 }
 
+export function requestPasswordReset(email) {
+  return request("/auth/password-reset/request", {
+    method: "POST",
+    body: JSON.stringify({ email })
+  });
+}
+
+export function verifyPasswordResetCode(email, code) {
+  return request("/auth/password-reset/verify", {
+    method: "POST",
+    body: JSON.stringify({ email, code })
+  });
+}
+
+export function confirmPasswordReset(email, code, password) {
+  return request("/auth/password-reset/confirm", {
+    method: "POST",
+    body: JSON.stringify({ email, code, password })
+  });
+}
+
 export function logout() {
   return request("/auth/logout", {
     method: "POST"
   }).finally(clearSession);
 }
 
-export function getEcrRequests(includeArchived = false) {
-  const query = includeArchived ? "?includeArchived=true" : "";
+export function getEcrRequests(options = {}) {
+  const params = new URLSearchParams();
+  if (typeof options === "boolean") {
+    if (options) params.set("includeArchived", "true");
+  } else {
+    if (options.includeArchived) params.set("includeArchived", "true");
+    if (options.view) params.set("view", options.view);
+  }
+  const query = params.toString() ? `?${params.toString()}` : "";
   return request(`/ecr-requests${query}`);
 }
 

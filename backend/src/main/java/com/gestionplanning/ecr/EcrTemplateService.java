@@ -106,6 +106,33 @@ public class EcrTemplateService {
         }
     }
 
+    public void ensureMissingActionsForStage(EcrRequest request, EcrStage stage) {
+        if (request == null || request.getId() == null || stage == null) {
+            return;
+        }
+        List<EcrAction> existingActions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId());
+        Set<String> existingKeys = existingActions.stream()
+                .map(this::actionKey)
+                .collect(Collectors.toCollection(HashSet::new));
+        List<ActionPlanningRule> rules = ruleRepository.findAllByOrderByStageAscActionTitleAsc().stream()
+                .filter(rule -> rule.getStage() == stage)
+                .filter(rule -> EcrStage.isAllowed(rule.getStage(), request.isNewVersion()))
+                .filter(rule -> appliesToRequest(rule, request))
+                .collect(Collectors.toList());
+
+        syncExistingActionsFromRules(request, existingActions, rules);
+
+        List<EcrAction> missingActions = rules.stream()
+                .filter(rule -> !existingKeys.contains(ruleKey(rule)))
+                .map(rule -> fromRule(request, rule))
+                .collect(Collectors.toList());
+
+        if (!missingActions.isEmpty()) {
+            actionRepository.saveAll(missingActions);
+            planningService.recalculateRequest(request);
+        }
+    }
+
     public void syncActionRuleFor(EcrRequest request, ActionPlanningRule previousRule, ActionPlanningRule updatedRule) {
         if (request == null || request.getId() == null || updatedRule == null || request.getCurrentStage() == EcrStage.CLOSED || request.getCurrentStage() == EcrStage.CANCELLED) {
             return;

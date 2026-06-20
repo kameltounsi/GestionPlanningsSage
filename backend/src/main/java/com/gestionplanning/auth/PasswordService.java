@@ -49,7 +49,7 @@ public class PasswordService {
             PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), salt, iterations, KEY_LENGTH);
             return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).getEncoded();
         } catch (Exception exception) {
-            throw new IllegalStateException("Impossible de securiser le mot de passe", exception);
+            throw new IllegalStateException("Impossible de sécurisér le mot de passe", exception);
         }
     }
 }

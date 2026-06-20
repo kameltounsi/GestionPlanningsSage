@@ -7,7 +7,7 @@ export const stageDefinitions = [
   { key: "PPAP_SOP_PREPARATION", modificationLabel: "PPAP validation Preparation SOP", newProjectLabel: "Production Set-up & Pre-Series", modification: true, newProject: true },
   { key: "LAUNCH", modificationLabel: "Launch", newProjectLabel: "Launch", modification: false, newProject: true },
   { key: "CLOSED", modificationLabel: "Clôture Status", newProjectLabel: "Clôture Status", modification: true, newProject: true },
-  { key: "CANCELLED", modificationLabel: "Cancelled", newProjectLabel: "Project Cancelled", modification: false, newProject: false }
+  { key: "CANCELLED", modificationLabel: "Cancelled", newProjectLabel: "Project Cancelled", modification: true, newProject: true }
 ];
 
 export const stageColors = [

@@ -52,7 +52,7 @@ public class FinishedProductReferenceController {
         try {
             saved = repository.save(finishedProduct);
         } catch (DataIntegrityViolationException exception) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).body("Part number ou code reduit deja existant.");
+            return ResponseEntity.status(HttpStatus.CONFLICT).body("Part number ou code réduit déjà existant.");
         }
         auditLogService.recordBusinessEvent(user, "AJOUT_PRODUIT_FINI", "produit_fini", saved.getId() == null ? null : String.valueOf(saved.getId()), "Ajout du produit fini: " + saved.getPartNumber());
         return ResponseEntity.ok(saved);
@@ -86,7 +86,7 @@ public class FinishedProductReferenceController {
                     try {
                         return ResponseEntity.ok(repository.save(finishedProduct));
                     } catch (DataIntegrityViolationException exception) {
-                        return ResponseEntity.status(HttpStatus.CONFLICT).body("Part number ou code reduit deja existant.");
+                        return ResponseEntity.status(HttpStatus.CONFLICT).body("Part number ou code réduit déjà existant.");
                     }
                 })
                 .orElse(ResponseEntity.notFound().build());
@@ -125,13 +125,13 @@ public class FinishedProductReferenceController {
                 ? repository.existsByPartNumber(finishedProduct.getPartNumber())
                 : repository.existsByPartNumberAndIdNot(finishedProduct.getPartNumber(), currentId);
         if (partNumberExists) {
-            return "Ce part number existe deja.";
+            return "Ce part number existe déjà.";
         }
         boolean reducedCodeExists = currentId == null
                 ? repository.existsByReducedCode(finishedProduct.getReducedCode())
                 : repository.existsByReducedCodeAndIdNot(finishedProduct.getReducedCode(), currentId);
         if (reducedCodeExists) {
-            return "Ce code reduit existe deja.";
+            return "Ce code réduit existe déjà.";
         }
         return null;
     }

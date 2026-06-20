@@ -34,6 +34,10 @@ public class AppUser {
 
     private String phone;
 
+    private String chef1;
+
+    private String chef2;
+
     private String profilePhotoFileName;
     private String profilePhotoContentType;
     private Long profilePhotoFileSize;
@@ -104,6 +108,22 @@ public class AppUser {
 
     public void setPhone(String phone) {
         this.phone = phone;
+    }
+
+    public String getChef1() {
+        return chef1;
+    }
+
+    public void setChef1(String chef1) {
+        this.chef1 = chef1;
+    }
+
+    public String getChef2() {
+        return chef2;
+    }
+
+    public void setChef2(String chef2) {
+        this.chef2 = chef2;
     }
 
     public String getProfilePhotoFileName() {

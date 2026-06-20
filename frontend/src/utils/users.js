@@ -12,6 +12,8 @@ export function userToForm(user) {
     email: user?.email || "",
     password: "",
     phone: user?.phone || "",
+    chef1: user?.chef1 || "",
+    chef2: user?.chef2 || "",
     role: user?.role || "CHEF_DE_PROJET",
     profilePhotoUrl: user?.profilePhotoUrl || "",
     profilePhotoFile: null,

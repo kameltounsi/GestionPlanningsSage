@@ -1,4 +1,4 @@
-import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import React, { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Swal from "sweetalert2";
 import "sweetalert2/dist/sweetalert2.min.css";
 import {
@@ -36,6 +36,7 @@ import {
   createRoleReference,
   createUser,
   cancelEcrRequest,
+  confirmPasswordReset,
   clearSession,
   addActionSuggestionToDefaults,
   acknowledgeActionDeadlineAlerts,
@@ -72,6 +73,7 @@ import {
   login,
   logout,
   planningEventsUrl,
+  requestPasswordReset,
   storeSession,
   updateAction,
   updateActionPlanningRule,
@@ -100,7 +102,8 @@ import {
   rejectPhaseValidation,
   requestActionValidation,
   requestPhaseValidation,
-  uploadUserPhoto
+  uploadUserPhoto,
+  verifyPasswordResetCode
 } from "./api";
 import { EmptyState } from "./components/common/EmptyState";
 import { PageHeader } from "./components/common/PageHeader";
@@ -187,18 +190,18 @@ function friendlyErrorMessage(message) {
     try {
       const payload = JSON.parse(text);
       if (payload.status === 400) return "Les donnees saisies sont invalides.";
-      if (payload.status === 401) return "Session expiree. Connectez-vous a nouveau.";
+      if (payload.status === 401) return "Session expirée. Connectez-vous à nouveau.";
       if (payload.status === 403) return "Vous n'avez pas les droits pour effectuer cette action.";
       if (payload.status === 404) return "Element introuvable.";
-      if (payload.status === 409) return "Cette reference existe deja.";
-      return "Une erreur serveur est survenue. Reessayez plus tard.";
+      if (payload.status === 409) return "Cette référence existe déjà.";
+      return "Une erreur serveur est survenue. Réessayez plus tard.";
     } catch {
       return "Une erreur est survenue.";
     }
   }
   const lower = text.toLowerCase();
   if (lower.includes("exception") || lower.includes("constraint") || lower.includes("sql") || lower.includes("internal server error") || lower.includes("\"timestamp\"")) {
-    return "Une erreur serveur est survenue. Reessayez plus tard.";
+    return "Une erreur serveur est survenue. Réessayez plus tard.";
   }
   return text;
 }
@@ -239,7 +242,7 @@ function confirmDelete(title, text) {
     icon: "warning",
     showCancelButton: true,
     confirmButtonText: "Supprimer",
-    cancelButtonText: "Annuler",
+    cancelButtonText: "Annulér",
     confirmButtonColor: "#b42318",
     cancelButtonColor: "#64748b"
   });
@@ -265,6 +268,30 @@ function formattedDateTime(value) {
 
 function isActionDone(action) {
   return Boolean(action?.checked) || action?.status === "DONE" || action?.status === "DONE_LATE";
+}
+
+function isTerminalRequest(request) {
+  return request?.currentStage === "CLOSED" || request?.currentStage === "CANCELLED";
+}
+
+function isActiveRequest(request) {
+  return Boolean(request) && !request.archived && !isTerminalRequest(request);
+}
+
+function requestMatchesView(request, view, canAdmin = false) {
+  if (!request) return false;
+  if (view === "archived") return canAdmin && Boolean(request.archived);
+  if (request.archived && view !== "all") return false;
+  if (view === "active") return isActiveRequest(request);
+  if (view === "closed") return !request.archived && request.currentStage === "CLOSED";
+  if (view === "cancelled") return !request.archived && request.currentStage === "CANCELLED";
+  return canAdmin || !request.archived;
+}
+
+function requestLoadOptions(view, user) {
+  return isAdminUser(user) && (view === "archived" || view === "all")
+    ? { view }
+    : {};
 }
 
 function escapeHtml(value) {
@@ -454,7 +481,7 @@ function isCriticalActionValue(action) {
 function actionGanttStatusLabel(action) {
   if (isCriticalActionValue(action)) return "Critique";
   if (isActionDone(action)) return "Done";
-  return actionGanttStatusClass(action) === "late" ? "En retard" : "Planifie / a faire";
+  return actionGanttStatusClass(action) === "late" ? "En retard" : "Planifié / à faire";
 }
 
 function actionGanttColor(action) {
@@ -601,7 +628,7 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
       <div class="gantt-row gantt-head"><div class="left">Activites</div><div class="left">Deb</div><div class="left">Fin</div><div class="timeline">${ticks.map((tick) => `<span class="tick">${escapeHtml(tick.label)}</span>`).join("")}</div></div>
       ${actionRows.length === 0 ? `<div class="empty">Aucune action planifiee pour cette modification.</div>` : rowHtml}
     </section>
-    <div class="legend"><span><i style="${ganttColorBarStyle("#9ca3af")}"></i>Planifie / a faire</span><span><i style="${ganttColorBarStyle("#16a34a")}"></i>Done</span><span><i style="${ganttColorBarStyle("#dc2626")}"></i>En retard</span><span><i style="${ganttColorBarStyle("#df7d3f")}"></i>Critique</span></div>
+    <div class="legend"><span><i style="${ganttColorBarStyle("#9ca3af")}"></i>Planifié / à faire</span><span><i style="${ganttColorBarStyle("#16a34a")}"></i>Done</span><span><i style="${ganttColorBarStyle("#dc2626")}"></i>En retard</span><span><i style="${ganttColorBarStyle("#df7d3f")}"></i>Critique</span></div>
     <script>window.onload=function(){window.print();};</script>
   </body></html>`;
 }
@@ -656,7 +683,8 @@ function hasApplicationRole(user, code, label) {
   return value === normalizeRoleToken(code).replaceAll("_", " ") || value === normalizeRoleToken(label);
 }
 
-function canManageActionForUser(user, action) {
+function canManageActionForUser(user, action, phaseValidations = []) {
+  if (isActionPhaseApproved(action, phaseValidations)) return false;
   if (isAdminUser(user)) return true;
   const responsible = normalizeRoleToken(action?.responsible);
   if (!responsible) return false;
@@ -697,7 +725,8 @@ function canRequestRejectedActionValidationForUser(user, action, request) {
     && (isRequestPilot(user, request) || isActionPilotForUser(user, action));
 }
 
-function canToggleActionForUser(user, action, request) {
+function canToggleActionForUser(user, action, request, phaseValidations = []) {
+  if (isActionPhaseApproved(action, phaseValidations)) return false;
   if (!isActionPilotForUser(user, action)) return false;
   return !isActionDone(action) || action?.stage === request?.currentStage;
 }
@@ -707,8 +736,15 @@ function isActionPhaseApproved(action, phaseValidations = []) {
 }
 
 function canDeleteActionForUser(user, action, request, phaseValidations = []) {
+  if (isActionPhaseApproved(action, phaseValidations)) return false;
   if (isAdminUser(user)) return true;
-  return isRequestPilot(user, request) && !isActionPhaseApproved(action, phaseValidations);
+  return isRequestPilot(user, request);
+}
+
+function canEditActionDurationForUser(user, action, request, phaseValidations = []) {
+  if (!isRequestPilot(user, request)) return false;
+  if (request?.currentStage === "CLOSED" || request?.currentStage === "CANCELLED") return false;
+  return !isActionPhaseApproved(action, phaseValidations);
 }
 
 function blockingActionFor(action, actions = []) {
@@ -748,6 +784,10 @@ function isValidPhone(value) {
 function App() {
   const [authSession, setAuthSession] = useState(getStoredSession());
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+  const [passwordResetStep, setPasswordResetStep] = useState("login");
+  const [passwordResetEmail, setPasswordResetEmail] = useState("");
+  const [passwordResetCode, setPasswordResetCode] = useState(["", "", "", ""]);
+  const [passwordResetForm, setPasswordResetForm] = useState({ password: "", confirmation: "" });
   const [page, setPage] = useState(pageFromPath());
   const [menuCollapsed, setMenuCollapsed] = useState(false);
   const [requests, setRequests] = useState([]);
@@ -793,13 +833,14 @@ function App() {
   const [editingUser, setEditingUser] = useState(null);
   const [query, setQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
-  const [requestArchiveView, setRequestArchiveView] = useState("active");
+  const [requestArchiveView, setRequestArchiveView] = useState("all");
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const realtimeRefreshTimer = useRef(null);
+  const selectedDetailsRequestId = useRef(0);
 
   const selectedRequest = requests.find((request) => request.id === selectedId);
   const selectedStages = useMemo(() => {
@@ -813,22 +854,41 @@ function App() {
     const currentIndex = selectedStages.findIndex(([key]) => key === selectedRequest.currentStage);
     return selectedStages.filter((_, index) => currentIndex < 0 || index <= currentIndex);
   }, [currentUser, selectedRequest, selectedStages]);
-  const activeRequests = useMemo(() => requests.filter((request) => !request.archived), [requests]);
+  const activeRequests = useMemo(() => requests.filter(isActiveRequest), [requests]);
   const doneCount = actions.filter(isActionDone).length;
   const completion = actions.length ? Math.round((doneCount / actions.length) * 100) : 0;
   const lateActions = actions.filter((action) => action.late).length;
 
   const filteredRequests = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
+    const normalized = normalizeSearchText(query);
+    const canAdmin = isAdminUser(currentUser);
     return requests.filter((request) => {
-      if (request.archived && requestArchiveView !== "all") return false;
+      if (!requestMatchesView(request, requestArchiveView, canAdmin)) return false;
       const matchesProject = !projectFilter || request.modificationProject === projectFilter;
       const matchesSearch = !normalized || [request.client, request.product, request.modificationProject, request.modificationNumber, request.modificationReason, request.modificationDetail, request.dossierReview, request.pilot]
         .filter(Boolean)
-        .some((value) => value.toLowerCase().includes(normalized));
+        .some((value) => normalizeSearchText(value).includes(normalized));
       return matchesProject && matchesSearch;
     });
-  }, [requests, query, projectFilter, requestArchiveView]);
+  }, [currentUser, requests, query, projectFilter, requestArchiveView]);
+
+  const requestSearchSuggestions = useMemo(() => {
+    const normalized = normalizeSearchText(query);
+    if (!normalized) return [];
+    const exactOrPrefix = [];
+    const contains = [];
+    for (const request of filteredRequests) {
+      const label = requestDisplayName(request);
+      const normalizedLabel = normalizeSearchText(label);
+      const item = { request, label };
+      if (normalizedLabel === normalized || normalizedLabel.startsWith(normalized)) {
+        exactOrPrefix.push(item);
+      } else if (normalizedLabel.includes(normalized)) {
+        contains.push(item);
+      }
+    }
+    return [...exactOrPrefix, ...contains].slice(0, 8);
+  }, [filteredRequests, query]);
 
   const projectOptions = useMemo(() => {
     const names = [
@@ -854,10 +914,11 @@ function App() {
   );
 
   const dashboardStats = useMemo(() => {
-    const active = activeRequests.filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED").length;
-    const closed = activeRequests.filter((request) => request.currentStage === "CLOSED").length;
-    return { active, closed, projects: projects.length, requests: activeRequests.length };
-  }, [activeRequests, projects]);
+    const visibleRequests = requests.filter((request) => !request.archived);
+    const active = visibleRequests.filter(isActiveRequest).length;
+    const closed = visibleRequests.filter((request) => request.currentStage === "CLOSED").length;
+    return { active, closed, projects: projects.length, requests: visibleRequests.length };
+  }, [requests, projects]);
 
   const filteredAuditLogs = useMemo(() => {
     const normalized = auditQuery.trim().toLowerCase();
@@ -972,7 +1033,7 @@ function App() {
           toast: true,
           position: "top-end",
           icon: firstAlert.alertType === "J_PLUS_1" ? "error" : "warning",
-          title: `${alerts.length} alerte${alerts.length > 1 ? "s" : ""} echeance action`,
+          title: `${alerts.length} alerte${alerts.length > 1 ? "s" : ""} échéance action`,
           text: `${firstAlert.actionTitle || "Action"} - ${firstAlert.requestLabel || "Modification"}`,
           showConfirmButton: false,
           timer: 7000,
@@ -1002,13 +1063,17 @@ function App() {
   }
   function refreshSelectedData(requestId = selectedId, stage = selectedStage) {
     if (!requestId) return Promise.resolve([]);
+    const requestSequence = ++selectedDetailsRequestId.current;
 
     return Promise.all([
-      getEcrRequests(),
+      getEcrRequests(requestLoadOptions(requestArchiveView, currentUser)),
       getChecklist(requestId, stage),
       getActions(requestId, stage),
       getPhaseValidations(requestId)
     ]).then(([requestData, checklistData, actionData, validationData]) => {
+      if (requestSequence !== selectedDetailsRequestId.current) {
+        return actionData;
+      }
       setRequests(requestData);
       setChecklist(checklistData);
       setActions(actionData);
@@ -1020,8 +1085,7 @@ function App() {
   function refreshRealtimeData() {
     const requestId = selectedId;
     const stage = selectedStage;
-    const includeArchived = requestArchiveView === "all";
-    const baseRequests = getEcrRequests(includeArchived).then((requestData) => {
+    const baseRequests = getEcrRequests(requestLoadOptions(requestArchiveView, currentUser)).then((requestData) => {
       setRequests(requestData);
       return requestData;
     });
@@ -1068,25 +1132,32 @@ function App() {
         clearSession();
         setAuthSession(null);
         setCurrentUser(null);
-        setError("Session expiree ou API indisponible. Connectez-vous a nouveau.");
+        setError("Session expirée ou API indisponible. Connectez-vous à nouveau.");
       })
       .finally(() => setLoading(false));
   }, [authSession?.token]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!selectedId) {
+      selectedDetailsRequestId.current += 1;
       setChecklist([]);
       setActions([]);
       setPhaseValidations([]);
       return;
     }
+    const requestSequence = ++selectedDetailsRequestId.current;
+    setChecklist([]);
+    setActions([]);
+    setPhaseValidations([]);
     Promise.all([getChecklist(selectedId, selectedStage), getActions(selectedId, selectedStage), getPhaseValidations(selectedId)])
       .then(([checklistData, actionData, validationData]) => {
+        if (requestSequence !== selectedDetailsRequestId.current) return;
         setChecklist(checklistData);
         setActions(actionData);
         setPhaseValidations(validationData);
       })
       .catch(() => {
+        if (requestSequence !== selectedDetailsRequestId.current) return;
         setChecklist([]);
         setActions([]);
         setPhaseValidations([]);
@@ -1197,7 +1268,7 @@ function App() {
         return Promise.all(uploads)
           .then(() => savedRequest)
           .catch(() => {
-            const message = "Modification creee, mais l'upload d'une image a echoue.";
+            const message = "Modification créée, mais l'upload d'une image a echoue.";
             setError(message);
             warningAlert("Upload incomplet", message);
             return savedRequest;
@@ -1209,14 +1280,14 @@ function App() {
         setSelectedStage(savedRequest.currentStage);
         setShowCreateForm(false);
         navigateToPage("modifications");
-        successToast("Modification creee");
+        successToast("Modification créée");
         return refreshSelectedData(
             savedRequest.id,
             safeStage(savedRequest.currentStage, Boolean(savedRequest.newVersion))
         );
       })
       .catch(() => {
-        const message = "Creation ECR impossible. Creez d'abord le projet, puis verifiez les champs obligatoires.";
+        const message = "Création ECR impossible. Créez d'abord le projet, puis vérifiez les champs obligatoires.";
         setError(message);
         errorAlert(message);
       })
@@ -1269,14 +1340,14 @@ function App() {
         closeEditEcr();
         setSelectedId(savedRequest.id);
         setSelectedStage(safeStage(savedRequest.currentStage, Boolean(savedRequest.newVersion)));
-        successToast("Modification mise a jour");
+        successToast("Modification mise à jour");
         return refreshSelectedData(
             savedRequest.id,
             safeStage(savedRequest.currentStage, Boolean(savedRequest.newVersion))
         );
       })
       .catch(() => {
-        const message = "Mise a jour de la modification impossible. Verifiez les champs obligatoires.";
+        const message = "Mise à jour de la modification impossible. Vérifiez les champs obligatoires.";
         setError(message);
         errorAlert(message);
       })
@@ -1324,7 +1395,7 @@ function App() {
     const latestValidation = phaseValidations.find((validation) => validation.stage === stage);
     if (stage !== selectedRequest.currentStage && latestValidation?.status === "APPROVED") {
       setSelectedStage(stage);
-      warningAlert("Phase validee", "Utilisez le bouton Reouvrir la phase pour remettre cette phase en phase courante.");
+      warningAlert("Phase validée", "Utilisez le bouton Rouvrir la phase pour remettre cette phase en phase courante.");
       return;
     }
     setSelectedStage(stage);
@@ -1350,7 +1421,7 @@ function App() {
         setSelectedStage(safeStage(updatedRequest.currentStage, Boolean(updatedRequest.newVersion)));
         return refreshSelectedData(updatedRequest.id, safeStage(updatedRequest.currentStage, Boolean(updatedRequest.newVersion)));
       })
-      .then(() => successToast("Phase reouverte"))
+      .then(() => successToast("Phase rouverte"))
       .catch((exception) => {
         const message = exception?.message || "Reouverture de phase impossible.";
         setError(message);
@@ -1370,17 +1441,16 @@ function App() {
   function handleRequestArchiveViewChange(view) {
     if (view === requestArchiveView) return;
     setRequestArchiveView(view);
-    if (!isAdminUser(currentUser)) return;
-    const includeArchived = view === "all";
     setSaving(true);
     setError("");
-    getEcrRequests(includeArchived)
+    getEcrRequests(requestLoadOptions(view, currentUser))
       .then((requestData) => {
         setRequests(requestData);
-        if (view === "active" && selectedId) {
-          const selectedStillVisible = requestData.some((item) => item.id === selectedId && !item.archived);
+        if (selectedId) {
+          const canAdmin = isAdminUser(currentUser);
+          const selectedStillVisible = requestData.some((item) => item.id === selectedId && requestMatchesView(item, view, canAdmin));
           if (!selectedStillVisible) {
-            const nextRequest = requestData.find((item) => !item.archived) || null;
+            const nextRequest = requestData.find((item) => requestMatchesView(item, view, canAdmin)) || null;
             setSelectedId(nextRequest?.id ?? null);
             setSelectedStage(nextRequest ? safeStage(nextRequest.currentStage, Boolean(nextRequest.newVersion)) : "FEASIBILITY_VALIDATION");
           }
@@ -1402,24 +1472,23 @@ function App() {
       : `La modification ${label} reviendra dans la liste des modifications actives.`;
     confirmDelete(title, text).then((result) => {
       if (!result.isConfirmed) return;
-      const includeArchived = requestArchiveView === "all" && isAdminUser(currentUser);
       setSaving(true);
       setError("");
       archiveEcrRequest(request.id, archived)
-        .then(() => getEcrRequests(includeArchived))
+        .then(() => getEcrRequests(requestLoadOptions(requestArchiveView, currentUser)))
         .then((requestData) => {
           setRequests(requestData);
-          if (selectedId === request.id && archived && !includeArchived) {
-            const nextRequest = requestData.find((item) => !item.archived) || null;
+          if (selectedId === request.id && archived && requestArchiveView !== "archived" && requestArchiveView !== "all") {
+            const nextRequest = requestData.find((item) => requestMatchesView(item, requestArchiveView, isAdminUser(currentUser))) || null;
             setSelectedId(nextRequest?.id ?? null);
             setSelectedStage(nextRequest ? safeStage(nextRequest.currentStage, Boolean(nextRequest.newVersion)) : "FEASIBILITY_VALIDATION");
           }
-          successToast(archived ? "Modification archivee" : "Modification desarchivee");
+          successToast(archived ? "Modification archivée" : "Modification désarchivée");
         })
         .catch(() => {
           const message = archived
-            ? "Archivage de la modification impossible. Verifiez vos droits."
-            : "Desarchivage de la modification impossible. Verifiez vos droits.";
+            ? "Archivage de la modification impossible. Vérifiez vos droits."
+            : "Desarchivage de la modification impossible. Vérifiez vos droits.";
           setError(message);
           errorAlert(message);
         })
@@ -1434,22 +1503,21 @@ function App() {
       return;
     }
     if (request.currentStage === "CANCELLED") {
-      warningAlert("Modification annulee", "Cette modification est deja annulee.");
+      warningAlert("Modification annulée", "Cette modification est déjà annulée.");
       return;
     }
     const label = requestDisplayName(request);
     Swal.fire({
       ...swalButtons,
-      title: "Annuler la modification ?",
+      title: "Annulér la modification ?",
       text: `La modification ${label} passera immediatement en phase Cancelled.`,
       icon: "warning",
       showCancelButton: true,
-      confirmButtonText: "Annuler la modification",
+      confirmButtonText: "Annulér la modification",
       cancelButtonText: "Retour",
       confirmButtonColor: "#b42318"
     }).then((result) => {
       if (!result.isConfirmed) return;
-      const includeArchived = requestArchiveView === "all" && isAdminUser(currentUser);
       setSaving(true);
       setError("");
       cancelEcrRequest(request.id)
@@ -1457,15 +1525,15 @@ function App() {
           setRequests((items) => items.map((item) => (item.id === updatedRequest.id ? updatedRequest : item)));
           setSelectedId(updatedRequest.id);
           setSelectedStage("CANCELLED");
-          return getEcrRequests(includeArchived);
+          return getEcrRequests(requestLoadOptions(requestArchiveView, currentUser));
         })
         .then((requestData) => {
           setRequests(requestData);
-          successToast("Modification annulee");
+          successToast("Modification annulée");
           return refreshSelectedData(request.id, "CANCELLED");
         })
         .catch((exception) => {
-          const message = exception?.message || "Annulation de la modification impossible. Verifiez vos droits.";
+          const message = exception?.message || "Annulation de la modification impossible. Vérifiez vos droits.";
           setError(message);
           errorAlert(message);
         })
@@ -1526,8 +1594,14 @@ function App() {
   function handleCreateAction(event) {
     event.preventDefault();
     if (!selectedRequest) return Promise.resolve();
+    if (isActionPhaseApproved({ stage: actionForm.stage || selectedStage }, phaseValidations)) {
+      const message = "Impossible d'ajouter une action dans une phase déjà validée. Reouvrez la phase avant de la modifier.";
+      setError(message);
+      warningAlert("Phase validée", message);
+      return Promise.reject(new Error("Phase approved"));
+    }
     if (!String(actionForm.responsible || "").trim() || !String(actionForm.validator || "").trim()) {
-      const message = "Choisissez le pilote d'action et le validateur avant de creer l'action. Sans ces deux champs, l'action ne sera pas creee.";
+      const message = "Choisissez le pilote d'action et le validateur avant de créer l'action. Sans ces deux champs, l'action ne sera pas créée.";
       setError(message);
       warningAlert("Pilote et validateur requis", message);
       return Promise.reject(new Error("Action assignees required"));
@@ -1535,13 +1609,13 @@ function App() {
     const evidenceFiles = filesFromValue(actionForm.evidenceFile);
     const proofDocumentFiles = filesFromValue(actionForm.proofDocumentFile);
     if (requiresEvidence(actionForm) && isActionDone(actionForm) && evidenceFiles.length === 0) {
-      const message = "Ajoutez un asset avant de creer cette action comme terminee.";
+      const message = "Ajoutez un asset avant de créér cette action comme terminée.";
       setError(message);
       warningAlert("Asset requis", message);
       return Promise.reject(new Error("Evidence required"));
     }
     if (isActionDone(actionForm) && !isActionPilotForUser(currentUser, actionForm)) {
-      const message = "Seul le pilote responsable de l'action peut la creer directement comme terminee.";
+      const message = "Seul le pilote responsable de l'action peut la créér directement comme terminée.";
       setError(message);
       warningAlert("Action reservee", message);
       return Promise.reject(new Error("Action completion forbidden"));
@@ -1570,15 +1644,15 @@ function App() {
       .then((actionData) => {
         setActions(actionData);
         setActionForm(emptyActionForm);
-        successToast("Action creee");
+        successToast("Action créée");
       })
       .catch((error) => {
-        if (error.message === "Evidence required" || error.message === "Action completion forbidden") throw error;
+        if (error.message === "Evidence required" || error.message === "Action completion forbidden" || error.message === "Phase approved") throw error;
         const message = error.message?.includes("422")
           ? "La date de debut de l'action ne peut pas etre apres le debut d'une phase suivante."
           : error.message?.includes("403")
-          ? "Action creee, mais seuls le responsable de l'action ou un profil autorise peuvent la marquer terminee."
-          : "Creation action impossible.";
+          ? "Action créée, mais seuls le responsable de l'action ou un profil autorise peuvent la marquer terminée."
+          : "Création action impossible.";
         setError(message);
         errorAlert(message);
         throw error;
@@ -1587,6 +1661,10 @@ function App() {
   }
 
   function handleToggleAction(action, completed) {
+    if (isActionPhaseApproved(action, phaseValidations)) {
+      warningAlert("Phase validée", "Impossible de modifier une action dans une phase déjà validée. Reouvrez la phase avant de la modifier.");
+      return;
+    }
     if (!completed && action?.stage !== selectedRequest?.currentStage) {
       warningAlert("Action verrouillee", "L'admin doit d'abord remettre cette phase en phase courante avant de rouvrir une action.");
       return;
@@ -1616,20 +1694,49 @@ function App() {
     updateAction(action.id, updatedAction)
         .then(() => refreshSelectedData(selectedRequest.id, selectedStage))
         .then(() => {
-          successToast(completed ? "Action terminee" : "Action reouverte");
+          successToast(completed ? "Action terminée" : "Action rouverte");
       })
       .catch((error) => {
         const message = error.message?.includes("403")
-          ? "Seul le responsable de l'action peut la marquer terminee."
+          ? "Seul le responsable de l'action peut la marquer terminée."
           : "Impossible de mettre a jour l'action.";
         setError(message);
         errorAlert(message);
       });
   }
 
+  function handleUpdateActionDuration(action, durationValue) {
+    if (!selectedRequest || !action?.id) return;
+    if (isActionPhaseApproved(action, phaseValidations)) {
+      warningAlert("Phase validée", "Impossible de modifier la duree d'une action dans une phase déjà validée. Reouvrez la phase avant de la modifier.");
+      return;
+    }
+    const duration = Math.max(0, Number(durationValue) || 0);
+    if (duration === (Number(action.workDurationDays) || 0)) return;
+    setSaving(true);
+    setError("");
+    updateAction(action.id, { ...action, workDurationDays: duration })
+      .then(() => refreshSelectedData(selectedRequest.id, selectedStage))
+      .then(() => {
+        successToast("Durée mise à jour");
+      })
+      .catch((error) => {
+        const message = error.message?.includes("403")
+          ? "Seul le pilote de la modification peut modifier la duree des actions."
+          : "Impossible de mettre a jour la duree de l'action.";
+        setError(message);
+        errorAlert(message);
+      })
+      .finally(() => setSaving(false));
+  }
+
   function handleUploadEvidence(action, fileValue) {
     const files = filesFromValue(fileValue);
     if (files.length === 0) return;
+    if (isActionPhaseApproved(action, phaseValidations)) {
+      warningAlert("Phase validée", "Impossible d'ajouter un asset dans une phase déjà validée. Reouvrez la phase avant de la modifier.");
+      return;
+    }
     setError("");
     uploadActionEvidenceFiles(action.id, files)
         .then(() => refreshSelectedData(selectedId, selectedStage))
@@ -1652,11 +1759,15 @@ function App() {
   }
 
   function handleDeleteActionAsset(action, asset) {
-    if (!asset || asset.legacy) {
-      warningAlert("Suppression indisponible", "Cet ancien fichier ne peut pas etre supprime depuis la liste des assets.");
+    if (isActionPhaseApproved(action, phaseValidations)) {
+      warningAlert("Phase validée", "Impossible de supprimer un asset dans une phase déjà validée. Reouvrez la phase avant de la modifier.");
       return;
     }
-    confirmDelete("Supprimer l'asset ?", `L'asset ${asset.fileName || "selectionne"} sera supprime de l'action et de Cloudinary.`).then((result) => {
+    if (!asset || asset.legacy) {
+      warningAlert("Suppression indisponible", "Cet ancien fichier ne peut pas être supprimé depuis la liste des assets.");
+      return;
+    }
+    confirmDelete("Supprimer l'asset ?", `L'asset ${asset.fileName || "sélectionné"} sera supprimé de l'action et de Cloudinary.`).then((result) => {
       if (!result.isConfirmed) return;
       setError("");
       deleteActionAsset(asset.id)
@@ -1674,19 +1785,23 @@ function App() {
 
   function handleDeleteAction(action) {
     if (!selectedRequest || !action?.id) return;
-    confirmDelete("Supprimer l'action ?", `L'action ${action.title || "selectionnee"} sera supprimee. Le SOP et les dates des actions suivantes seront recalcules.`).then((result) => {
+    if (isActionPhaseApproved(action, phaseValidations)) {
+      warningAlert("Phase validée", "Impossible de supprimer une action dans une phase déjà validée. Reouvrez la phase avant de la modifier.");
+      return;
+    }
+    confirmDelete("Supprimer l'action ?", `L'action ${action.title || "sélectionnée"} sera supprimée. Le SOP et les dates des actions suivantes seront recalcules.`).then((result) => {
       if (!result.isConfirmed) return;
       setSaving(true);
       setError("");
       deleteAction(action.id)
         .then(() => refreshSelectedData(selectedId, selectedStage))
         .then(() => {
-          successToast("Action supprimee");
+          successToast("Action supprimée");
         })
         .catch((error) => {
           const message = error.message?.includes("403")
-            ? "Suppression impossible: vous devez etre admin ou pilote de la modification, et la phase ne doit pas etre validee."
-            : "Suppression de l'action impossible. La phase est peut-etre deja validee.";
+            ? "Suppression impossible: vous devez être admin ou pilote de la modification, et la phase ne doit pas être validée."
+            : "Suppression de l'action impossible. La phase est peut-être déjà validée.";
           setError(message);
           errorAlert(message);
         })
@@ -1706,16 +1821,16 @@ function App() {
       return;
     }
     if (actions.length === 0 || actions.some((action) => !isActionDone(action))) {
-      warningAlert("Phase non terminee", "Toutes les actions de la phase doivent etre terminees avant la demande de validation.");
+      warningAlert("Phase non terminée", "Toutes les actions de la phase doivent être terminées avant la demande de validation.");
       return;
     }
     setSaving(true);
     requestPhaseValidation(selectedRequest.id, selectedStage)
       .then(() => {
-        successToast("Demande envoyee");
+        successToast("Demande envoyée");
         return refreshSelectedData(selectedRequest.id, selectedStage);
       })
-      .catch((exception) => errorAlert(exception?.message || "Demande de validation impossible. Verifiez que vous etes sur la phase courante et que toutes ses actions sont terminees."))
+      .catch((exception) => errorAlert(exception?.message || "Demande de validation impossible. Vérifiez que vous êtes sur la phase courante et que toutes ses actions sont terminées."))
       .finally(() => setSaving(false));
   }
 
@@ -1726,7 +1841,7 @@ function App() {
         .then((updatedRequest) => {
           const nextStage = safeStage(updatedRequest.currentStage, Boolean(updatedRequest.newVersion));
           setSelectedStage(nextStage);
-          successToast("Phase validee");
+          successToast("Phase validée");
           return refreshSelectedData(updatedRequest.id, nextStage);
         })
       .catch((exception) => errorAlert(exception?.message || "Validation de phase impossible."))
@@ -1740,13 +1855,13 @@ function App() {
       ? completedActions.map((action) => (
         `<label class="swal-action-choice"><input type="checkbox" value="${escapeHtml(action.title || "")}" /> <span>${escapeHtml(action.title || "-")}</span></label>`
       )).join("")
-      : "<p class=\"swal-action-empty\">Aucune action terminee dans cette phase.</p>";
+      : "<p class=\"swal-action-empty\">Aucune action terminée dans cette phase.</p>";
     Swal.fire({
       title: "Refuser la phase",
-      html: `<textarea id="refusal-reason" class="swal2-textarea" placeholder="Raison du refus: manque document, manque action..."></textarea><div class="swal-action-list-title">Actions a revisiter</div><div id="actions-revisit-list" class="swal-action-list">${actionsHtml}</div>`,
+      html: `<textarea id="refusal-reason" class="swal2-textarea" placeholder="Raison du refus: manque document, manque action..."></textarea><div class="swal-action-list-title">Actions à revisiter</div><div id="actions-revisit-list" class="swal-action-list">${actionsHtml}</div>`,
       showCancelButton: true,
       confirmButtonText: "Refuser",
-      cancelButtonText: "Annuler",
+      cancelButtonText: "Annulér",
       confirmButtonColor: "#b42318",
       preConfirm: () => {
         const reason = document.getElementById("refusal-reason")?.value.trim();
@@ -1758,7 +1873,7 @@ function App() {
           return false;
         }
         if (!actionsToRevisit) {
-          Swal.showValidationMessage("Selectionnez au moins une action a revisiter.");
+          Swal.showValidationMessage("Sélectionnez au moins une action à revisiter.");
           return false;
         }
         return { reason, actionsToRevisit };
@@ -1768,7 +1883,7 @@ function App() {
       setSaving(true);
       rejectPhaseValidation(selectedRequest.id, validation.id, result.value)
         .then(() => {
-          successToast("Phase refusee");
+          successToast("Phase refusée");
           return refreshPhaseValidations(selectedRequest.id);
         })
         .catch((exception) => errorAlert(exception?.message || "Refus de phase impossible."))
@@ -1788,7 +1903,7 @@ function App() {
               : selectedStage;
 
           setSelectedStage(nextStage);
-          successToast("Action validee");
+          successToast("Action validée");
           return refreshSelectedData(selectedRequest.id, nextStage);
         })
       .catch((exception) => errorAlert(exception?.message || "Validation de l'action impossible."))
@@ -1803,7 +1918,7 @@ function App() {
       html: `<textarea id="action-refusal-reason" class="swal2-textarea" placeholder="Motif du refus"></textarea>`,
       showCancelButton: true,
       confirmButtonText: "Refuser",
-      cancelButtonText: "Annuler",
+      cancelButtonText: "Annulér",
       confirmButtonColor: "#b42318",
       preConfirm: () => {
         const reason = document.getElementById("action-refusal-reason")?.value.trim();
@@ -1818,7 +1933,7 @@ function App() {
       setSaving(true);
       rejectActionValidation(selectedRequest.id, validation.id, action.id, result.value)
         .then(() => {
-          successToast("Action refusee");
+          successToast("Action refusée");
           return refreshSelectedData(selectedRequest.id, selectedStage);
         })
         .catch((exception) => errorAlert(exception?.message || "Refus de l'action impossible."))
@@ -1834,7 +1949,7 @@ function App() {
         successToast("Validation de l'action redemandee");
         return refreshSelectedData(selectedRequest.id, selectedStage);
       })
-      .catch((exception) => errorAlert(exception?.message || "Redemande de validation impossible. Verifiez que l'action est terminee."))
+      .catch((exception) => errorAlert(exception?.message || "Redemande de validation impossible. Vérifiez que l'action est terminée."))
       .finally(() => setSaving(false));
   }
 
@@ -1866,7 +1981,7 @@ function App() {
         return getEcrRequests().then(setRequests);
       })
       .catch(() => {
-        const message = "Sauvegarde projet impossible. Verifiez le nom du projet.";
+        const message = "Sauvegarde projet impossible. Vérifiez le nom du projet.";
         setError(message);
         errorAlert(message);
         throw new Error(message);
@@ -1881,7 +1996,7 @@ function App() {
 
   function handleDeleteProject(name) {
     setError("");
-    confirmDelete("Supprimer le projet ?", `Le projet ${name} sera supprime definitivement.`).then((result) => {
+    confirmDelete("Supprimer le projet ?", `Le projet ${name} sera supprimé définitivement.`).then((result) => {
       if (!result.isConfirmed) return;
       deleteProject(name)
         .then(() => {
@@ -1918,7 +2033,7 @@ function App() {
         successToast(isEdit ? "Client modifie" : "Client ajoute");
       })
       .catch(() => {
-        const message = "Sauvegarde client impossible. Verifiez le nom.";
+        const message = "Sauvegarde client impossible. Vérifiez le nom.";
         setError(message);
         errorAlert(message);
       })
@@ -1933,7 +2048,7 @@ function App() {
   function handleDeleteClientReference(id) {
     const client = clientReferences.find((item) => item.id === id);
     setError("");
-    confirmDelete("Supprimer le client ?", `Le client ${client?.name || "selectionne"} sera supprime definitivement.`).then((result) => {
+    confirmDelete("Supprimer le client ?", `Le client ${client?.name || "sélectionné"} sera supprimé définitivement.`).then((result) => {
       if (!result.isConfirmed) return;
       deleteClientReference(id)
         .then(() => {
@@ -1970,7 +2085,7 @@ function App() {
         successToast(isEdit ? "Produit modifie" : "Produit ajoute");
       })
       .catch(() => {
-        const message = "Sauvegarde produit impossible. Verifiez le nom.";
+        const message = "Sauvegarde produit impossible. Vérifiez le nom.";
         setError(message);
         errorAlert(message);
       })
@@ -1985,7 +2100,7 @@ function App() {
   function handleDeleteProductReference(id) {
     const product = productReferences.find((item) => item.id === id);
     setError("");
-    confirmDelete("Supprimer le produit ?", `Le produit ${product?.name || "selectionne"} sera supprime definitivement.`).then((result) => {
+    confirmDelete("Supprimer le produit ?", `Le produit ${product?.name || "sélectionné"} sera supprimé définitivement.`).then((result) => {
       if (!result.isConfirmed) return;
       deleteProductReference(id)
         .then(() => {
@@ -2025,7 +2140,7 @@ function App() {
     event.preventDefault();
     const payload = finishedProductPayload(finishedProductReferenceForm);
     if (!payload.client || !payload.project || !payload.product || !payload.partNumber || !payload.reducedCode) {
-      warningAlert("Champs requis", "Renseignez client, projet, produit, part number et code reduit.");
+      warningAlert("Champs requis", "Renseignez client, projet, produit, part number et code réduit.");
       return Promise.reject(new Error("Champs requis."));
     }
     setSaving(true);
@@ -2043,7 +2158,7 @@ function App() {
         successToast(isEdit ? "Produit fini modifie" : "Produit fini ajoute");
       })
       .catch((exception) => {
-        const message = friendlyErrorMessage(exception?.message || "Sauvegarde du produit fini impossible. Verifiez les cles uniques.");
+        const message = friendlyErrorMessage(exception?.message || "Sauvegarde du produit fini impossible. Vérifiez les clés uniques.");
         setError(message);
         errorAlert(message);
         throw exception;
@@ -2072,7 +2187,7 @@ function App() {
   function handleDeleteFinishedProductReference(id) {
     const finishedProduct = finishedProductReferences.find((item) => item.id === id);
     setError("");
-    confirmDelete("Supprimer le produit fini ?", `Le produit fini ${finishedProduct?.partNumber || "selectionne"} sera supprime definitivement.`).then((result) => {
+    confirmDelete("Supprimer le produit fini ?", `Le produit fini ${finishedProduct?.partNumber || "sélectionné"} sera supprimé définitivement.`).then((result) => {
       if (!result.isConfirmed) return;
       deleteFinishedProductReference(id)
         .then(() => {
@@ -2173,7 +2288,7 @@ function App() {
         setPlanningRules((items) => [...items.filter((item) => item.id !== savedRule.id), savedRule].sort(comparePlanningRules));
         setPlanningRuleForm(emptyPlanningRuleForm);
         setEditingPlanningRule(null);
-        successToast(isEdit ? "Regle planning modifiee" : "Regle planning ajoutee");
+        successToast(isEdit ? "Règle planning modifiée" : "Règle planning ajoutée");
         return selectedId ? Promise.all([getActions(selectedId, selectedStage), getEcrRequests()]) : Promise.resolve([actions, requests]);
       })
       .then(([actionData, requestData]) => {
@@ -2181,7 +2296,7 @@ function App() {
         if (Array.isArray(requestData)) setRequests(requestData);
       })
       .catch(() => {
-        const message = "Sauvegarde regle planning impossible. Verifiez l'action et la duree.";
+        const message = "Sauvegarde règle planning impossible. Vérifiez l'action et la durée.";
         setError(message);
         errorAlert(message);
       })
@@ -2193,7 +2308,7 @@ function App() {
       setPlanningRuleForm((form) => ({ ...form, proofDocumentFile: null }));
       return;
     }
-    confirmDelete("Supprimer l'element preuve ?", "Le document sera supprime de cette action standard et de Cloudinary.").then((result) => {
+    confirmDelete("Supprimer l'élément preuve ?", "Le document sera supprimé de cette action standard et de Cloudinary.").then((result) => {
       if (!result.isConfirmed) return;
       setSaving(true);
       setError("");
@@ -2215,7 +2330,7 @@ function App() {
           successToast("Element preuve supprime");
         })
         .catch(() => {
-          const message = "Suppression de l'element preuve impossible.";
+          const message = "Suppression de l'élément preuve impossible.";
           setError(message);
           errorAlert(message);
         })
@@ -2225,7 +2340,7 @@ function App() {
 
   function handleDeletePlanningRuleProofDocumentItem(proofDocumentId) {
     if (!proofDocumentId) return;
-    confirmDelete("Supprimer l'element preuve ?", "Le document sera supprime de cette action standard et de Cloudinary.").then((result) => {
+    confirmDelete("Supprimer l'élément preuve ?", "Le document sera supprimé de cette action standard et de Cloudinary.").then((result) => {
       if (!result.isConfirmed) return;
       setSaving(true);
       setError("");
@@ -2236,7 +2351,7 @@ function App() {
           successToast("Element preuve supprime");
         })
         .catch(() => {
-          const message = "Suppression de l'element preuve impossible.";
+          const message = "Suppression de l'élément preuve impossible.";
           setError(message);
           errorAlert(message);
         })
@@ -2255,7 +2370,7 @@ function App() {
       })
       .catch((exception) => {
         const message = String(exception?.message || "");
-        errorAlert(message.includes("409") ? "Une action standard avec ce nom existe deja dans cette phase." : "Ajout aux actions standard impossible.");
+        errorAlert(message.includes("409") ? "Une action standard avec ce nom existe déjà dans cette phase." : "Ajout aux actions standard impossible.");
       })
       .finally(() => setSaving(false));
   }
@@ -2301,7 +2416,7 @@ function App() {
   function handleDeletePlanningRule(id) {
     const rule = planningRules.find((item) => item.id === id);
     setError("");
-    confirmDelete("Supprimer la regle planning ?", `La regle ${rule?.actionTitle || "selectionnee"} sera supprimee definitivement.`).then((result) => {
+    confirmDelete("Supprimer la règle planning ?", `La règle ${rule?.actionTitle || "sélectionnée"} sera supprimée définitivement.`).then((result) => {
       if (!result.isConfirmed) return;
       deleteActionPlanningRule(id)
         .then(() => {
@@ -2310,11 +2425,11 @@ function App() {
             setEditingPlanningRule(null);
             setPlanningRuleForm(emptyPlanningRuleForm);
           }
-          successToast("Regle planning supprimee");
+          successToast("Règle planning supprimée");
           return selectedId ? refreshSelectedData(selectedId, selectedStage) : Promise.resolve();
         })
         .catch(() => {
-          const message = "Suppression regle planning impossible.";
+          const message = "Suppression règle planning impossible.";
           setError(message);
           errorAlert(message);
         });
@@ -2330,8 +2445,16 @@ function App() {
       username: userForm.username.trim(),
       email: userForm.email.trim(),
       jobTitle: userForm.jobTitle.trim(),
-      phone: userForm.phone.trim()
+      phone: userForm.phone.trim(),
+      chef1: userForm.chef1.trim(),
+      chef2: userForm.chef2.trim()
     };
+    if (!payload.chef1 || !payload.chef2) {
+      const message = "Affectez Chef 1 et Chef 2 avant d'enregistrer l'utilisateur.";
+      setError(message);
+      warningAlert("Chefs requis", message);
+      return;
+    }
     if (!isValidEmail(payload.email)) {
       const message = "Saisissez une adresse email valide, par exemple nom@sagetunisia.com.";
       setError(message);
@@ -2369,7 +2492,7 @@ function App() {
         const detail = exception?.message || "";
         const message = detail && !detail.startsWith("API error")
           ? detail
-          : "Sauvegarde utilisateur impossible. Verifiez username/email uniques, les champs obligatoires et la configuration SMTP.";
+          : "Sauvegarde utilisateur impossible. Vérifiez username/email uniques, les champs obligatoires et la configuration SMTP.";
         setError(message);
         errorAlert(message);
       })
@@ -2384,7 +2507,7 @@ function App() {
   function handleDeleteUser(id) {
     const user = users.find((item) => item.id === id);
     setError("");
-    confirmDelete("Supprimer l'utilisateur ?", `Le compte ${user?.fullName || user?.email || "selectionne"} sera supprime definitivement.`).then((result) => {
+    confirmDelete("Supprimer l'utilisateur ?", `Le compte ${user?.fullName || user?.email || "sélectionné"} sera supprimé définitivement.`).then((result) => {
       if (!result.isConfirmed) return;
       deleteUser(id)
         .then(() => {
@@ -2418,7 +2541,7 @@ function App() {
         return selectedId ? refreshSelectedData(selectedId, selectedStage) : Promise.resolve();
       })
       .catch(() => {
-        const message = "Mise a jour du profil impossible.";
+        const message = "Mise à jour du profil impossible.";
         setError(message);
         errorAlert(message);
       })
@@ -2456,7 +2579,7 @@ function App() {
       .then((savedUser) => {
         setCurrentUser(savedUser);
         setUsers((items) => items.map((item) => (item.id === savedUser.id ? savedUser : item)));
-        successToast("Photo mise a jour");
+        successToast("Photo mise à jour");
       })
       .catch(() => {
         const message = "Ajout de la photo impossible.";
@@ -2486,6 +2609,112 @@ function App() {
       .finally(() => setSaving(false));
   }
 
+  function resetPasswordRecoveryState() {
+    setPasswordResetStep("login");
+    setPasswordResetEmail("");
+    setPasswordResetCode(["", "", "", ""]);
+    setPasswordResetForm({ password: "", confirmation: "" });
+    setError("");
+  }
+
+  function showForgotPassword() {
+    setPasswordResetEmail(loginForm.email || "");
+    setPasswordResetCode(["", "", "", ""]);
+    setPasswordResetForm({ password: "", confirmation: "" });
+    setPasswordResetStep("email");
+    setError("");
+  }
+
+  function handleRequestPasswordReset(event) {
+    event.preventDefault();
+    if (!isValidEmail(passwordResetEmail)) {
+      const message = "Saisissez une adresse email valide.";
+      setError(message);
+      warningAlert("Email invalide", message);
+      return;
+    }
+    setSaving(true);
+    setError("");
+    requestPasswordReset(passwordResetEmail)
+      .then(() => {
+        setPasswordResetCode(["", "", "", ""]);
+        setPasswordResetStep("code");
+        successToast("Code envoyé par email");
+      })
+      .catch((error) => {
+        const message = error?.message || "Envoi du code impossible.";
+        setError(message);
+        errorAlert(message);
+      })
+      .finally(() => setSaving(false));
+  }
+
+  function handleResendPasswordResetCode() {
+    if (!passwordResetEmail) return;
+    setSaving(true);
+    setError("");
+    requestPasswordReset(passwordResetEmail)
+      .then(() => {
+        setPasswordResetCode(["", "", "", ""]);
+        successToast("Nouveau code envoyé");
+      })
+      .catch((error) => {
+        const message = error?.message || "Renvoi du code impossible.";
+        setError(message);
+        errorAlert(message);
+      })
+      .finally(() => setSaving(false));
+  }
+
+  function handleVerifyPasswordResetCode(event) {
+    event.preventDefault();
+    const code = passwordResetCode.join("");
+    if (!code.match(/^\d{4}$/)) {
+      const message = "Saisissez les 4 chiffres du code reçu.";
+      setError(message);
+      warningAlert("Code incomplet", message);
+      return;
+    }
+    setSaving(true);
+    setError("");
+    verifyPasswordResetCode(passwordResetEmail, code)
+      .then(() => {
+        setPasswordResetStep("password");
+        successToast("Code valide");
+      })
+      .catch(() => {
+        const message = "Code incorrect ou expire.";
+        setError(message);
+        errorAlert(message);
+      })
+      .finally(() => setSaving(false));
+  }
+
+  function handleConfirmPasswordReset(event) {
+    event.preventDefault();
+    const code = passwordResetCode.join("");
+    if (!passwordResetForm.password || passwordResetForm.password !== passwordResetForm.confirmation) {
+      const message = "Confirmez le nouveau mot de passe avec la meme valeur.";
+      setError(message);
+      warningAlert("Confirmation requise", message);
+      return;
+    }
+    setSaving(true);
+    setError("");
+    confirmPasswordReset(passwordResetEmail, code, passwordResetForm.password)
+      .then(() => {
+        resetPasswordRecoveryState();
+        setLoginForm({ email: passwordResetEmail, password: "" });
+        successToast("Mot de passe modifie");
+      })
+      .catch(() => {
+        const message = "Changement du mot de passe impossible. Redemandez un code.";
+        setError(message);
+        errorAlert(message);
+      })
+      .finally(() => setSaving(false));
+  }
+
   function handleLogout() {
     Swal.fire({
       title: "Se deconnecter ?",
@@ -2493,7 +2722,7 @@ function App() {
       icon: "question",
       showCancelButton: true,
       confirmButtonText: "Se deconnecter",
-      cancelButtonText: "Annuler",
+      cancelButtonText: "Annulér",
       ...swalButtons
     }).then((result) => {
       if (!result.isConfirmed) return;
@@ -2505,7 +2734,7 @@ function App() {
           setRequests([]);
           setUsers([]);
           navigateToPage("dashboard", { replace: true });
-          successToast("Deconnexion effectuee");
+          successToast("Déconnexion effectuée");
         });
     });
   }
@@ -2546,9 +2775,22 @@ function App() {
       <LoginPage
         error={error}
         form={loginForm}
+        passwordResetCode={passwordResetCode}
+        passwordResetEmail={passwordResetEmail}
+        passwordResetForm={passwordResetForm}
+        passwordResetStep={passwordResetStep}
         saving={saving}
+        onBackToLogin={resetPasswordRecoveryState}
+        onConfirmPasswordReset={handleConfirmPasswordReset}
+        onRequestPasswordReset={handleRequestPasswordReset}
+        onResendPasswordResetCode={handleResendPasswordResetCode}
+        onShowForgotPassword={showForgotPassword}
         onSubmit={handleLogin}
+        onVerifyPasswordResetCode={handleVerifyPasswordResetCode}
         setForm={setLoginForm}
+        setPasswordResetCode={setPasswordResetCode}
+        setPasswordResetEmail={setPasswordResetEmail}
+        setPasswordResetForm={setPasswordResetForm}
       />
     );
   }
@@ -2576,7 +2818,7 @@ function App() {
         {isAdminUser(currentUser) && actionSuggestions.length > 0 && (
           <div className="banner action-suggestion-banner">
             <CircleAlert size={18} />
-            {actionSuggestions.length} action{actionSuggestions.length > 1 ? "s" : ""} creee{actionSuggestions.length > 1 ? "s" : ""} par pilote en attente de decision.
+            {actionSuggestions.length} action{actionSuggestions.length > 1 ? "s" : ""} créée{actionSuggestions.length > 1 ? "s" : ""} par pilote en attente de decision.
             <button className="secondary-action compact-action" type="button" onClick={() => setSuggestionsOpen(true)}>
               Voir
             </button>
@@ -2709,6 +2951,7 @@ function App() {
             projectFilter={projectFilter}
             projectOptions={projectOptions}
             query={query}
+            requestSearchSuggestions={requestSearchSuggestions}
             requestArchiveView={requestArchiveView}
             saving={saving}
             selectedId={selectedId}
@@ -2727,6 +2970,7 @@ function App() {
             handleDeleteAction={handleDeleteAction}
             handleStageChange={handleStageChange}
             handleToggleAction={handleToggleAction}
+            handleUpdateActionDuration={handleUpdateActionDuration}
             handleDeleteActionAsset={handleDeleteActionAsset}
             handleUploadEvidence={handleUploadEvidence}
             removeActionProofDocumentFile={removeActionProofDocumentFile}
@@ -3358,12 +3602,12 @@ function TraceabilityPage({ actionFilter, actionOptions, logs, query, total, onR
 
 function auditActionLabel(actionType) {
   const labels = {
-    CREATION_MODIFICATION: "Creation d'une modification",
+    CREATION_MODIFICATION: "Création d'une modification",
     MODIFICATION_MODIFICATION: "Modification d'une modification",
     VALIDATION_PHASE: "Validation d'une phase",
     REOUVERTURE_PHASE: "Reouverture d'une phase",
     ANNULATION_MODIFICATION: "Annulation d'une modification",
-    ACTION_TERMINEE: "Action marquee terminee",
+    ACTION_TERMINEE: "Action marquée terminée",
     VALIDATION_ACTION: "Validation d'une action",
     REFUS_VALIDATION_ACTION: "Refus de validation d'une action",
     AJOUT_CLIENT: "Ajout d'un client",
@@ -3445,12 +3689,12 @@ function auditTargetLabel(targetType) {
 
 function auditActionSentence(log) {
   const labels = {
-    CREATION_MODIFICATION: "Creation d'une modification",
+    CREATION_MODIFICATION: "Création d'une modification",
     MODIFICATION_MODIFICATION: "Modification d'une modification",
     VALIDATION_PHASE: "Validation d'une phase",
     REOUVERTURE_PHASE: "Reouverture d'une phase",
     ANNULATION_MODIFICATION: "Annulation d'une modification",
-    ACTION_TERMINEE: "Action marquee comme terminee",
+    ACTION_TERMINEE: "Action marquée comme terminée",
     VALIDATION_ACTION: "Validation d'une action",
     REFUS_VALIDATION_ACTION: "Refus de validation d'une action",
     AJOUT_CLIENT: "Ajout d'un client",
@@ -3470,25 +3714,25 @@ function auditResultLabel(log) {
 }
 
 function auditFriendlyDetail(log) {
-  if (!auditSucceeded(log)) return "Le changement n'a pas ete autorise.";
+  if (!auditSucceeded(log)) return "Le changement n'a pas été autorisé.";
   const storedDetail = userFriendlyStoredAuditDetail(log.details);
   if (storedDetail) return storedDetail;
   const target = auditTargetHint(log);
   const labels = {
-    CREATION_MODIFICATION: `Nouvelle demande creee${target ? `: ${target}` : ""}.`,
-    MODIFICATION_MODIFICATION: `Demande mise a jour${target ? `: ${target}` : ""}.`,
-    ANNULATION_MODIFICATION: `Demande annulee${target ? `: ${target}` : ""}.`,
-    VALIDATION_PHASE: `Phase validee${target ? ` pour ${target}` : ""}.`,
+    CREATION_MODIFICATION: `Nouvelle demande créée${target ? `: ${target}` : ""}.`,
+    MODIFICATION_MODIFICATION: `Demande mise à jour${target ? `: ${target}` : ""}.`,
+    ANNULATION_MODIFICATION: `Demande annulée${target ? `: ${target}` : ""}.`,
+    VALIDATION_PHASE: `Phase validée${target ? ` pour ${target}` : ""}.`,
     REOUVERTURE_PHASE: `Phase rouverte${target ? ` pour ${target}` : ""}.`,
-    ACTION_TERMINEE: `Action terminee${target ? `: ${target}` : ""}.`,
-    VALIDATION_ACTION: `Action validee${target ? `: ${target}` : ""}.`,
-    REFUS_VALIDATION_ACTION: `Action refusee${target ? `: ${target}` : ""}.`,
+    ACTION_TERMINEE: `Action terminée${target ? `: ${target}` : ""}.`,
+    VALIDATION_ACTION: `Action validée${target ? `: ${target}` : ""}.`,
+    REFUS_VALIDATION_ACTION: `Action refusée${target ? `: ${target}` : ""}.`,
     AJOUT_CLIENT: "Nouveau client ajoute au referentiel.",
     AJOUT_PRODUIT: "Nouveau produit ajoute au referentiel.",
     AJOUT_PROJET: "Nouveau projet ajoute.",
     MODIFICATION_PROJET_EQUIPE: `Projet ou equipe mis a jour${target ? `: ${target}` : ""}.`
   };
-  return labels[log.actionType] || "Un changement important a ete effectue.";
+  return labels[log.actionType] || "Un changement important a été effectué.";
 }
 
 function auditTargetSummary(log) {
@@ -3538,11 +3782,11 @@ function userFriendlyStoredAuditDetail(detail) {
   const value = String(detail || "").trim();
   if (!value || value.includes("/api/") || value.includes("HTTP ")) return "";
   const allowedPrefixes = [
-    "Creation de la modification:",
-    "Modification mise a jour:",
+    "Création de la modification:",
+    "Modification mise à jour:",
     "Validation de la phase:",
-    "Phase reouverte:",
-    "Action marquee terminee:",
+    "Phase rouverte:",
+    "Action marquée terminée:",
     "Validation de l'action:",
     "Refus de validation de l'action:",
     "Ajout du client:",
@@ -3693,7 +3937,7 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
               })}
             </div>
             {displayedProductOptions.length === 0 && <span className="form-hint">Ajoutez d'abord des produits dans le referentiel.</span>}
-            <span className="form-hint">{selectedProducts.length} produit{selectedProducts.length > 1 ? "s" : ""} selectionne{selectedProducts.length > 1 ? "s" : ""}</span>
+            <span className="form-hint">{selectedProducts.length} produit{selectedProducts.length > 1 ? "s" : ""} sélectionné{selectedProducts.length > 1 ? "s" : ""}</span>
           </fieldset>
           <label>
             Pilote
@@ -3781,7 +4025,7 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
             <SubmitIcon size={16} />
             {submitLabel}
           </button>
-          <button className="secondary-action" type="button" onClick={onCancel}>Annuler</button>
+          <button className="secondary-action" type="button" onClick={onCancel}>Annulér</button>
         </div>
         {projects.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un projet dans le référentiel projets.</p>}
         {ecrForm.modificationProject && projectTeamMembers.length === 0 && <p className="form-hint project-team-warning">Ce projet n'a pas encore d'Équipe projet.</p>}
@@ -4041,7 +4285,7 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
             <input value={form.drawingIndex} onChange={(event) => setForm((current) => ({ ...current, drawingIndex: event.target.value }))} />
           </label>
           <label>
-            Code reduit
+            Code réduit
             <input required value={form.reducedCode} onChange={(event) => setForm((current) => ({ ...current, reducedCode: event.target.value }))} />
           </label>
           <label>
@@ -4062,7 +4306,7 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
             <Save size={16} />
             Enregistrer
           </button>
-          {editing && <button className="secondary-action" type="button" onClick={onCancelEdit}>Annuler</button>}
+          {editing && <button className="secondary-action" type="button" onClick={onCancelEdit}>Annulér</button>}
         </div>
         {clientNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un client.</p>}
         {projectNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un projet.</p>}
@@ -4086,7 +4330,7 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
               <article className="project-table-row preferential-table-row finished-product-row" key={reference.id}>
                 <div>
                   <strong>{reference.partNumber}</strong>
-                  <span>{reference.project} | {reference.product} | Code reduit: {reference.reducedCode}</span>
+                  <span>{reference.project} | {reference.product} | Code réduit: {reference.reducedCode}</span>
                   <small>{[reference.client, reference.designation, reference.customerPn].filter(Boolean).join(" | ") || "Details non renseignes"}</small>
                 </div>
                 <div className="finished-product-meta">
@@ -4139,7 +4383,7 @@ function PreferentialPanel({ count, editing, emptyText, emptyTitle, form, refere
             <Save size={16} />
             Enregistrer
           </button>
-          {editing && <button className="secondary-action" type="button" onClick={onCancelEdit}>Annuler</button>}
+          {editing && <button className="secondary-action" type="button" onClick={onCancelEdit}>Annulér</button>}
         </div>
       </form>
       <label className="preferential-search">
@@ -4318,7 +4562,7 @@ function ProjectDialog({ editingProject, projectForm, saving, users, onClose, on
             <Save size={16} />
             Enregistrer
           </button>
-          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annulér</button>
         </div>
       </form>
     </div>
@@ -4597,7 +4841,7 @@ function fileNamesLabel(value, fallback) {
   const files = filesFromValue(value);
   if (files.length === 0) return fallback;
   if (files.length === 1) return files[0].name;
-  return `${files.length} fichiers selectionnes`;
+  return `${files.length} fichiers sélectionnés`;
 }
 
 function uploadActionEvidenceFiles(actionId, files) {
@@ -4763,6 +5007,7 @@ function ModificationsPage(props) {
     handleDeleteAction,
     handleStageChange,
     handleToggleAction,
+    handleUpdateActionDuration,
     handleDeleteActionAsset,
     handleUploadEvidence,
     removeActionProofDocumentFile,
@@ -4779,6 +5024,7 @@ function ModificationsPage(props) {
     projectFilter,
     projectOptions,
     query,
+    requestSearchSuggestions,
     requestArchiveView,
     onEditRequest,
     onRequestArchiveViewChange,
@@ -4806,6 +5052,13 @@ function ModificationsPage(props) {
   const latestStageValidation = phaseValidations.find((validation) => validation.stage === selectedStage);
   const stageActionsDone = actions.length > 0 && actions.every(isActionDone);
   const isCurrentStage = selectedRequest && selectedStage === selectedRequest.currentStage;
+  const requestStatusOptions = [
+    ...(canAdmin ? [["all", "Toutes"],
+    ["active", "Actives"],
+    ["closed", "Clôturées"],
+    ["cancelled", "Annulées"],
+    ["archived", "Archivées"]] : [])
+  ];
 
   function selectRequest(request) {
     setShowCreateForm(false);
@@ -4834,10 +5087,36 @@ function ModificationsPage(props) {
     <section className="page-content modifications-content">
       <PageHeader eyebrow="Suivi ECR" title="Modifications" subtitle="Créez une demande, sélectionnez-la, puis pilotez ses phases et actions sans quitter cette page." />
       <div className="modifications-toolbar">
-        <label className="search">
+        <div className="search request-search">
           <Search size={16} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher une modification" />
-        </label>
+          <input
+            aria-label="Rechercher une modification"
+            autoComplete="off"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Rechercher une modification"
+          />
+          {requestSearchSuggestions.length > 0 && (
+            <div className="request-search-suggestions" role="listbox">
+              {requestSearchSuggestions.map(({ request, label }) => (
+                <button
+                  key={request.id}
+                  type="button"
+                  role="option"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    selectRequest(request);
+                    setQuery(label);
+                  }}
+                >
+                  <strong>{label}</strong>
+                  <span>{request.modificationProject || request.client || request.product || "-"}</span>
+                  <small className={`stage-pill ${stageColorClass(request.currentStage, Boolean(request.newVersion))}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</small>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <label className="project-filter">
           <FolderKanban size={16} />
           <select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}>
@@ -4847,31 +5126,24 @@ function ModificationsPage(props) {
             ))}
           </select>
         </label>
-        <button className="secondary-action" type="button" onClick={() => setListOpen(true)}>
+        <button className="secondary-action request-list-action" type="button" onClick={() => setListOpen(true)}>
           <ClipboardList size={16} />
           Liste modifications
         </button>
-        {canAdmin && (
-          <div className="request-archive-toggle" aria-label="Filtrer les modifications archivees">
-            <button
-              className={requestArchiveView === "active" ? "active" : ""}
-              disabled={saving}
-              onClick={() => onRequestArchiveViewChange("active")}
-              type="button"
-            >
-              Actives
-            </button>
-            <button
-              className={requestArchiveView === "all" ? "active" : ""}
-              disabled={saving}
-              onClick={() => onRequestArchiveViewChange("all")}
-              type="button"
-            >
-              Toutes
-            </button>
-          </div>
-        )}
-        <button className="primary-action" type="button" onClick={() => {
+        <label className="project-filter request-status-filter">
+          <ClipboardList size={16} />
+          <select
+            aria-label="Filtrer les modifications"
+            disabled={saving}
+            value={requestArchiveView}
+            onChange={(event) => onRequestArchiveViewChange(event.target.value)}
+          >
+            {requestStatusOptions.map(([view, label]) => (
+              <option key={view} value={view}>{label}</option>
+            ))}
+          </select>
+        </label>
+        <button className="primary-action request-create-action" type="button" onClick={() => {
           setShowCreateForm(true);
         }} disabled={!canAdmin}>
           <Plus size={16} />
@@ -4907,11 +5179,11 @@ function ModificationsPage(props) {
                     disabled={saving}
                     type="button"
                     onClick={() => handleCancelEcr(selectedRequest)}
-                    title="Annuler la modification"
-                    aria-label="Annuler la modification"
+                    title="Annulér la modification"
+                    aria-label="Annulér la modification"
                   >
                     <XCircle size={18} />
-                    <span>Annuler la modification</span>
+                    <span>Annulér la modification</span>
                   </button>
                 )}
                 <button
@@ -4933,10 +5205,10 @@ function ModificationsPage(props) {
                   {selectedRequest.modificationDetail && <p>{selectedRequest.modificationDetail}</p>}
                 </div>
                 <div className="meta-grid">
-                  <div><ClipboardList size={16} /><span>Projet</span><strong>{selectedRequest.modificationProject || "ì définir"}</strong></div>
+                  <div><ClipboardList size={16} /><span>Projet</span><strong>{selectedRequest.modificationProject || "À définir"}</strong></div>
                   <div><ClipboardList size={16} /><span>Client</span><strong>{selectedRequest.client || "-"}</strong></div>
                   <div><ClipboardList size={16} /><span>Produit</span><strong>{selectedRequest.product || "-"}</strong></div>
-                  <div><Gauge size={16} /><span>Pilote</span><strong>{selectedRequest.pilot || "ì définir"}</strong></div>
+                  <div><Gauge size={16} /><span>Pilote</span><strong>{selectedRequest.pilot || "À définir"}</strong></div>
                   <div><CalendarDays size={16} /><span>Réception</span><strong>{selectedRequest.receptionDate || "-"}</strong></div>
                   <div><CalendarDays size={16} /><span>SOP</span><strong>{selectedRequest.sopDate || "-"}</strong></div>
                   <div><ClipboardList size={16} /><span>Mixabilité</span><strong>{mixabilityLabel(selectedRequest.mixability)}</strong></div>
@@ -5012,6 +5284,7 @@ function ModificationsPage(props) {
                   handleCreateAction={handleCreateAction}
                   handleDeleteAction={handleDeleteAction}
                   handleToggleAction={handleToggleAction}
+                  handleUpdateActionDuration={handleUpdateActionDuration}
 
                   handleApproveActionValidation={handleApproveActionValidation}
                   handleRejectActionValidation={handleRejectActionValidation}
@@ -5073,7 +5346,7 @@ function ModificationsPage(props) {
                   <span>{request.modificationProject || request.product || "Projet non renseigné"}</span>
                   <div className="request-card-status">
                     <strong className={`stage-pill ${stageColorClass(request.currentStage, Boolean(request.newVersion))}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</strong>
-                    {request.archived && <span className="archive-badge">Archivee</span>}
+                    {request.archived && <span className="archive-badge">Archivée</span>}
                   </div>
                 </button>
                   {canAdmin && (
@@ -5183,7 +5456,7 @@ function DossierReviewDialog({ canManage, request, saving, onClose, onSubmit }) 
             <X size={18} />
           </button>
         </header>
-        <textarea className="dossier-review-editor" readOnly={!canManage} value={value} onChange={(event) => setValue(event.target.value)} placeholder="Ajouter les notes de revue, decisions, points ouverts, actions a suivre..." />
+        <textarea className="dossier-review-editor" readOnly={!canManage} value={value} onChange={(event) => setValue(event.target.value)} placeholder="Ajouter les notes de revue, décisions, points ouverts, actions à suivre..." />
         <div className="button-row dossier-review-actions">
           {canManage && (
             <>
@@ -5201,7 +5474,7 @@ function DossierReviewDialog({ canManage, request, saving, onClose, onSubmit }) 
               </button>
             </>
           )}
-          <button className="secondary-action" type="button" onClick={onClose}>{canManage ? "Annuler" : "Fermer"}</button>
+          <button className="secondary-action" type="button" onClick={onClose}>{canManage ? "Annulér" : "Fermer"}</button>
         </div>
       </form>
     </div>
@@ -5214,18 +5487,18 @@ function PhaseValidationPanel({ canAdmin, canRequestValidation, canValidate, isC
   const displayedRate = latestValidation?.validationRate ?? validationRate ?? 0;
   const allActionsValidated = validation && (validation.totalActions || 0) > 0 && (validation.approvedActions || 0) >= (validation.totalActions || 0);
   const statusText = !isCurrentStage
-    ? "Cette phase est consultable, mais seule la phase courante peut etre envoyee en validation"
+    ? "Cette phase est consultable, mais seule la phase courante peut être envoyée en validation"
     : phaseApproved
-      ? "Phase deja validee"
+      ? "Phase déjà validée"
     : phaseReopened
-      ? "Phase reouverte, en attente de reprise"
+      ? "Phase rouverte, en attente de reprise"
     : validation
       ? "Demande en attente de validation"
       : !canRequestValidation
         ? "Seul le pilote de la modification peut demander la validation"
         : stageActionsDone
-        ? "Phase prete a envoyer en validation"
-        : "Toutes les actions doivent etre terminees";
+        ? "Phase prête a envoyér en validation"
+        : "Toutes les actions doivent être terminées";
   return (
     <section className="panel phase-validation-panel">
       <div>
@@ -5236,12 +5509,12 @@ function PhaseValidationPanel({ canAdmin, canRequestValidation, canValidate, isC
             <b>{phaseValidationStatusLabel(latestValidation.status)}</b>
             {latestValidation.reviewedBy && <span>Par {latestValidation.reviewedBy}</span>}
             {latestValidation.refusalReason && <p>Raison: {latestValidation.refusalReason}</p>}
-            {latestValidation.actionsToRevisit && <p>Actions a revisiter: {latestValidation.actionsToRevisit}</p>}
+            {latestValidation.actionsToRevisit && <p>Actions à revisiter: {latestValidation.actionsToRevisit}</p>}
           </div>
         )}
         {latestValidation && latestValidation.status === "PENDING" && (
           <div className="phase-validation-rate">
-            <span>{latestValidation.approvedActions || 0}/{latestValidation.totalActions || 0} actions validees</span>
+            <span>{latestValidation.approvedActions || 0}/{latestValidation.totalActions || 0} actions validées</span>
             <strong>{displayedRate}%</strong>
             <div className="progress-track"><span style={{ width: `${displayedRate}%` }} /></div>
           </div>
@@ -5265,7 +5538,7 @@ function PhaseValidationPanel({ canAdmin, canRequestValidation, canValidate, isC
         )}
         {canAdmin && phaseApproved && !isCurrentStage && (
           <button className="primary-action compact-action" disabled={saving} type="button" onClick={() => onReopen(latestValidation)}>
-            Reouvrir la phase
+            Rouvrir la phase
           </button>
         )}
       </div>
@@ -5274,12 +5547,12 @@ function PhaseValidationPanel({ canAdmin, canRequestValidation, canValidate, isC
 }
 
 function phaseValidationStatusLabel(status) {
-  if (status === "APPROVED") return "Phase validee";
-  if (status === "REOPENED") return "Phase reouverte";
-  return "Phase refusee";
+  if (status === "APPROVED") return "Phase validée";
+  if (status === "REOPENED") return "Phase rouverte";
+  return "Phase refusée";
 }
 
-function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleDeleteAction, handleToggleAction, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, isCriticalAction, lateActions, phaseValidation, phaseValidations = [], requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm, removeActionProofDocumentFile }) {
+function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleDeleteAction, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, isCriticalAction, lateActions, phaseValidation, phaseValidations = [], requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm, removeActionProofDocumentFile }) {
   const [expanded, setExpanded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const stageTitle = stageLabel(selectedStage, stageNewProject);
@@ -5322,6 +5595,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
         handleRequestActionValidation={handleRequestActionValidation}
         handleDeleteAction={handleDeleteAction}
         handleToggleAction={handleToggleAction}
+        handleUpdateActionDuration={handleUpdateActionDuration}
         handleDeleteActionAsset={handleDeleteActionAsset}
         handleUploadEvidence={handleUploadEvidence}
         canAdmin={canAdmin}
@@ -5361,6 +5635,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
               handleDeleteAction={handleDeleteAction}
               expanded
               handleToggleAction={handleToggleAction}
+              handleUpdateActionDuration={handleUpdateActionDuration}
               handleDeleteActionAsset={handleDeleteActionAsset}
               handleUploadEvidence={handleUploadEvidence}
               canAdmin={canAdmin}
@@ -5392,7 +5667,19 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
   );
 }
 
-function ActionList({ actions, currentUser, expanded = false, phaseValidation, phaseValidations = [], handleToggleAction, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteAction, handleDeleteActionAsset, handleUploadEvidence, requiresEvidence, saving, selectedRequest }) {
+function ActionList({ actions, currentUser, expanded = false, phaseValidation, phaseValidations = [], handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteAction, handleDeleteActionAsset, handleUploadEvidence, requiresEvidence, saving, selectedRequest }) {
+  const [durationValues, setDurationValues] = useState({});
+
+  useEffect(() => {
+    setDurationValues((current) => {
+      const nextValues = {};
+      actions.forEach((action) => {
+        nextValues[action.id] = current[action.id] ?? String(action.workDurationDays ?? 1);
+      });
+      return nextValues;
+    });
+  }, [actions]);
+
   return (
     <>
       <div className={expanded ? "action-list expanded" : "action-list"}>
@@ -5403,25 +5690,58 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
             const blockingAction = blockingActionFor(action, actions);
             const isBlocked = Boolean(action.dependsOnActionId && (!blockingAction || !isActionDone(blockingAction)));
             const canDeleteAction = canDeleteActionForUser(currentUser, action, selectedRequest, phaseValidations);
+            const canEditDuration = canEditActionDurationForUser(currentUser, action, selectedRequest, phaseValidations);
+            const canManageAction = canManageActionForUser(currentUser, action, phaseValidations);
+            const canToggleAction = canToggleActionForUser(currentUser, action, selectedRequest, phaseValidations);
 
             return (
             <article className={action.late ? "action-row late" : "action-row"} key={action.id}>
-              <label className="action-check" title={isActionDone(action) ? "Marquer non terminee" : "Marquer terminee"}>
-                <input checked={isActionDone(action)} disabled={saving || !canToggleActionForUser(currentUser, action, selectedRequest)} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
+              <label className="action-check" title={isActionDone(action) ? "Marquer non terminée" : "Marquer terminée"}>
+                <input checked={isActionDone(action)} disabled={saving || !canToggleAction} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
               </label>
               <div className="action-main">
                 <h3>{action.title}</h3>
                 <p>{action.topicRisk || "-"}</p>
               </div>
               <div className="action-meta">
-                <span><em>Pilote</em><strong>{action.responsible || "ì définir"}</strong></span>
-                <span><em>Validateur</em><strong>{action.validatorDisplayName || action.validator || "a definir"}</strong></span>
-                <span><em>Criticite</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>
+                <span><em>Pilote</em><strong>{action.responsible || "À définir"}</strong></span>
+                <span><em>Validateur</em><strong>{action.validatorDisplayName || action.validator || "à définir"}</strong></span>
+                <span><em>Criticité</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>
                 <span className="blocking-action-meta"><em>Blocage</em><strong className={isBlocked ? "status late" : action.dependsOnActionId ? "status done" : ""}>{action.dependsOnActionId ? `Par: ${blockingActionLabel(action, actions)}` : "Aucune"}</strong></span>
-                <span><em>Debut</em><strong>{action.startDate || "-"}</strong></span>
+                <span><em>Début</em><strong>{action.startDate || "-"}</strong></span>
                 <span><em>Fin</em><strong>{action.endDate || "-"}</strong></span>
                 <span><em>Finalisation</em><strong>{formattedDateTime(action.finalizationDate)}</strong></span>
-                <span><em>Jours</em><strong>{action.workDurationDays ?? "-"}</strong></span>
+                <span>
+                  <em>Jours</em>
+                  {canEditDuration ? (
+                    <div className="action-duration-control">
+                      <input
+                        className="action-duration-input"
+                        disabled={saving}
+                        min="0"
+                        type="number"
+                        value={durationValues[action.id] ?? String(action.workDurationDays ?? 1)}
+                        onChange={(event) => setDurationValues((current) => ({ ...current, [action.id]: event.target.value }))}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            handleUpdateActionDuration(action, event.currentTarget.value);
+                          }
+                        }}
+                      />
+                      <button
+                        className="primary-action compact-action action-duration-update"
+                        disabled={saving || Number(durationValues[action.id] ?? action.workDurationDays ?? 0) === Number(action.workDurationDays ?? 0)}
+                        type="button"
+                        onClick={() => handleUpdateActionDuration(action, durationValues[action.id] ?? action.workDurationDays)}
+                      >
+                        Mettre à jour
+                      </button>
+                    </div>
+                  ) : (
+                    <strong>{action.workDurationDays ?? "-"}</strong>
+                  )}
+                </span>
                 <span><em>Asset</em><strong>{requiresEvidence(action) ? "Obligatoire" : "Optionnel"}</strong></span>
                 <span className="evidence-meta">
                   <em>Element preuve</em>
@@ -5444,16 +5764,16 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
                           {asset.fileName || "Asset"}
                         </a>
                         {!asset.legacy && (
-                          <button className="ghost-icon asset-delete-action" disabled={saving || !canManageActionForUser(currentUser, action)} type="button" onClick={() => handleDeleteActionAsset(action, asset)} title="Supprimer l'asset">
+                          <button className="ghost-icon asset-delete-action" disabled={saving || !canManageAction} type="button" onClick={() => handleDeleteActionAsset(action, asset)} title="Supprimer l'asset">
                             <Trash2 size={13} />
                           </button>
                         )}
                       </span>
                     )) : "-"}
                   </strong>
-                  <label className={canManageActionForUser(currentUser, action) ? "row-upload asset-upload-action" : "row-upload asset-upload-action disabled"} title="Affecter un asset">
+                  <label className={canManageAction ? "row-upload asset-upload-action" : "row-upload asset-upload-action disabled"} title="Affecter un asset">
                     <Upload size={15} />
-                    <input disabled={saving || !canManageActionForUser(currentUser, action)} multiple type="file" onChange={(event) => {
+                    <input disabled={saving || !canManageAction} multiple type="file" onChange={(event) => {
                       const selectedFiles = Array.from(event.currentTarget.files || []);
                       handleUploadEvidence(action, selectedFiles);
                       event.currentTarget.value = "";
@@ -5520,7 +5840,7 @@ function ActionSuggestionDialog({ saving, suggestions, onAdd, onClose, onIgnore 
         <div className="form-intro">
           <div>
             <p className="eyebrow">Notification admin</p>
-            <h2 id="action-suggestion-title">Actions creees par les pilotes</h2>
+            <h2 id="action-suggestion-title">Actions créées par les pilotes</h2>
             <p>Decidez si chaque action locale doit aussi devenir une action standard.</p>
           </div>
           <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
@@ -5538,12 +5858,12 @@ function ActionSuggestionDialog({ saving, suggestions, onAdd, onClose, onIgnore 
               </div>
               <div className="suggestion-details">
                 <span><em>Topic / risque</em><strong>{suggestion.topicRisk || "-"}</strong></span>
-                <span><em>Pilote</em><strong>{suggestion.responsible || "A definir"}</strong></span>
-                <span><em>Validateur</em><strong>{suggestion.validator || "A definir"}</strong></span>
-                <span><em>Criticite</em><strong className={`criticality ${criticalityClass(suggestion.criticality)}`}>{suggestion.criticality || "3-faible"}</strong></span>
+                <span><em>Pilote</em><strong>{suggestion.responsible || "À définir"}</strong></span>
+                <span><em>Validateur</em><strong>{suggestion.validator || "À définir"}</strong></span>
+                <span><em>Criticité</em><strong className={`criticality ${criticalityClass(suggestion.criticality)}`}>{suggestion.criticality || "3-faible"}</strong></span>
                 <span><em>Asset</em><strong>{suggestion.evidenceRequired ? "Obligatoire" : "Optionnel"}</strong></span>
                 <span><em>Element preuve</em><strong>{suggestion.proofDocumentFileName || suggestion.proofDocument || "-"}</strong></span>
-                <span><em>Duree</em><strong>{suggestion.durationDays ?? 1} j</strong></span>
+                <span><em>Durée</em><strong>{suggestion.durationDays ?? 1} j</strong></span>
                 <span><em>Type standard cible</em><strong>{suggestion.newProject ? "Nouveau projet" : "Modification"}</strong></span>
               </div>
               <div className="row-actions">
@@ -5636,7 +5956,7 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
             <ActionRoleSelect required options={actionRoleOptions} value={actionForm.validator} onChange={(value) => updateActionForm("validator", value)} placeholder="Selectionner un role" />
           </label>
           <label>
-            Criticite
+            Criticité
             <select value={actionForm.criticality} onChange={(event) => updateActionForm("criticality", event.target.value)}>
               <option value="1-critique">1-critique</option>
               <option value="2-moyenne">2-moyenne</option>
@@ -5659,7 +5979,7 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
           <div className="proof-document-picker-field">
             <label className="file-picker proof-document-picker">
               <FileText size={15} />
-              <span>{selectedProofDocumentFiles.length > 0 ? "Ajouter un autre element preuve" : "Element preuve"}</span>
+              <span>{selectedProofDocumentFiles.length > 0 ? "Ajouter un autre élément preuve" : "Element preuve"}</span>
               <input multiple type="file" onChange={addProofDocumentFiles} />
             </label>
             {selectedProofDocumentFiles.length > 0 && (
@@ -5691,7 +6011,7 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
             <Save size={16} />
             Enregistrer
           </button>
-          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annulér</button>
         </div>
       </form>
     </div>

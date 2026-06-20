@@ -95,7 +95,7 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
       />
       <div className="planning-rule-list">
         {filteredRules.length === 0 ? (
-          <EmptyState title="Aucune action standard" text="Cliquez sur + dans la phase selectionnee pour creer la premiere action standard." />
+          <EmptyState title="Aucune action standard" text="Cliquez sur + dans la phase sélectionnée pour créér la premiere action standard." />
         ) : (
           filteredRules.map((rule) => (
             <article className="planning-rule-row" key={rule.id}>
@@ -105,11 +105,11 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
                 <span>{rule.topicRisk || "Topic non renseigne"}</span>
               </div>
               <div className="planning-rule-details">
-                <span><em>Pilote</em><strong>{rule.responsible || "A definir"}</strong></span>
-                <span><em>Validateur</em><strong>{rule.validator || "A definir"}</strong></span>
-                <span><em>Criticite</em><strong className={`criticality ${criticalityClass(rule.criticality)}`}>{rule.criticality || "3-faible"}</strong></span>
+                <span><em>Pilote</em><strong>{rule.responsible || "À définir"}</strong></span>
+                <span><em>Validateur</em><strong>{rule.validator || "À définir"}</strong></span>
+                <span><em>Criticité</em><strong className={`criticality ${criticalityClass(rule.criticality)}`}>{rule.criticality || "3-faible"}</strong></span>
                 <span><em>Type</em><strong>{ruleTypes(rule)}</strong></span>
-                <span><em>Duree</em><strong className="duration-pill">{rule.durationDays ?? 0} j</strong></span>
+                <span><em>Durée</em><strong className="duration-pill">{rule.durationDays ?? 0} j</strong></span>
                 <span><em>Depart</em><strong>{ruleDependency(rule)}</strong></span>
                 <span><em>Asset</em><strong>{rule.evidenceRequired ? "Obligatoire" : "Optionnel"}</strong></span>
                 <span className="planning-rule-evidence">
@@ -133,7 +133,7 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
               <span>{rule.dependencyActionTitle ? `Après ${rule.dependencyAnchor === "INPUT" ? "entrée" : "sortie"}: ${rule.dependencyActionTitle}` : "Départ réception ECR"}</span>
               <strong className="duration-pill">{rule.durationDays} j</strong>
               <div className="row-actions">
-                <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => openEditDialog(rule)} aria-label="Modifier la regle" title="Modifier">
+                <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => openEditDialog(rule)} aria-label="Modifier la règle" title="Modifier">
                   <Pencil size={15} />
                 </button>
                 <button className="ghost-icon" type="button" onClick={() => onDelete(rule.id)} title="Supprimer">
@@ -285,7 +285,7 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
             <span>{phaseActions.length} action{phaseActions.length > 1 ? "s" : ""}</span>
           </div>
           {phaseActions.length === 0 ? (
-            <p className="form-hint">Aucune action standard n'est encore definie pour cette phase.</p>
+            <p className="form-hint">Aucune action standard n'est encore définie pour cette phase.</p>
           ) : (
             <div className="phase-action-table">
               {phaseActions.map((rule) => (
@@ -331,7 +331,7 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
             </select>
           </label>
           <label>
-            Criticite
+            Criticité
             <select value={form.criticality} onChange={(event) => setForm((current) => ({ ...current, criticality: event.target.value }))}>
               <option value="1-critique">1-critique</option>
               <option value="2-moyenne">2-moyenne</option>
@@ -354,7 +354,7 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
           <div className="proof-document-picker-field">
             <label className="file-picker proof-document-picker">
               <FileText size={15} />
-              <span>{selectedProofDocumentFiles.length > 0 || savedProofDocuments.length > 0 ? "Ajouter un autre element preuve" : "Element preuve"}</span>
+              <span>{selectedProofDocumentFiles.length > 0 || savedProofDocuments.length > 0 ? "Ajouter un autre élément preuve" : "Element preuve"}</span>
               <input multiple type="file" onChange={addProofDocumentFiles} />
             </label>
             {selectedProofDocumentFiles.length > 0 && (
@@ -383,7 +383,7 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
                       disabled={saving}
                       type="button"
                       onClick={() => (proofDocument.legacy ? onDeleteProofDocument(form.id) : onDeleteProofDocumentItem(proofDocument.id))}
-                      title="Supprimer l'element preuve"
+                      title="Supprimer l'élément preuve"
                     >
                       <Trash2 size={15} />
                     </button>
@@ -402,7 +402,7 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
             <Save size={16} />
             Enregistrer action
           </button>
-          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annulér</button>
         </div>
       </form>
     </div>

@@ -60,6 +60,9 @@ public class AuthInterceptor implements HandlerInterceptor {
         if ("/api/auth/login".equals(path)) {
             return true;
         }
+        if (HttpMethod.POST.matches(method) && path.matches("/api/auth/password-reset/(request|verify|confirm)")) {
+            return true;
+        }
         if (HttpMethod.GET.matches(method) && "/api/events".equals(path)) {
             return true;
         }

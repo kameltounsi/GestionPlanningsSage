@@ -17,6 +17,7 @@ import org.springframework.web.multipart.MultipartFile;
 import javax.validation.Valid;
 import java.net.URI;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 @RestController
@@ -47,15 +48,19 @@ public class EcrRequestController {
 
     @GetMapping
     public List<EcrRequest> list(@RequestParam(defaultValue = "false") boolean includeArchived,
+                                 @RequestParam(required = false) String view,
                                  @RequestAttribute("authenticatedUser") AppUser user) {
         requestRepository.findByArchivedFalseOrderByReceptionDateDescIdDesc().stream()
                 .filter(request -> request.getCurrentStage() != EcrStage.CLOSED && request.getCurrentStage() != EcrStage.CANCELLED)
                 .forEach(templateService::ensureMissingActionsFor);
-        List<EcrRequest> requests = includeArchived && accessControlService.isAdmin(user)
+        String normalizedView = normalizeView(view, includeArchived);
+        boolean admin = accessControlService.isAdmin(user);
+        List<EcrRequest> requests = (admin && ("all".equals(normalizedView) || "archived".equals(normalizedView)))
                 ? requestRepository.findAllByOrderByReceptionDateDescIdDesc()
                 : requestRepository.findByArchivedFalseOrderByReceptionDateDescIdDesc();
         return requests.stream()
                 .filter(request -> accessControlService.canAccessRequest(user, request))
+                .filter(request -> matchesView(request, normalizedView, admin))
                 .collect(java.util.stream.Collectors.toList());
     }
 
@@ -85,7 +90,7 @@ public class EcrRequestController {
                 "CREATION_MODIFICATION",
                 "modification",
                 saved.getId() == null ? null : String.valueOf(saved.getId()),
-                "Creation de la modification: " + requestLabel(saved)
+                "Création de la modification: " + requestLabel(saved)
         );
         return ResponseEntity.created(URI.create("/api/ecr-requests/" + saved.getId())).body(saved);
     }
@@ -139,7 +144,7 @@ public class EcrRequestController {
                             "MODIFICATION_MODIFICATION",
                             "modification",
                             saved.getId() == null ? null : String.valueOf(saved.getId()),
-                            "Modification mise a jour: " + requestLabel(saved)
+                            "Modification mise à jour: " + requestLabel(saved)
                     );
                     return ResponseEntity.ok(saved);
                 })
@@ -196,7 +201,7 @@ public class EcrRequestController {
                     } catch (DownloadException exception) {
                         return ResponseEntity.status(502)
                                 .contentType(MediaType.TEXT_PLAIN)
-                                .body("Telechargement impossible depuis Cloudinary. Verifiez la connexion reseau ou reessayez plus tard.");
+                                .body("Téléchargement impossible depuis Cloudinary. Vérifiez la connexion réseau ou réessayez plus tard.");
                     }
                 })
                 .orElseGet(() -> ResponseEntity.notFound().build());
@@ -217,7 +222,7 @@ public class EcrRequestController {
                             "ARCHIVAGE_MODIFICATION",
                             "modification",
                             requestLabel(saved),
-                            "Modification archivee: " + requestLabel(saved)
+                            "Modification archivée: " + requestLabel(saved)
                     );
                     return ResponseEntity.noContent().<Void>build();
                 })
@@ -248,7 +253,7 @@ public class EcrRequestController {
                                 "REOUVERTURE_PHASE",
                                 "modification",
                                 requestLabel(saved),
-                                "Phase reouverte: " + stageLabel(stage) + " - Modification: " + requestLabel(saved)
+                                "Phase rouverte: " + stageLabel(stage) + " - Modification: " + requestLabel(saved)
                         );
                     }
                     return ResponseEntity.ok(saved);
@@ -269,12 +274,13 @@ public class EcrRequestController {
                     request.setCurrentStage(EcrStage.CANCELLED);
                     request.setCancelledDate(java.time.LocalDate.now());
                     EcrRequest saved = requestRepository.save(request);
+                    templateService.ensureMissingActionsForStage(saved, EcrStage.CANCELLED);
                     auditLogService.recordBusinessEvent(
                             user,
                             "ANNULATION_MODIFICATION",
                             "modification",
                             requestLabel(saved),
-                            "Modification annulee: " + requestLabel(saved)
+                            "Modification annulée: " + requestLabel(saved)
                     );
                     return ResponseEntity.ok(saved);
                 })
@@ -297,7 +303,7 @@ public class EcrRequestController {
                             archived ? "ARCHIVAGE_MODIFICATION" : "DESARCHIVAGE_MODIFICATION",
                             "modification",
                             requestLabel(saved),
-                            (archived ? "Modification archivee: " : "Modification desarchivee: ") + requestLabel(saved)
+                            (archived ? "Modification archivée: " : "Modification désarchivée: ") + requestLabel(saved)
                     );
                     return ResponseEntity.ok(saved);
                 })
@@ -324,6 +330,48 @@ public class EcrRequestController {
                 .orElse(false);
     }
 
+    private String normalizeView(String view, boolean includeArchived) {
+        if (includeArchived) {
+            return "all";
+        }
+        String normalized = view == null ? "" : view.trim().toLowerCase(Locale.ROOT);
+        switch (normalized) {
+            case "active":
+            case "closed":
+            case "cancelled":
+            case "archived":
+            case "all":
+                return normalized;
+            default:
+                return "all";
+        }
+    }
+
+    private boolean matchesView(EcrRequest request, String view, boolean admin) {
+        if (request == null) {
+            return false;
+        }
+        if ("archived".equals(view)) {
+            return admin && request.isArchived();
+        }
+        if (!admin && request.isArchived()) {
+            return false;
+        }
+        if (!"all".equals(view) && request.isArchived()) {
+            return false;
+        }
+        if ("active".equals(view)) {
+            return request.getCurrentStage() != EcrStage.CLOSED && request.getCurrentStage() != EcrStage.CANCELLED;
+        }
+        if ("closed".equals(view)) {
+            return request.getCurrentStage() == EcrStage.CLOSED;
+        }
+        if ("cancelled".equals(view)) {
+            return request.getCurrentStage() == EcrStage.CANCELLED;
+        }
+        return true;
+    }
+
     private boolean canManageDossierReview(AppUser user, EcrRequest request) {
         return accessControlService.isAdmin(user) || accessControlService.isRequestPilot(user, request);
     }
@@ -343,7 +391,7 @@ public class EcrRequestController {
                     validation.setStatus(PhaseValidationStatus.REOPENED);
                     validation.setReviewedBy(displayName(user));
                     validation.setReviewedAt(java.time.LocalDateTime.now());
-                    validation.setRefusalReason("Phase reouverte par l'admin.");
+                    validation.setRefusalReason("Phase rouverte par l'admin.");
                     validationRepository.save(validation);
                 });
     }

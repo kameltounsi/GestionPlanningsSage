@@ -9,7 +9,7 @@ export function ProfilePage({ currentUser, passwordForm, profileForm, saving, on
     return (
       <section className="page-content">
         <PageHeader eyebrow="Compte" title="Profil" subtitle="Les informations du compte seront disponibles après chargement." />
-        <EmptyState title="Profil indisponible" text="Le compte fchelbi n'a pas encore ete charge." />
+        <EmptyState title="Profil indisponible" text="Le compte fchelbi n'a pas encore été chargé." />
       </section>
     );
   }
@@ -70,7 +70,7 @@ export function ProfilePage({ currentUser, passwordForm, profileForm, saving, on
           <div className="form-intro">
             <div>
               <h2>Mot de passe</h2>
-              <p>Choisissez un nouveau mot de passe pour votre prochain acces.</p>
+              <p>Choisissez un nouveau mot de passe pour votre prochain accès.</p>
             </div>
           </div>
           <label>
@@ -92,4 +92,3 @@ export function ProfilePage({ currentUser, passwordForm, profileForm, saving, on
     </section>
   );
 }
-

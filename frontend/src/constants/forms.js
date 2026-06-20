@@ -87,6 +87,8 @@ export const emptyUserForm = {
   email: "",
   password: "",
   phone: "",
+  chef1: "",
+  chef2: "",
   role: "CHEF_DE_PROJET",
   profilePhotoUrl: "",
   profilePhotoFile: null,

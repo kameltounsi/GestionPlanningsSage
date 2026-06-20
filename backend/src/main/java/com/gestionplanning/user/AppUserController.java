@@ -40,7 +40,11 @@ public class AppUserController {
     @Transactional
     public ResponseEntity<AppUser> create(@Valid @RequestBody AppUser user) {
         normalize(user);
-        if (user.getUsername() == null || user.getUsername().trim().isEmpty() || invalidPhone(user.getPhone()) || userRepository.existsByUsername(user.getUsername()) || userRepository.existsByEmail(user.getEmail())) {
+        if (user.getUsername() == null || user.getUsername().trim().isEmpty()
+                || invalidPhone(user.getPhone())
+                || userRepository.existsByUsername(user.getUsername())
+                || userRepository.existsByEmail(user.getEmail())
+                || invalidChefAssignment(user, null)) {
             return ResponseEntity.badRequest().build();
         }
         String initialPassword = user.getPassword();
@@ -59,7 +63,9 @@ public class AppUserController {
                             || updatedUser.getUsername() == null || updatedUser.getUsername().trim().isEmpty()
                             || updatedUser.getEmail() == null || updatedUser.getEmail().trim().isEmpty()
                             || invalidPhone(updatedUser.getPhone())
-                            || hasDuplicateUsername(id, updatedUser.getUsername()) || hasDuplicateEmail(id, updatedUser.getEmail())) {
+                            || hasDuplicateUsername(id, updatedUser.getUsername())
+                            || hasDuplicateEmail(id, updatedUser.getEmail())
+                            || invalidChefAssignment(updatedUser, id)) {
                         return ResponseEntity.badRequest().<AppUser>build();
                     }
                     user.setFullName(updatedUser.getFullName());
@@ -70,6 +76,8 @@ public class AppUserController {
                         user.setPassword(passwordService.encode(updatedUser.getPassword()));
                     }
                     user.setPhone(updatedUser.getPhone());
+                    user.setChef1(updatedUser.getChef1());
+                    user.setChef2(updatedUser.getChef2());
                     user.setRole(updatedUser.getRole());
                     user.setEnabled(updatedUser.isEnabled());
                     return ResponseEntity.ok(userRepository.save(user));
@@ -160,6 +168,8 @@ public class AppUserController {
     private void normalize(AppUser user) {
         user.setUsername(normalizedText(user.getUsername()));
         user.setEmail(normalizedText(user.getEmail()));
+        user.setChef1(normalizedText(user.getChef1()));
+        user.setChef2(normalizedText(user.getChef2()));
         user.setRole(user.getRole() == null || user.getRole().trim().isEmpty() ? UserRole.CHEF_DE_PROJET.name() : user.getRole().trim());
     }
 
@@ -181,6 +191,32 @@ public class AppUserController {
 
     private boolean invalidPhone(String phone) {
         return phone != null && !phone.trim().isEmpty() && !phone.trim().matches("\\+?[0-9\\s().-]{8,20}");
+    }
+
+    private boolean invalidChefAssignment(AppUser user, Long userId) {
+        return !validChefAssignment(user, user.getChef1(), userId) || !validChefAssignment(user, user.getChef2(), userId);
+    }
+
+    private boolean validChefAssignment(AppUser user, String chef, Long userId) {
+        if (chef == null || chef.trim().isEmpty()) {
+            return false;
+        }
+        String value = normalizedText(chef);
+        if (matchesUserIdentity(user, value)) {
+            return true;
+        }
+        return userRepository.findAll().stream()
+                .filter(existing -> userId == null || !existing.getId().equals(userId))
+                .anyMatch(existing -> matchesUserIdentity(existing, value));
+    }
+
+    private boolean matchesUserIdentity(AppUser user, String value) {
+        if (user == null || value == null || value.trim().isEmpty()) {
+            return false;
+        }
+        return value.equals(normalizedText(user.getUsername()))
+                || value.equals(normalizedText(user.getEmail()))
+                || value.equals(normalizedText(user.getFullName()));
     }
 
     private boolean canUpdateProfile(AppUser authenticatedUser, Long userId) {

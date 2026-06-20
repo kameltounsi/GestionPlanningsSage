@@ -67,11 +67,11 @@ export function Sidebar({ canAdmin, collapsed, currentUser, page, pageHref, onCo
           <button
               className="menu-item logout-item"
               onClick={onLogout}
-              title="Deconnexion"
+              title="Déconnexion"
               type="button"
           >
             <LogOut size={18}/>
-            <span>Deconnexion</span>
+            <span>Déconnexion</span>
           </button>
         </nav>
       </aside>

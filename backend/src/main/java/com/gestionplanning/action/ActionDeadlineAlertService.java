@@ -60,7 +60,7 @@ public class ActionDeadlineAlertService {
     @Transactional
     public void generateDueAlerts() {
         LocalDate today = LocalDate.now();
-        List<EcrAction> actions = actionRepository.findByEndDateBetweenAndStatusNotInOrderByEndDateAscIdAsc(today.minusDays(1), today.plusDays(2), DONE_STATUSES);
+        List<EcrAction> actions = actionRepository.findByEndDateBetweenAndStatusNotInOrderByEndDateAscIdAsc(today.minusDays(2), today.plusDays(2), DONE_STATUSES);
         for (EcrAction action : actions) {
             if (isDone(action) || action.getEndDate() == null || action.getRequest() == null) {
                 continue;
@@ -139,7 +139,7 @@ public class ActionDeadlineAlertService {
         }
         alert.setMailAttemptedAt(now);
         try {
-            mailService.sendActionDeadlineEmail(alert.getAction().getRequest(), alert.getAction(), recipient, timingLabel(alert.getAlertType()), timingMessage(alert.getAlertType()));
+            mailService.sendActionDeadlineEmail(alert.getAction().getRequest(), alert.getAction(), recipient, escalationCcFor(alert.getAction(), alert.getAlertType(), recipient), timingLabel(alert.getAlertType()), timingMessage(alert.getAlertType()));
             alert.setMailSentAt(now);
             alert.setMailError(null);
             alertRepository.save(alert);
@@ -152,11 +152,36 @@ public class ActionDeadlineAlertService {
 
     private List<AppUser> recipientsFor(EcrAction action) {
         Map<String, AppUser> recipients = new LinkedHashMap<>();
-        findUser(action.getRequest().getPilot()).ifPresent(user -> recipients.put(normalizeEmail(user.getEmail()), user));
         findUser(action.getResponsible()).ifPresent(user -> recipients.put(normalizeEmail(user.getEmail()), user));
-        adminsInProjectTeam(action.getRequest()).forEach(user -> recipients.put(normalizeEmail(user.getEmail()), user));
         return recipients.values().stream()
                 .filter(user -> !isBlank(user.getEmail()))
+                .collect(Collectors.toList());
+    }
+
+    private List<AppUser> escalationCcFor(EcrAction action, ActionDeadlineAlertType alertType, AppUser recipient) {
+        if (action == null || alertType == null) {
+            return Collections.emptyList();
+        }
+        Optional<AppUser> actionPilot = findUser(action.getResponsible());
+        if (!actionPilot.isPresent()) {
+            return Collections.emptyList();
+        }
+        Map<String, AppUser> cc = new LinkedHashMap<>();
+        if (alertType == ActionDeadlineAlertType.DUE_TODAY || alertType == ActionDeadlineAlertType.J_PLUS_1 || alertType == ActionDeadlineAlertType.J_PLUS_2) {
+            findUser(actionPilot.get().getChef1()).ifPresent(user -> cc.put(normalizeEmail(user.getEmail()), user));
+        }
+        if (alertType == ActionDeadlineAlertType.J_PLUS_2) {
+            Optional<AppUser> chef2 = findUser(actionPilot.get().getChef2());
+            if (!chef2.isPresent()) {
+                chef2 = findUser(actionPilot.get().getChef1()).flatMap(chef1 -> findUser(chef1.getChef1()));
+            }
+            chef2.ifPresent(user -> cc.put(normalizeEmail(user.getEmail()), user));
+        }
+        String recipientEmail = normalizeEmail(recipient == null ? null : recipient.getEmail());
+        return cc.entrySet().stream()
+                .filter(entry -> !isBlank(entry.getKey()))
+                .filter(entry -> !entry.getKey().equals(recipientEmail))
+                .map(Map.Entry::getValue)
                 .collect(Collectors.toList());
     }
 
@@ -220,6 +245,7 @@ public class ActionDeadlineAlertService {
         if (daysUntilEnd == 1) return ActionDeadlineAlertType.J_MINUS_1;
         if (daysUntilEnd == 0) return ActionDeadlineAlertType.DUE_TODAY;
         if (daysUntilEnd == -1) return ActionDeadlineAlertType.J_PLUS_1;
+        if (daysUntilEnd == -2) return ActionDeadlineAlertType.J_PLUS_2;
         return null;
     }
 
@@ -232,14 +258,18 @@ public class ActionDeadlineAlertService {
         if (type == ActionDeadlineAlertType.J_MINUS_1) return "J-1";
         if (type == ActionDeadlineAlertType.DUE_TODAY) return "Jour J";
         if (type == ActionDeadlineAlertType.J_PLUS_1) return "J+1";
+        if (type == ActionDeadlineAlertType.J_PLUS_2) return "J+2";
         return "Alerte";
     }
 
     private String timingMessage(ActionDeadlineAlertType type) {
-        if (type == ActionDeadlineAlertType.J_PLUS_1) {
-            return "La date de fin de l'action a ete expiree et l'action n'est pas marquee terminee.";
+        if (type == ActionDeadlineAlertType.J_PLUS_2) {
+            return "La date de fin de l'action est expirée depuis 2 jours et l'action n'a toujours pas avancé.";
         }
-        return "La date de fin de l'action va expirer et l'action n'est pas encore marquee terminee.";
+        if (type == ActionDeadlineAlertType.J_PLUS_1) {
+            return "La date de fin de l'action a été expirée et l'action n'est pas marquée terminée.";
+        }
+        return "La date de fin de l'action va expirer et l'action n'est pas encore marquée terminée.";
     }
 
     private String requestLabel(EcrRequest request) {

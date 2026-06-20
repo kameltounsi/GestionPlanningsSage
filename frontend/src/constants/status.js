@@ -4,7 +4,7 @@ export const statusLabels = {
   DONE: "Termine",
   DONE_LATE: "Termine en retard",
   LATE: "En retard",
-  CANCELLED: "Annule",
+  CANCELLED: "Annulé",
   OK: "OK",
   NOK: "NOK"
 };

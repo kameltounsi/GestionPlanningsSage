@@ -1,6 +1,7 @@
 package com.gestionplanning.auth;
 
 import com.gestionplanning.user.AppUser;
+import com.gestionplanning.user.AccountMailService;
 import com.gestionplanning.user.AppUserRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,15 +16,22 @@ import java.util.Locale;
 @RequestMapping("/api/auth")
 public class AuthController {
     private static final int TOKEN_BYTES = 48;
+    private static final int RESET_CODE_BOUND = 10000;
     private final AppUserRepository userRepository;
     private final AuthTokenRepository tokenRepository;
+    private final PasswordResetCodeRepository resetCodeRepository;
     private final PasswordService passwordService;
+    private final AccountMailService accountMailService;
     private final SecureRandom secureRandom = new SecureRandom();
 
-    public AuthController(AppUserRepository userRepository, AuthTokenRepository tokenRepository, PasswordService passwordService) {
+    public AuthController(AppUserRepository userRepository, AuthTokenRepository tokenRepository,
+                          PasswordResetCodeRepository resetCodeRepository, PasswordService passwordService,
+                          AccountMailService accountMailService) {
         this.userRepository = userRepository;
         this.tokenRepository = tokenRepository;
+        this.resetCodeRepository = resetCodeRepository;
         this.passwordService = passwordService;
+        this.accountMailService = accountMailService;
     }
 
     @PostMapping("/login")
@@ -66,10 +74,69 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/password-reset/request")
+    @Transactional
+    public ResponseEntity<Void> requestPasswordReset(@RequestBody PasswordResetRequest request) {
+        if (request == null || isBlank(request.getEmail())) {
+            return ResponseEntity.badRequest().build();
+        }
+        resetCodeRepository.deleteByExpiresAtBefore(LocalDateTime.now());
+        userRepository.findByEmail(request.getEmail().trim().toLowerCase(Locale.ROOT))
+                .filter(AppUser::isEnabled)
+                .ifPresent(user -> {
+                    PasswordResetCode resetCode = new PasswordResetCode();
+                    resetCode.setUser(user);
+                    resetCode.setCode(generateResetCode());
+                    resetCode.setExpiresAt(LocalDateTime.now().plusMinutes(10));
+                    PasswordResetCode saved = resetCodeRepository.save(resetCode);
+                    accountMailService.sendPasswordResetCodeEmail(user, saved.getCode());
+                });
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/password-reset/verify")
+    public ResponseEntity<Void> verifyPasswordResetCode(@RequestBody PasswordResetVerifyRequest request) {
+        if (!isValidResetRequest(request)) {
+            return ResponseEntity.badRequest().build();
+        }
+        return userRepository.findByEmail(request.getEmail().trim().toLowerCase(Locale.ROOT))
+                .filter(AppUser::isEnabled)
+                .flatMap(resetCodeRepository::findFirstByUserAndUsedFalseOrderByCreatedAtDescIdDesc)
+                .filter(resetCode -> isValidResetCode(resetCode, request.getCode()))
+                .map(resetCode -> ResponseEntity.noContent().<Void>build())
+                .orElse(ResponseEntity.status(403).build());
+    }
+
+    @PostMapping("/password-reset/confirm")
+    @Transactional
+    public ResponseEntity<Void> confirmPasswordReset(@RequestBody PasswordResetConfirmRequest request) {
+        if (!isValidResetRequest(request) || isBlank(request.getPassword())) {
+            return ResponseEntity.badRequest().build();
+        }
+        return userRepository.findByEmail(request.getEmail().trim().toLowerCase(Locale.ROOT))
+                .filter(AppUser::isEnabled)
+                .flatMap(user -> resetCodeRepository.findFirstByUserAndUsedFalseOrderByCreatedAtDescIdDesc(user)
+                        .filter(resetCode -> isValidResetCode(resetCode, request.getCode()))
+                        .map(resetCode -> {
+                            user.setPassword(passwordService.encode(request.getPassword()));
+                            userRepository.save(user);
+                            resetCode.setUsed(true);
+                            resetCode.setUsedAt(LocalDateTime.now());
+                            resetCodeRepository.save(resetCode);
+                            tokenRepository.deleteByUser(user);
+                            return ResponseEntity.noContent().<Void>build();
+                        }))
+                .orElse(ResponseEntity.status(403).build());
+    }
+
     private String generateToken() {
         byte[] bytes = new byte[TOKEN_BYTES];
         secureRandom.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private String generateResetCode() {
+        return String.format("%04d", secureRandom.nextInt(RESET_CODE_BOUND));
     }
 
     private String bearerToken(String authorization) {
@@ -77,6 +144,22 @@ public class AuthController {
             return null;
         }
         return authorization.substring("Bearer ".length()).trim();
+    }
+
+    private boolean isValidResetRequest(PasswordResetVerifyRequest request) {
+        return request != null && !isBlank(request.getEmail()) && request.getCode() != null && request.getCode().matches("\\d{4}");
+    }
+
+    private boolean isValidResetCode(PasswordResetCode resetCode, String code) {
+        return resetCode != null
+                && !resetCode.isUsed()
+                && resetCode.getExpiresAt() != null
+                && resetCode.getExpiresAt().isAfter(LocalDateTime.now())
+                && resetCode.getCode().equals(code);
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     public static class LoginRequest {
@@ -90,6 +173,51 @@ public class AuthController {
         public void setEmail(String email) {
             this.email = email;
         }
+
+        public String getPassword() {
+            return password;
+        }
+
+        public void setPassword(String password) {
+            this.password = password;
+        }
+    }
+
+    public static class PasswordResetRequest {
+        private String email;
+
+        public String getEmail() {
+            return email;
+        }
+
+        public void setEmail(String email) {
+            this.email = email;
+        }
+    }
+
+    public static class PasswordResetVerifyRequest {
+        private String email;
+        private String code;
+
+        public String getEmail() {
+            return email;
+        }
+
+        public void setEmail(String email) {
+            this.email = email;
+        }
+
+        public String getCode() {
+            return code;
+        }
+
+        public void setCode(String code) {
+            this.code = code;
+        }
+    }
+
+    public static class PasswordResetConfirmRequest extends PasswordResetVerifyRequest {
+        private String password;
 
         public String getPassword() {
             return password;

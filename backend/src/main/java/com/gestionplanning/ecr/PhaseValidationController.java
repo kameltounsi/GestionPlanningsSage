@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -171,8 +172,7 @@ public class PhaseValidationController {
                         updatedValidation.setReviewedAt(LocalDateTime.now());
                         validationRepository.save(updatedValidation);
                         EcrRequest request = updatedValidation.getRequest();
-                        request.setCurrentStage(nextStage(request, updatedValidation.getStage()));
-                        requestRepository.save(request);
+                        advanceRequestAfterPhaseApproval(request, updatedValidation.getStage());
                         auditLogService.recordBusinessEvent(
                                 user,
                                 "VALIDATION_PHASE",
@@ -249,8 +249,7 @@ public class PhaseValidationController {
                     validation.setReviewedAt(LocalDateTime.now());
                     validationRepository.save(validation);
                     EcrRequest request = validation.getRequest();
-                    request.setCurrentStage(nextStage(request, validation.getStage()));
-                    EcrRequest savedRequest = requestRepository.save(request);
+                    EcrRequest savedRequest = advanceRequestAfterPhaseApproval(request, validation.getStage());
                     auditLogService.recordBusinessEvent(
                             user,
                             "VALIDATION_PHASE",
@@ -375,6 +374,35 @@ public class PhaseValidationController {
             return EcrStage.CLOSED;
         }
         return stages.get(index + 1);
+    }
+
+    private EcrRequest advanceRequestAfterPhaseApproval(EcrRequest request, EcrStage approvedStage) {
+        boolean wasCompleted = request.isClosureStatus() || request.getCurrentStage() == EcrStage.CLOSED;
+        EcrStage nextStage = nextStage(request, approvedStage);
+        request.setCurrentStage(nextStage);
+        if (nextStage == EcrStage.CLOSED) {
+            request.setClosureStatus(true);
+            if (request.getClosureDate() == null) {
+                request.setClosureDate(LocalDate.now());
+            }
+            request.setCancelledStatus(false);
+            request.setCancelledDate(null);
+        }
+        EcrRequest saved = requestRepository.save(request);
+        if (nextStage == EcrStage.CLOSED && !wasCompleted) {
+            notifyModificationCompleted(saved);
+        }
+        return saved;
+    }
+
+    private void notifyModificationCompleted(EcrRequest request) {
+        Map<String, AppUser> recipients = new LinkedHashMap<>();
+        accessControlService.projectLeadFor(request)
+                .ifPresent(user -> recipients.put(normalizeEmail(user.getEmail()), user));
+        accessControlService.adminsFor(request)
+                .forEach(user -> recipients.put(normalizeEmail(user.getEmail()), user));
+        recipients.remove("");
+        accountMailService.sendModificationCompletedEmail(request, recipients.values());
     }
 
     private String displayName(AppUser user) {

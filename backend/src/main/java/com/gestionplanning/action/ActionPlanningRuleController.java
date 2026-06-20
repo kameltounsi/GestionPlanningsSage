@@ -129,7 +129,7 @@ public class ActionPlanningRuleController {
             } catch (RuntimeException exception) {
                 return ResponseEntity.status(502)
                         .contentType(MediaType.TEXT_PLAIN)
-                        .body("Telechargement impossible depuis Cloudinary. Activez la livraison des fichiers PDF/ZIP dans les parametres Security de Cloudinary, puis reessayez.");
+                        .body("Téléchargement impossible depuis Cloudinary. Activez la livraison des fichiers PDF/ZIP dans les paramètres Security de Cloudinary, puis réessayez.");
             }
         }).orElseGet(() -> ResponseEntity.notFound().build());
     }
@@ -149,7 +149,7 @@ public class ActionPlanningRuleController {
             } catch (RuntimeException exception) {
                 return ResponseEntity.status(502)
                         .contentType(MediaType.TEXT_PLAIN)
-                        .body("Telechargement impossible depuis Cloudinary. Activez la livraison des fichiers PDF/ZIP dans les parametres Security de Cloudinary, puis reessayez.");
+                        .body("Téléchargement impossible depuis Cloudinary. Activez la livraison des fichiers PDF/ZIP dans les paramètres Security de Cloudinary, puis réessayez.");
             }
         }).orElseGet(() -> ResponseEntity.notFound().build());
     }

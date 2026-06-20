@@ -59,10 +59,10 @@ public class CloudinaryStorageService {
             );
         } catch (IOException exception) {
             LOGGER.error("Cloudinary upload failed for folder {}", folder, exception);
-            throw new IllegalStateException("Impossible d'envoyer le fichier vers Cloudinary", exception);
+            throw new IllegalStateException("Impossible d'envoyér le fichier vers Cloudinary", exception);
         } catch (RuntimeException exception) {
             LOGGER.error("Cloudinary upload failed for folder {}", folder, exception);
-            throw new IllegalStateException("Impossible d'envoyer le fichier vers Cloudinary", exception);
+            throw new IllegalStateException("Impossible d'envoyér le fichier vers Cloudinary", exception);
         }
     }
 

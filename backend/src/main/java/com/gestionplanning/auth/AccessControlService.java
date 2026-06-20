@@ -251,6 +251,13 @@ public class AccessControlService {
                 .findFirst();
     }
 
+    public List<AppUser> adminsFor(EcrRequest request) {
+        return userRepository.findAll().stream()
+                .filter(AppUser::isEnabled)
+                .filter(user -> hasApplicationRole(user, UserRole.ADMIN))
+                .collect(Collectors.toList());
+    }
+
     private boolean hasApplicationRole(AppUser user, UserRole role) {
         if (user == null || role == null) {
             return false;
@@ -329,4 +336,3 @@ public class AccessControlService {
         return ascii.trim().toLowerCase(Locale.ROOT).replace("_", " ");
     }
 }
-

@@ -56,8 +56,9 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
                   <div className="avatar-cell">
                     {user.profilePhotoUrl ? <img alt="" src={user.profilePhotoUrl} /> : <UserCircle size={24} />}
                   </div>
-                  <div><strong>{user.fullName}</strong><span>{user.jobTitle || "-"}</span></div>
-                  <div><strong>{user.username || "-"}</strong><span>{user.email}</span></div>
+                  <div className="user-identity"><strong>{user.fullName}</strong><span>{user.jobTitle || "-"}</span></div>
+                  <div className="user-account"><strong>{user.username || "-"}</strong><span>{user.email}</span></div>
+                  <div className="user-chefs"><strong>Chef 1: {userLabelForValue(users, user.chef1)}</strong><span>Chef 2: {userLabelForValue(users, user.chef2)}</span></div>
                   <small className="status in_progress">{userRoleLabel(user.role)}</small>
                   <div className="row-actions">
                     <button className="secondary-action compact-action icon-only-action" disabled={!canAdmin} type="button" onClick={() => openEditDialog(user)} aria-label="Modifier l'utilisateur" title="Modifier">
@@ -80,6 +81,7 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
           form={userForm}
           actionRoleOptions={actionRoleOptions}
           saving={saving}
+          users={users}
           onClose={closeDialog}
           onSubmit={submitDialog}
           setForm={setUserForm}
@@ -89,7 +91,7 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
   );
 }
 
-function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, saving, onClose, onSubmit, setForm }) {
+function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, saving, users = [], onClose, onSubmit, setForm }) {
   const [localPhotoPreviewUrl, setLocalPhotoPreviewUrl] = useState("");
   const historicalRoleLabels = userRoleOptions.map(([, label]) => label);
   const roleOptions = [
@@ -102,6 +104,7 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
     ? [{ value: form.role, label: userRoleLabel(form.role) }, ...roleOptions]
     : roleOptions;
   const previewPhotoUrl = localPhotoPreviewUrl || form.profilePhotoUrl || "";
+  const chefOptions = userSelectOptions(users, form, editingUser);
 
   useEffect(() => {
     if (!form.profilePhotoFile) {
@@ -180,6 +183,24 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
             <input autoComplete="tel" disabled={!canAdmin} inputMode="tel" pattern="\\+?[0-9\\s().-]{8,20}" value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
           </label>
           <label>
+            Chef 1
+            <select required disabled={!canAdmin} value={form.chef1} onChange={(event) => setForm((current) => ({ ...current, chef1: event.target.value }))}>
+              <option value="">Selectionner chef 1</option>
+              {chefOptions.map(({ value, label }) => (
+                <option key={`chef1-${value}`} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Chef 2
+            <select required disabled={!canAdmin} value={form.chef2} onChange={(event) => setForm((current) => ({ ...current, chef2: event.target.value }))}>
+              <option value="">Selectionner chef 2</option>
+              {chefOptions.map(({ value, label }) => (
+                <option key={`chef2-${value}`} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
             Rôle applicatif
             <select disabled={!canAdmin} value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}>
               {displayedRoleOptions.map(({ value, label }) => (
@@ -197,9 +218,37 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
             <Save size={16} />
             Enregistrer
           </button>
-          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annulér</button>
         </div>
       </form>
     </div>
   );
+}
+
+function userSelectOptions(users, form, editingUser) {
+  const options = users
+    .filter((user) => user?.username)
+    .map((user) => ({
+      value: normalizeUserKey(user.username),
+      label: `${user.fullName || user.username} (${user.username})`
+    }));
+  const selfValue = normalizeUserKey(form.username);
+  if (selfValue && !options.some((option) => option.value === selfValue)) {
+    options.unshift({
+      value: selfValue,
+      label: `${form.fullName || selfValue} (${editingUser ? "lui-meme" : "nouvel utilisateur"})`
+    });
+  }
+  return options.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function userLabelForValue(users, value) {
+  const key = normalizeUserKey(value);
+  if (!key) return "-";
+  const user = users.find((item) => [item.username, item.email, item.fullName].map(normalizeUserKey).includes(key));
+  return user ? user.fullName || user.username : value;
+}
+
+function normalizeUserKey(value) {
+  return String(value || "").trim().toLowerCase();
 }

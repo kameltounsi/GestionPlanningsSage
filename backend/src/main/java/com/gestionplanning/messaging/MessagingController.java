@@ -10,6 +10,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -24,16 +26,18 @@ public class MessagingController {
     private final AppUserRepository userRepository;
     private final ChatMessageRepository messageRepository;
     private final ChatGroupRepository groupRepository;
+    private final ChatGroupReadStateRepository groupReadStateRepository;
     private final UserPresenceRepository presenceRepository;
     private final CloudinaryStorageService storageService;
     private final RealtimeUpdateService realtimeUpdateService;
 
     public MessagingController(AppUserRepository userRepository, ChatMessageRepository messageRepository,
-                               ChatGroupRepository groupRepository, UserPresenceRepository presenceRepository,
+                               ChatGroupRepository groupRepository, ChatGroupReadStateRepository groupReadStateRepository, UserPresenceRepository presenceRepository,
                                CloudinaryStorageService storageService, RealtimeUpdateService realtimeUpdateService) {
         this.userRepository = userRepository;
         this.messageRepository = messageRepository;
         this.groupRepository = groupRepository;
+        this.groupReadStateRepository = groupReadStateRepository;
         this.presenceRepository = presenceRepository;
         this.storageService = storageService;
         this.realtimeUpdateService = realtimeUpdateService;
@@ -47,14 +51,24 @@ public class MessagingController {
         userRepository.findAll().stream()
                 .filter(AppUser::isEnabled)
                 .filter(user -> !user.getId().equals(currentUser.getId()))
-                .map(user -> ChatConversationDto.user(user, onlinePresence(user), latestByPeer.get(user.getId())))
+                .map(user -> ChatConversationDto.user(user, onlinePresence(user), latestByPeer.get(user.getId()), directUnreadCount(currentUser, user)))
                 .forEach(conversations::add);
         groupRepository.findForUser(currentUser.getId()).stream()
-                .map(group -> ChatConversationDto.group(group, messageRepository.recentForGroup(group.getId()).stream().findFirst().orElse(null)))
+                .map(group -> ChatConversationDto.group(group, messageRepository.recentForGroup(group.getId()).stream().findFirst().orElse(null), groupUnreadCount(group, currentUser)))
                 .forEach(conversations::add);
-        conversations.sort(Comparator
-                .comparing(ChatConversationDto::sortDate, Comparator.nullsLast(Comparator.reverseOrder()))
-                .thenComparing(dto -> dto.getName() == null ? "" : dto.getName(), String.CASE_INSENSITIVE_ORDER));
+        conversations.sort((first, second) -> {
+            LocalDateTime firstDate = first.sortDate();
+            LocalDateTime secondDate = second.sortDate();
+            if (firstDate != null && secondDate != null) {
+                int result = secondDate.compareTo(firstDate);
+                if (result != 0) return result;
+            } else if (firstDate != null) {
+                return -1;
+            } else if (secondDate != null) {
+                return 1;
+            }
+            return String.valueOf(first.getName()).compareToIgnoreCase(String.valueOf(second.getName()));
+        });
         return conversations;
     }
 
@@ -93,9 +107,12 @@ public class MessagingController {
     public ResponseEntity<List<ChatMessageDto>> groupMessages(@PathVariable Long groupId, @RequestAttribute("authenticatedUser") AppUser currentUser) {
         return groupRepository.findById(groupId)
                 .filter(group -> isGroupMember(group, currentUser))
-                .map(group -> ResponseEntity.ok(messageRepository.groupConversation(group.getId()).stream()
-                        .map(ChatMessageDto::from)
-                        .collect(Collectors.toList())))
+                .map(group -> {
+                    markGroupRead(group, currentUser);
+                    return ResponseEntity.ok(messageRepository.groupConversation(group.getId()).stream()
+                            .map(ChatMessageDto::from)
+                            .collect(Collectors.toList()));
+                })
                 .orElse(ResponseEntity.notFound().build());
     }
 
@@ -122,7 +139,7 @@ public class MessagingController {
         group.setMembers(members);
         ChatGroup saved = groupRepository.save(group);
         realtimeUpdateService.publishChatGroupMessage(null, currentUser.getId(), saved.getId());
-        return ResponseEntity.ok(ChatConversationDto.group(saved, null));
+        return ResponseEntity.ok(ChatConversationDto.group(saved, null, 0));
     }
 
     @PostMapping(value = "/messages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -146,7 +163,7 @@ public class MessagingController {
                     }
                     ChatMessage saved = messageRepository.save(message);
                     touch(currentUser, true);
-                    realtimeUpdateService.publishChatMessage(saved.getId(), currentUser.getId(), recipient.getId());
+                    afterCommit(() -> realtimeUpdateService.publishChatMessage(saved.getId(), currentUser.getId(), recipient.getId()));
                     return ResponseEntity.ok(ChatMessageDto.from(saved));
                 })
                 .orElse(ResponseEntity.notFound().build());
@@ -174,10 +191,32 @@ public class MessagingController {
                     }
                     ChatMessage saved = messageRepository.save(message);
                     touch(currentUser, true);
-                    realtimeUpdateService.publishChatGroupMessage(saved.getId(), currentUser.getId(), group.getId());
+                    afterCommit(() -> realtimeUpdateService.publishChatGroupMessage(saved.getId(), currentUser.getId(), group.getId()));
                     return ResponseEntity.ok(ChatMessageDto.from(saved));
                 })
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/typing")
+    public ResponseEntity<Void> typing(@RequestBody TypingRequest request, @RequestAttribute("authenticatedUser") AppUser currentUser) {
+        if (request == null || request.getTargetId() == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        String targetType = request.getTargetType() == null ? "user" : request.getTargetType();
+        if ("group".equalsIgnoreCase(targetType)) {
+            Optional<ChatGroup> group = groupRepository.findById(request.getTargetId());
+            if (!group.isPresent() || !isGroupMember(group.get(), currentUser)) {
+                return ResponseEntity.notFound().build();
+            }
+            realtimeUpdateService.publishChatTyping(currentUser.getId(), currentUser.getFullName(), "group", group.get().getId(), request.isActive());
+            return ResponseEntity.noContent().build();
+        }
+        Optional<AppUser> recipient = userRepository.findById(request.getTargetId()).filter(AppUser::isEnabled);
+        if (!recipient.isPresent()) {
+            return ResponseEntity.notFound().build();
+        }
+        realtimeUpdateService.publishChatTyping(currentUser.getId(), currentUser.getFullName(), "user", recipient.get().getId(), request.isActive());
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/presence/heartbeat")
@@ -249,6 +288,48 @@ public class MessagingController {
         return group.getMembers().stream().anyMatch(member -> member.getId().equals(user.getId()));
     }
 
+    private void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
+    }
+
+    private long directUnreadCount(AppUser currentUser, AppUser peer) {
+        return messageRepository.conversation(currentUser.getId(), peer.getId()).stream()
+                .filter(message -> message.getRecipient() != null && message.getRecipient().getId().equals(currentUser.getId()))
+                .filter(message -> message.getReadAt() == null)
+                .count();
+    }
+
+    private long groupUnreadCount(ChatGroup group, AppUser user) {
+        Optional<ChatGroupReadState> state = groupReadStateRepository.findByGroupAndUser(group, user);
+        return state.map(readState -> {
+            LocalDateTime lastReadAt = readState.getLastReadAt();
+            if (lastReadAt == null) {
+                return messageRepository.countByGroup_IdAndSender_IdNot(group.getId(), user.getId());
+            }
+            return messageRepository.countByGroup_IdAndSender_IdNotAndCreatedAtAfter(group.getId(), user.getId(), lastReadAt);
+        }).orElseGet(() -> messageRepository.countByGroup_IdAndSender_IdNot(group.getId(), user.getId()));
+    }
+
+    private void markGroupRead(ChatGroup group, AppUser user) {
+        ChatGroupReadState state = groupReadStateRepository.findByGroupAndUser(group, user).orElseGet(() -> {
+            ChatGroupReadState item = new ChatGroupReadState();
+            item.setGroup(group);
+            item.setUser(user);
+            return item;
+        });
+        state.setLastReadAt(LocalDateTime.now());
+        groupReadStateRepository.save(state);
+    }
+
     private void fillAttachment(ChatMessage message, StoredAsset asset) {
         message.setAttachmentFileName(asset.getFileName());
         message.setAttachmentContentType(asset.getContentType());
@@ -306,10 +387,11 @@ public class MessagingController {
         private LocalDateTime lastSeenAt;
         private String projectName;
         private int memberCount;
+        private long unreadCount;
         private List<Long> memberIds = new ArrayList<>();
         private ChatMessageDto latestMessage;
 
-        public static ChatConversationDto user(AppUser user, UserPresence presence, ChatMessage latestMessage) {
+        public static ChatConversationDto user(AppUser user, UserPresence presence, ChatMessage latestMessage, long unreadCount) {
             ChatConversationDto dto = new ChatConversationDto();
             dto.id = user.getId();
             dto.type = "user";
@@ -320,17 +402,19 @@ public class MessagingController {
             dto.online = presence != null && presence.isOnline();
             dto.lastSeenAt = presence == null ? null : presence.getLastSeenAt();
             dto.memberCount = 1;
+            dto.unreadCount = unreadCount;
             dto.latestMessage = latestMessage == null ? null : ChatMessageDto.from(latestMessage);
             return dto;
         }
 
-        public static ChatConversationDto group(ChatGroup group, ChatMessage latestMessage) {
+        public static ChatConversationDto group(ChatGroup group, ChatMessage latestMessage, long unreadCount) {
             ChatConversationDto dto = new ChatConversationDto();
             dto.id = group.getId();
             dto.type = "group";
             dto.name = group.getName();
             dto.projectName = group.getProjectName();
             dto.memberCount = group.getMembers().size();
+            dto.unreadCount = unreadCount;
             dto.memberIds = group.getMembers().stream().map(AppUser::getId).collect(Collectors.toList());
             dto.latestMessage = latestMessage == null ? null : ChatMessageDto.from(latestMessage);
             return dto;
@@ -351,6 +435,7 @@ public class MessagingController {
         public LocalDateTime getLastSeenAt() { return lastSeenAt; }
         public String getProjectName() { return projectName; }
         public int getMemberCount() { return memberCount; }
+        public long getUnreadCount() { return unreadCount; }
         public List<Long> getMemberIds() { return memberIds; }
         public ChatMessageDto getLatestMessage() { return latestMessage; }
     }
@@ -417,5 +502,18 @@ public class MessagingController {
         public void setProjectName(String projectName) { this.projectName = projectName; }
         public List<Long> getMemberIds() { return memberIds; }
         public void setMemberIds(List<Long> memberIds) { this.memberIds = memberIds; }
+    }
+
+    public static class TypingRequest {
+        private String targetType;
+        private Long targetId;
+        private boolean active = true;
+
+        public String getTargetType() { return targetType; }
+        public void setTargetType(String targetType) { this.targetType = targetType; }
+        public Long getTargetId() { return targetId; }
+        public void setTargetId(Long targetId) { this.targetId = targetId; }
+        public boolean isActive() { return active; }
+        public void setActive(boolean active) { this.active = active; }
     }
 }

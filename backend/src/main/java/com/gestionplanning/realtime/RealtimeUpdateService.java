@@ -54,6 +54,16 @@ public class RealtimeUpdateService {
         broadcast("chat-presence", payload);
     }
 
+    public void publishChatTyping(Long senderId, String senderName, String targetType, Long targetId, boolean active) {
+        java.util.Map<String, String> payload = new java.util.LinkedHashMap<>();
+        payload.put("senderId", senderId == null ? "" : String.valueOf(senderId));
+        payload.put("senderName", senderName == null ? "" : senderName);
+        payload.put("targetType", targetType == null ? "" : targetType);
+        payload.put("targetId", targetId == null ? "" : String.valueOf(targetId));
+        payload.put("active", String.valueOf(active));
+        broadcast("chat-typing", payload);
+    }
+
     private Map<String, String> payload(String path) {
         return java.util.Collections.singletonMap("path", path == null ? "" : path);
     }

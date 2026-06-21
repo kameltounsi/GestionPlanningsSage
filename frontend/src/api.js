@@ -189,6 +189,13 @@ export function createChatGroup(name, memberIds, projectName = "") {
   });
 }
 
+export function chatTyping(targetType, targetId, active = true) {
+  return request("/chat/typing", {
+    method: "POST",
+    body: JSON.stringify({ targetType, targetId, active })
+  });
+}
+
 export function chatHeartbeat() {
   return request("/chat/presence/heartbeat", { method: "POST" });
 }

@@ -48,6 +48,7 @@ import {
   chatAttachmentUrl,
   chatHeartbeat,
   chatOffline,
+  chatTyping,
   addActionSuggestionToDefaults,
   acknowledgeActionDeadlineAlerts,
   archiveEcrRequest,
@@ -263,6 +264,31 @@ function playActionSuggestionSound() {
       fallback.volume = 0.8;
       fallback.play().catch(() => {});
     });
+  } catch {
+  }
+}
+
+let typingAudio = null;
+
+function playTypingSound() {
+  try {
+    if (!typingAudio) {
+      typingAudio = new Audio("/typing.mp3");
+      typingAudio.volume = 0.45;
+      typingAudio.loop = true;
+    }
+    if (!typingAudio.paused) return;
+    typingAudio.currentTime = 0;
+    typingAudio.play().catch(() => {});
+  } catch {
+  }
+}
+
+function stopTypingSound() {
+  try {
+    if (!typingAudio) return;
+    typingAudio.pause();
+    typingAudio.currentTime = 0;
   } catch {
   }
 }
@@ -1058,6 +1084,9 @@ function App() {
   const [chatGroupName, setChatGroupName] = useState("");
   const [chatGroupProjectName, setChatGroupProjectName] = useState("");
   const [chatGroupMemberIds, setChatGroupMemberIds] = useState([]);
+  const [quickChatOpen, setQuickChatOpen] = useState(false);
+  const [chatNotificationCount, setChatNotificationCount] = useState(0);
+  const [chatTypingNotice, setChatTypingNotice] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
   const [auditQuery, setAuditQuery] = useState("");
   const [auditActionFilter, setAuditActionFilter] = useState("");
@@ -1098,6 +1127,9 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const chatFileInputRef = useRef(null);
+  const chatTypingSentAt = useRef(0);
+  const chatTypingStopTimer = useRef(null);
+  const chatTypingClearTimer = useRef(null);
   const realtimeRefreshTimer = useRef(null);
   const selectedDetailsRequestId = useRef(0);
 
@@ -1337,6 +1369,7 @@ function App() {
       .then((items) => {
         const nextUsers = Array.isArray(items) ? items : [];
         setChatUsers(nextUsers);
+        setChatNotificationCount(totalUnreadConversations(nextUsers));
         setSelectedChatUserId((currentId) => currentId ?? (nextUsers[0] ? chatTargetKey(nextUsers[0]) : null));
         return nextUsers;
       })
@@ -1374,7 +1407,7 @@ function App() {
 
   function handleSelectChatUser(targetKey) {
     setSelectedChatUserId(targetKey);
-    loadChatMessages(targetKey);
+    loadChatMessages(targetKey).then(() => loadChatUsers());
   }
 
   function handleChatFileChange(event) {
@@ -1389,6 +1422,21 @@ function App() {
     }
   }
 
+  function handleChatDraftChange(value) {
+    setChatDraft(value);
+    const target = parseChatTarget(selectedChatUserId);
+    const now = Date.now();
+    window.clearTimeout(chatTypingStopTimer.current);
+    if (!target.id) return;
+    if (now - chatTypingSentAt.current >= 1800) {
+      chatTypingSentAt.current = now;
+      chatTyping(target.type, target.id, true).catch(() => {});
+    }
+    chatTypingStopTimer.current = window.setTimeout(() => {
+      chatTyping(target.type, target.id, false).catch(() => {});
+    }, 2200);
+  }
+
   function handleSendChatMessage(event) {
     event.preventDefault();
     if (!selectedChatUserId || chatSending) return;
@@ -1398,6 +1446,8 @@ function App() {
     }
     setChatSending(true);
     const target = parseChatTarget(selectedChatUserId);
+    window.clearTimeout(chatTypingStopTimer.current);
+    chatTyping(target.type, target.id, false).catch(() => {});
     const request = target.type === "group"
       ? sendChatGroupMessage(target.id, chatDraft, chatFile)
       : sendChatMessage(target.id, chatDraft, chatFile);
@@ -1416,6 +1466,14 @@ function App() {
     setChatGroupMemberIds((ids) =>
       ids.includes(userId) ? ids.filter((id) => id !== userId) : [...ids, userId]
     );
+  }
+
+  function handleChatGroupProjectChange(projectName) {
+    setChatGroupProjectName(projectName);
+    const project = projects.find((item) => item.name === projectName);
+    const memberIds = projectTeamUserIds(project?.projectTeam, users, currentUser);
+    setChatGroupMemberIds(memberIds);
+    setChatGroupName((name) => name.trim() ? name : projectName);
   }
 
   function handleCreateChatGroup(event) {
@@ -1443,6 +1501,29 @@ function App() {
       })
       .catch((message) => errorAlert(message.message || message))
       .finally(() => setChatSending(false));
+  }
+
+  function notifyIncomingChat(title = "Nouveau message") {
+    if (!quickChatOpen && page !== "messages") {
+      setChatNotificationCount((count) => count + 1);
+    }
+    playActionSuggestionSound();
+    Swal.fire({
+      toast: true,
+      position: "top-end",
+      icon: "info",
+      title,
+      text: "Ouvrez la messagerie rapide pour repondre.",
+      showConfirmButton: false,
+      timer: 4500,
+      timerProgressBar: true
+    });
+  }
+
+  function openQuickChat() {
+    setQuickChatOpen(true);
+    setChatNotificationCount(0);
+    refreshChatData();
   }
 
   function loadInitialData() {
@@ -1529,10 +1610,12 @@ function App() {
       if (!concernsCurrentUser) return;
       loadChatUsers();
       if (activePeerId && (senderId === activePeerId || recipientId === activePeerId)) {
-        loadChatMessages(activePeerId);
+        loadChatMessages(selectedChatUserId);
       }
+      setChatTypingNotice(null);
+      stopTypingSound();
       if (recipientId === currentId && senderId !== currentId) {
-        playActionSuggestionSound();
+        notifyIncomingChat("Nouveau message recu");
       }
     };
     const handleChatPresence = () => {
@@ -1546,9 +1629,39 @@ function App() {
       if (activeTarget.type === "group" && Number(activeTarget.id) === groupId) {
         loadChatMessages(selectedChatUserId);
       }
+      setChatTypingNotice(null);
+      stopTypingSound();
       if (senderId !== Number(currentUser?.id)) {
-        playActionSuggestionSound();
+        notifyIncomingChat("Nouveau message groupe");
       }
+    };
+    const handleChatTyping = (payload = {}) => {
+      const senderId = Number(payload.senderId);
+      if (!senderId || senderId === Number(currentUser?.id)) return;
+      const targetType = payload.targetType || "user";
+      const targetId = Number(payload.targetId);
+      const active = String(payload.active ?? "true") === "true";
+      const activeTarget = parseChatTarget(selectedChatUserId);
+      const matchesActiveDirect = targetType === "user"
+        && targetId === Number(currentUser?.id)
+        && activeTarget.type === "user"
+        && activeTarget.id === senderId;
+      const matchesActiveGroup = targetType === "group"
+        && activeTarget.type === "group"
+        && Number(activeTarget.id) === targetId;
+      if (!matchesActiveDirect && !matchesActiveGroup) return;
+      window.clearTimeout(chatTypingClearTimer.current);
+      if (!active) {
+        setChatTypingNotice(null);
+        stopTypingSound();
+        return;
+      }
+      setChatTypingNotice(`${payload.senderName || "Quelqu'un"} est en train d'ecrire...`);
+      playTypingSound();
+      chatTypingClearTimer.current = window.setTimeout(() => {
+        setChatTypingNotice(null);
+        stopTypingSound();
+      }, 3500);
     };
     const startSseFallback = () => {
       if (disposed) return;
@@ -1575,6 +1688,15 @@ function App() {
         }
         handleChatGroupMessage(payload);
       });
+      events.addEventListener("chat-typing", (event) => {
+        let payload = {};
+        try {
+          payload = JSON.parse(event.data || "{}");
+        } catch {
+          payload = {};
+        }
+        handleChatTyping(payload);
+      });
       events.onerror = () => {};
     };
 
@@ -1591,6 +1713,7 @@ function App() {
         if (envelope.event === "chat-message") handleChatMessage(envelope.data || {});
         if (envelope.event === "chat-presence") handleChatPresence();
         if (envelope.event === "chat-group-message") handleChatGroupMessage(envelope.data || {});
+        if (envelope.event === "chat-typing") handleChatTyping(envelope.data || {});
       };
       socket.onerror = startSseFallback;
       socket.onclose = () => {
@@ -1602,6 +1725,9 @@ function App() {
 
     return () => {
       disposed = true;
+      window.clearTimeout(chatTypingClearTimer.current);
+      window.clearTimeout(chatTypingStopTimer.current);
+      stopTypingSound();
       window.clearTimeout(realtimeRefreshTimer.current);
       if (events) events.close();
       if (socket) socket.close();
@@ -3381,14 +3507,17 @@ function App() {
             groupName={chatGroupName}
             groupProjectName={chatGroupProjectName}
             messages={chatMessages}
+            projects={projects}
             selectedUserId={selectedChatUserId}
             sending={chatSending}
+            typingNotice={chatTypingNotice}
             users={chatUsers}
             onClearFile={clearChatFile}
             onCreateGroup={handleCreateChatGroup}
-            onDraftChange={setChatDraft}
+            onDraftChange={handleChatDraftChange}
             onFileChange={handleChatFileChange}
             onGroupMemberToggle={handleToggleChatGroupMember}
+            onGroupProjectChange={handleChatGroupProjectChange}
             onRefresh={() => refreshChatData()}
             onSelectUser={handleSelectChatUser}
             onSend={handleSendChatMessage}
@@ -3547,6 +3676,28 @@ function App() {
         )}
       </section>
 
+      <ChatFloatingButton count={chatNotificationCount} onClick={openQuickChat} />
+
+      {quickChatOpen && (
+        <QuickChatPanel
+          currentUser={currentUser}
+          draft={chatDraft}
+          file={chatFile}
+          fileInputRef={chatFileInputRef}
+          messages={chatMessages}
+          selectedUser={chatUsers.find((user) => chatTargetKey(user) === selectedChatUserId)}
+          sending={chatSending}
+          typingNotice={chatTypingNotice}
+          users={chatUsers}
+          onClearFile={clearChatFile}
+          onClose={() => setQuickChatOpen(false)}
+          onDraftChange={handleChatDraftChange}
+          onFileChange={handleChatFileChange}
+          onSelectUser={handleSelectChatUser}
+          onSend={handleSendChatMessage}
+        />
+      )}
+
       {showCreateForm && page === "modifications" && (
         <CreateModificationDialog
           clientOptions={clientOptions}
@@ -3590,6 +3741,150 @@ function App() {
   );
 }
 
+function ChatFloatingButton({ count = 0, onClick }) {
+  return (
+    <button className="chat-floating-button" type="button" title="Messagerie rapide" onClick={onClick}>
+      <Pencil size={26} />
+      {count > 0 && <span>{count > 9 ? "9+" : count}</span>}
+    </button>
+  );
+}
+
+function QuickChatPanel({
+  currentUser,
+  draft,
+  file,
+  fileInputRef,
+  messages = [],
+  selectedUser,
+  sending,
+  typingNotice,
+  users = [],
+  onClearFile,
+  onClose,
+  onDraftChange,
+  onFileChange,
+  onSelectUser,
+  onSend
+}) {
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [messageSearch, setMessageSearch] = useState("");
+  const messagesEndRef = useRef(null);
+  const visibleMessages = filterChatMessages(messages, messageSearch);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [messages, selectedUser]);
+
+  function insertEmoji(emoji) {
+    onDraftChange(`${draft || ""}${emoji}`);
+    setEmojiPickerOpen(false);
+  }
+
+  return (
+    <aside className="quick-chat-panel" aria-label="Messagerie rapide">
+      <header className="quick-chat-header">
+        <div>
+          <strong>Messagerie</strong>
+          <span>{selectedUser ? chatUserName(selectedUser) : "Choisissez une discussion"}</span>
+        </div>
+        <button className="icon-button" type="button" title="Fermer" onClick={onClose}>
+          <X size={18} />
+        </button>
+      </header>
+      <div className="quick-chat-body">
+        <div className="quick-chat-users">
+          {users.map((user) => (
+            <button
+              className={selectedUser && chatTargetKey(user) === chatTargetKey(selectedUser) ? "quick-chat-user active" : "quick-chat-user"}
+              key={chatTargetKey(user)}
+              type="button"
+              onClick={() => onSelectUser(chatTargetKey(user))}
+              title={chatUserName(user)}
+            >
+              <UserAvatar user={user} />
+              {chatUnreadCount(user) > 0 && <span className="quick-chat-unread">{chatUnreadCount(user) > 9 ? "9+" : chatUnreadCount(user)}</span>}
+            </button>
+          ))}
+        </div>
+        <section className="quick-chat-thread">
+          {!selectedUser && (
+            <EmptyState title="Aucune discussion" text="Selectionnez un contact ou un groupe." compact />
+          )}
+          {selectedUser && (
+            <>
+              <div className="quick-chat-messages">
+                {messageSearch && visibleMessages.length === 0 && (
+                  <EmptyState title="Aucun resultat" text="Aucun message ne correspond a la recherche." compact />
+                )}
+                {visibleMessages.map((message) => {
+                  const own = isOwnChatMessage(message, currentUser);
+                  const author = own ? currentUser : { fullName: message.senderName };
+                  return (
+                    <article className={own ? "chat-message own" : "chat-message"} key={message.id}>
+                      {!own && <UserAvatar user={author} small />}
+                      <div className="chat-bubble">
+                        {!own && <strong>{message.senderName}</strong>}
+                        {message.content && <p>{message.content}</p>}
+                        {message.attachmentFileName && <ChatAttachment message={message} />}
+                        <time dateTime={message.createdAt}>{chatMessageTime(message.createdAt)}</time>
+                      </div>
+                      {own && <UserAvatar user={author} small />}
+                    </article>
+                  );
+                })}
+                <span ref={messagesEndRef} />
+              </div>
+              {typingNotice && <div className="chat-typing-notice">{typingNotice}</div>}
+              <form className="quick-chat-composer" onSubmit={onSend}>
+                <input
+                  className="chat-message-search"
+                  value={messageSearch}
+                  placeholder="Rechercher dans la discussion..."
+                  onChange={(event) => setMessageSearch(event.target.value)}
+                />
+                <textarea value={draft} placeholder="Message..." rows={2} onChange={(event) => onDraftChange(event.target.value)} />
+                <div className="chat-composer-actions">
+                  <div className="chat-emoji-area">
+                    <button className="icon-button" type="button" title="Ajouter un emoji" onClick={() => setEmojiPickerOpen((open) => !open)}>
+                      <Smile size={18} />
+                    </button>
+                    {emojiPickerOpen && (
+                      <div className="chat-emoji-picker" role="menu" aria-label="Palette emojis">
+                        {chatEmojiPalette.map((emoji) => (
+                          <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}>
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <label className="icon-button chat-file-button" title="Joindre un fichier">
+                    <Paperclip size={18} />
+                    <input ref={fileInputRef} type="file" onChange={onFileChange} />
+                  </label>
+                  {file && (
+                    <span className="chat-file-chip">
+                      <Paperclip size={14} />
+                      {file.name}
+                      <button type="button" title="Retirer le fichier" onClick={onClearFile}>
+                        <X size={14} />
+                      </button>
+                    </span>
+                  )}
+                  <button className="primary-action chat-send-button" type="submit" disabled={sending || (!draft.trim() && !file)}>
+                    <Send size={16} />
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
+        </section>
+      </div>
+    </aside>
+  );
+}
+
 function MessagingPage({
   currentUser,
   draft,
@@ -3600,14 +3895,17 @@ function MessagingPage({
   groupName,
   groupProjectName,
   messages = [],
+  projects = [],
   selectedUserId,
   sending,
+  typingNotice,
   users = [],
   onClearFile,
   onCreateGroup,
   onDraftChange,
   onFileChange,
   onGroupMemberToggle,
+  onGroupProjectChange,
   onRefresh,
   onSelectUser,
   onSend,
@@ -3616,14 +3914,21 @@ function MessagingPage({
   setGroupProjectName
 }) {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [messageSearch, setMessageSearch] = useState("");
+  const messagesEndRef = useRef(null);
   const selectedUser = users.find((user) => chatTargetKey(user) === selectedUserId);
   const selectableUsers = users.filter((user) => (user.type || "user") === "user");
   const onlineCount = users.filter((user) => user.online).length;
+  const visibleMessages = filterChatMessages(messages, messageSearch);
 
   function insertEmoji(emoji) {
     onDraftChange(`${draft || ""}${emoji}`);
     setEmojiPickerOpen(false);
   }
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [messages, selectedUserId]);
 
   return (
     <section className="page-content messaging-page">
@@ -3655,11 +3960,17 @@ function MessagingPage({
                   placeholder="Nom du groupe, ex: Projet J4U"
                   onChange={(event) => setGroupName(event.target.value)}
                 />
-                <input
-                  value={groupProjectName}
-                  placeholder="Projet associe (optionnel)"
-                  onChange={(event) => setGroupProjectName(event.target.value)}
-                />
+                <select value={groupProjectName} onChange={(event) => onGroupProjectChange(event.target.value)}>
+                  <option value="">Choisir un projet</option>
+                  {projects.map((project) => (
+                    <option key={project.name} value={project.name}>{project.name}</option>
+                  ))}
+                </select>
+                {groupProjectName && (
+                  <p className="chat-group-hint">
+                    Membres par defaut depuis l'equipe projet. Vous pouvez ajuster la selection.
+                  </p>
+                )}
                 <div className="chat-group-members">
                   {selectableUsers.map((user) => (
                     <label key={user.id}>
@@ -3701,6 +4012,7 @@ function MessagingPage({
                 {(user.type || "user") === "group"
                   ? <span className="group-badge">{user.memberCount || 0}</span>
                   : <span className={user.online ? "presence-dot online" : "presence-dot"} title={presenceLabel(user)} />}
+                {chatUnreadCount(user) > 0 && <span className="chat-unread-badge">{chatUnreadCount(user) > 99 ? "99+" : chatUnreadCount(user)}</span>}
               </button>
             ))}
           </div>
@@ -3722,6 +4034,12 @@ function MessagingPage({
                   <h2>{chatUserName(selectedUser)}</h2>
                   <span>{presenceLabel(selectedUser)}</span>
                 </div>
+                <input
+                  className="chat-message-search"
+                  value={messageSearch}
+                  placeholder="Rechercher..."
+                  onChange={(event) => setMessageSearch(event.target.value)}
+                />
               </header>
 
               <div className="chat-history">
@@ -3732,7 +4050,15 @@ function MessagingPage({
                     text="Demarrez la discussion avec un message ou une piece jointe."
                   />
                 )}
-                {messages.map((message) => {
+                {messageSearch && visibleMessages.length === 0 && (
+                  <EmptyState
+                    icon={Search}
+                    title="Aucun resultat"
+                    text="Aucun message ne correspond a votre recherche."
+                    compact
+                  />
+                )}
+                {visibleMessages.map((message) => {
                   const own = isOwnChatMessage(message, currentUser);
                   const author = own ? currentUser : { fullName: message.senderName };
                   return (
@@ -3750,7 +4076,9 @@ function MessagingPage({
                   </article>
                 );
                 })}
+                <span ref={messagesEndRef} />
               </div>
+              {typingNotice && <div className="chat-typing-notice">{typingNotice}</div>}
 
               <form className="chat-composer" onSubmit={onSend}>
                 <textarea
@@ -3854,6 +4182,14 @@ function chatTargetKey(target) {
   return `${target.type || "user"}:${target.id}`;
 }
 
+function chatUnreadCount(conversation) {
+  return Math.max(0, Number(conversation?.unreadCount) || 0);
+}
+
+function totalUnreadConversations(conversations = []) {
+  return conversations.reduce((total, conversation) => total + chatUnreadCount(conversation), 0);
+}
+
 function parseChatTarget(value) {
   if (!value) return { type: "user", id: null };
   const text = String(value);
@@ -3867,6 +4203,19 @@ function chatPreview(message, currentUserId) {
   const prefix = Number(message.senderId) === Number(currentUserId) || message.own ? "Vous : " : "";
   const text = message.content || message.attachmentFileName || "Piece jointe";
   return `${prefix}${text}`;
+}
+
+function filterChatMessages(messages = [], query = "") {
+  const normalized = normalizeSearchText(query);
+  if (!normalized) return messages;
+  return messages.filter((message) => normalizeSearchText([
+    message.senderName,
+    message.recipientName,
+    message.groupName,
+    message.content,
+    message.attachmentFileName,
+    chatMessageTime(message.createdAt)
+  ].filter(Boolean).join(" ")).includes(normalized));
 }
 
 function chatMessageTime(value) {
@@ -5767,6 +6116,14 @@ function userDisplayRole(user) {
 
 function findUserByTeamName(userName, users) {
   return users.find((user) => [user.fullName, user.username, user.email].filter(Boolean).includes(userName));
+}
+
+function projectTeamUserIds(projectTeam, users, currentUser) {
+  return parseProjectTeam(projectTeam)
+    .map((member) => findUserByTeamName(member, users))
+    .filter(Boolean)
+    .map((user) => user.id)
+    .filter((id) => Number(id) !== Number(currentUser?.id));
 }
 
 function projectLeadTeamMembers(projectTeam, users) {

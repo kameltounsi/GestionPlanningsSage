@@ -19,5 +19,11 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
     @Query("select m from ChatMessage m where m.group.id = ?1 order by m.createdAt desc, m.id desc")
     List<ChatMessage> recentForGroup(Long groupId);
 
+    long countByRecipient_IdAndReadAtIsNullAndGroupIsNull(Long recipientId);
+
+    long countByGroup_IdAndSender_IdNotAndCreatedAtAfter(Long groupId, Long senderId, java.time.LocalDateTime createdAt);
+
+    long countByGroup_IdAndSender_IdNot(Long groupId, Long senderId);
+
     Optional<ChatMessage> findByIdAndAttachmentUrlIsNotNull(Long id);
 }

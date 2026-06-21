@@ -48,14 +48,14 @@ export function LoginPage({
       : "Nouveau mot de passe";
 
   return (
-    <main className="login-scréén">
+    <main className="login-screen">
       <section className="login-panel">
         <div className="login-brand">
           <img className="login-logo" src="/sage_logo1.png" alt="SAGE Automotive Interiors" />
           <div>
             <p className="eyebrow">Sage Plannings</p>
             <h1>{passwordResetStep === "login" ? "Connexion" : resetTitle}</h1>
-            <span>{passwordResetStep === "login" ? "Accès sécurisé a l'application ECR" : "Récupération sécurisée du compte"}</span>
+            <span>{passwordResetStep === "login" ? "Accès sécurisé à l'application ECR" : "Récupération sécurisée du compte"}</span>
           </div>
         </div>
         {error && (
@@ -76,7 +76,7 @@ export function LoginPage({
                   type="email"
                   value={form.email}
                   onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
-                  placeholder="f.chalbi@sagetunisia.com"
+                  placeholder="votre.email@sagetunisia.com"
                 />
               </span>
             </label>

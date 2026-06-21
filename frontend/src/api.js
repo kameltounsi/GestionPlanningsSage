@@ -13,6 +13,11 @@ export function planningEventsUrl(token) {
   return `${API_BASE}/events?token=${encodeURIComponent(token || "")}`;
 }
 
+export function planningWebSocketUrl(token) {
+  const base = API_BASE.replace(/^http/i, "ws").replace(/\/api$/, "");
+  return `${base}/ws/events?token=${encodeURIComponent(token || "")}`;
+}
+
 export function storeSession(session) {
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
@@ -144,6 +149,56 @@ export function logout() {
   return request("/auth/logout", {
     method: "POST"
   }).finally(clearSession);
+}
+
+export function getChatUsers() {
+  return request("/chat/users");
+}
+
+export function getChatConversations() {
+  return request("/chat/conversations");
+}
+
+export function getChatMessages(peerId) {
+  return request(`/chat/messages/${peerId}`);
+}
+
+export function getChatGroupMessages(groupId) {
+  return request(`/chat/groups/${groupId}/messages`);
+}
+
+export function sendChatMessage(recipientId, content, file) {
+  const formData = new FormData();
+  formData.append("recipientId", recipientId);
+  if (content) formData.append("content", content);
+  if (file) formData.append("file", file);
+  return multipartRequest("/chat/messages", formData);
+}
+
+export function sendChatGroupMessage(groupId, content, file) {
+  const formData = new FormData();
+  if (content) formData.append("content", content);
+  if (file) formData.append("file", file);
+  return multipartRequest(`/chat/groups/${groupId}/messages`, formData);
+}
+
+export function createChatGroup(name, memberIds, projectName = "") {
+  return request("/chat/groups", {
+    method: "POST",
+    body: JSON.stringify({ name, memberIds, projectName })
+  });
+}
+
+export function chatHeartbeat() {
+  return request("/chat/presence/heartbeat", { method: "POST" });
+}
+
+export function chatOffline() {
+  return request("/chat/presence/offline", { method: "POST" });
+}
+
+export function chatAttachmentUrl(messageId) {
+  return `${API_BASE}/chat/messages/${messageId}/attachment`;
 }
 
 export function getEcrRequests(options = {}) {

@@ -1,9 +1,10 @@
 import React from "react";
-import { ChevronLeft, ChevronRight, Database, FolderKanban, History, LayoutDashboard, ListChecks, LogOut, UserCircle, Users } from "lucide-react";
+import { ChevronLeft, ChevronRight, Database, FolderKanban, History, LayoutDashboard, ListChecks, LogOut, MessageCircle, UserCircle, Users } from "lucide-react";
 
 const navItems = [
   ["dashboard", "Tableau", LayoutDashboard],
   ["modifications", "Modifications", ListChecks],
+  ["messages", "Messagerie", MessageCircle],
   ["projects", "Actions", FolderKanban],
   ["traceability", "Tracabilite", History],
   ["preferentials", "Preferentiels", Database],
@@ -12,7 +13,7 @@ const navItems = [
 ];
 
 export function Sidebar({ canAdmin, collapsed, currentUser, page, pageHref, onCollapseToggle, onLogout, onNavigate }) {
-  const visibleItems = navItems.filter(([key]) => canAdmin || ["dashboard", "modifications", "profile"].includes(key));
+  const visibleItems = navItems.filter(([key]) => canAdmin || ["dashboard", "modifications", "messages", "profile"].includes(key));
 
   return (
       <aside className="app-nav">

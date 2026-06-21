@@ -35,6 +35,11 @@ public class ActionPlanningService {
             return;
         }
 
+        if (request.getCurrentStage() == EcrStage.CANCELLED) {
+            recalculateCancelledRequest(request, actions);
+            return;
+        }
+
         Map<String, ActionPlanningRule> rules = ruleRepository.findAll().stream()
                 .filter(rule -> request.isNewVersion() ? rule.isAppliesToNewProject() : rule.isAppliesToModification())
                 .collect(Collectors.toMap(this::ruleKey, Function.identity(), (first, second) -> second));
@@ -67,7 +72,36 @@ public class ActionPlanningService {
                     .orElse(nextPhaseStart);
         }
 
-        updateSopDate(request, actions, fallbackStart);
+        List<EcrAction> plannedActions = actions.stream()
+                .filter(action -> action.getStage() != EcrStage.CANCELLED)
+                .collect(Collectors.toList());
+        updateSopDate(request, plannedActions, fallbackStart);
+        refreshActionStatuses(actions);
+        actionRepository.saveAll(actions);
+        requestRepository.save(request);
+    }
+
+    private void recalculateCancelledRequest(EcrRequest request, List<EcrAction> actions) {
+        Map<String, ActionPlanningRule> rules = ruleRepository.findAll().stream()
+                .filter(rule -> rule.getStage() == EcrStage.CANCELLED)
+                .filter(rule -> request.isNewVersion() ? rule.isAppliesToNewProject() : rule.isAppliesToModification())
+                .collect(Collectors.toMap(this::ruleKey, Function.identity(), (first, second) -> second));
+        LocalDate actionStart = (request.getCancelledDate() == null ? LocalDate.now() : request.getCancelledDate()).plusDays(1);
+
+        List<EcrAction> cancelledActions = actions.stream()
+                .filter(action -> action.getStage() == EcrStage.CANCELLED)
+                .sorted(this::compareActionsForPlanning)
+                .collect(Collectors.toList());
+        for (EcrAction action : cancelledActions) {
+            action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
+            if (action.getValidatorRole() == null || action.getValidatorRole().trim().isEmpty()) {
+                action.setValidatorRole(action.getValidator());
+            }
+            action.setWorkDurationDays(durationFor(action, rules.get(actionKey(action))));
+            shiftActionTo(action, actionStart);
+            actionStart = action.getEndDate() == null ? actionStart : action.getEndDate().plusDays(1);
+        }
+
         refreshActionStatuses(actions);
         actionRepository.saveAll(actions);
         requestRepository.save(request);

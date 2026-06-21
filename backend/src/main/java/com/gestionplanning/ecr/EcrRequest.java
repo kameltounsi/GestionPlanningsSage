@@ -76,6 +76,8 @@ public class EcrRequest {
     private LocalDate closureDate;
     private boolean cancelledStatus;
     private LocalDate cancelledDate;
+    @Enumerated(EnumType.STRING)
+    private EcrStage cancelledFromStage;
     @Column(nullable = false, columnDefinition = "boolean default false")
     private boolean archived = false;
     private String accessProjectTimeline;
@@ -483,6 +485,14 @@ public class EcrRequest {
 
     public void setCancelledDate(LocalDate cancelledDate) {
         this.cancelledDate = cancelledDate;
+    }
+
+    public EcrStage getCancelledFromStage() {
+        return cancelledFromStage;
+    }
+
+    public void setCancelledFromStage(EcrStage cancelledFromStage) {
+        this.cancelledFromStage = cancelledFromStage;
     }
 
     public boolean isArchived() {

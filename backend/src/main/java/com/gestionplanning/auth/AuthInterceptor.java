@@ -66,6 +66,9 @@ public class AuthInterceptor implements HandlerInterceptor {
         if (HttpMethod.GET.matches(method) && "/api/events".equals(path)) {
             return true;
         }
+        if (HttpMethod.GET.matches(method) && "/ws/events".equals(path)) {
+            return true;
+        }
         if (HttpMethod.GET.matches(method) && path.matches("/api/documents/\\d+/download")) {
             return true;
         }
@@ -85,6 +88,9 @@ public class AuthInterceptor implements HandlerInterceptor {
             return true;
         }
         if (HttpMethod.GET.matches(method) && path.matches("/api/ecr-requests/\\d+/files/(before|after)/download")) {
+            return true;
+        }
+        if (HttpMethod.GET.matches(method) && path.matches("/api/chat/messages/\\d+/attachment")) {
             return true;
         }
         return HttpMethod.GET.matches(method) && path.matches("/api/actions/\\d+/evidence");

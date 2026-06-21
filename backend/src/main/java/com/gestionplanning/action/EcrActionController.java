@@ -91,7 +91,7 @@ public class EcrActionController {
             if (!accessControlService.canAccessRequest(user, request)) {
                 return ResponseEntity.status(403).<List<EcrAction>>build();
             }
-            if (!accessControlService.isAdmin(user) && stage != null && EcrStage.allowedStages(request.isNewVersion()).indexOf(stage) > EcrStage.allowedStages(request.isNewVersion()).indexOf(request.getCurrentStage())) {
+            if (!accessControlService.isAdmin(user) && !canViewStage(request, stage)) {
                 return ResponseEntity.status(403).<List<EcrAction>>build();
             }
             templateService.ensureActionsFor(request);
@@ -519,6 +519,28 @@ public class EcrActionController {
         return validationRepository.findFirstByRequest_IdAndStageOrderByRequestedAtDescIdDesc(requestId, stage)
                 .map(validation -> validation.getStatus() == PhaseValidationStatus.APPROVED)
                 .orElse(false);
+    }
+
+    private boolean canViewStage(com.gestionplanning.ecr.EcrRequest request, EcrStage stage) {
+        if (stage == null) {
+            return true;
+        }
+        if (stage == EcrStage.CANCELLED && request.getCurrentStage() != EcrStage.CANCELLED) {
+            return false;
+        }
+        if (request.getCurrentStage() == EcrStage.CANCELLED) {
+            if (stage == EcrStage.CANCELLED) {
+                return true;
+            }
+            List<EcrStage> stages = EcrStage.allowedStages(request.isNewVersion());
+            int stageIndex = stages.indexOf(stage);
+            int cancelledFromIndex = stages.indexOf(request.getCancelledFromStage());
+            return stageIndex >= 0 && cancelledFromIndex >= 0 && stageIndex <= cancelledFromIndex;
+        }
+        List<EcrStage> stages = EcrStage.allowedStages(request.isNewVersion());
+        int stageIndex = stages.indexOf(stage);
+        int currentIndex = stages.indexOf(request.getCurrentStage());
+        return stageIndex >= 0 && currentIndex >= 0 && stageIndex <= currentIndex;
     }
 
     private boolean canUpdateDuration(AppUser user, EcrAction action) {

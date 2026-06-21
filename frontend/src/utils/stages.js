@@ -3,6 +3,7 @@ import { newProjectStageColorByKey, stageColorByKey, stageDefinitions } from "..
 export function getStages(newProject) {
   return stageDefinitions
     .filter((stage) => (newProject ? stage.newProject : stage.modification))
+    .filter((stage) => stage.key !== "CANCELLED")
     .map((stage) => [stage.key, newProject ? stage.newProjectLabel : stage.modificationLabel]);
 }
 

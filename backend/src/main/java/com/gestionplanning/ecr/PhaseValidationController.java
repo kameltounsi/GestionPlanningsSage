@@ -387,6 +387,7 @@ public class PhaseValidationController {
             }
             request.setCancelledStatus(false);
             request.setCancelledDate(null);
+            request.setCancelledFromStage(null);
         }
         EcrRequest saved = requestRepository.save(request);
         if (nextStage == EcrStage.CLOSED && !wasCompleted) {

@@ -12,6 +12,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
 @Service
 public class RealtimeUpdateService {
     private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
+    private final RealtimeWebSocketHandler webSocketHandler;
+
+    public RealtimeUpdateService(RealtimeWebSocketHandler webSocketHandler) {
+        this.webSocketHandler = webSocketHandler;
+    }
 
     public SseEmitter subscribe() {
         SseEmitter emitter = new SseEmitter(0L);
@@ -27,6 +32,28 @@ public class RealtimeUpdateService {
         broadcast("planning-updated", payload(path));
     }
 
+    public void publishChatMessage(Long messageId, Long senderId, Long recipientId) {
+        java.util.Map<String, String> payload = new java.util.LinkedHashMap<>();
+        payload.put("messageId", messageId == null ? "" : String.valueOf(messageId));
+        payload.put("senderId", senderId == null ? "" : String.valueOf(senderId));
+        payload.put("recipientId", recipientId == null ? "" : String.valueOf(recipientId));
+        broadcast("chat-message", payload);
+    }
+
+    public void publishChatGroupMessage(Long messageId, Long senderId, Long groupId) {
+        java.util.Map<String, String> payload = new java.util.LinkedHashMap<>();
+        payload.put("messageId", messageId == null ? "" : String.valueOf(messageId));
+        payload.put("senderId", senderId == null ? "" : String.valueOf(senderId));
+        payload.put("groupId", groupId == null ? "" : String.valueOf(groupId));
+        broadcast("chat-group-message", payload);
+    }
+
+    public void publishChatPresence(Long userId) {
+        java.util.Map<String, String> payload = new java.util.LinkedHashMap<>();
+        payload.put("userId", userId == null ? "" : String.valueOf(userId));
+        broadcast("chat-presence", payload);
+    }
+
     private Map<String, String> payload(String path) {
         return java.util.Collections.singletonMap("path", path == null ? "" : path);
     }
@@ -35,6 +62,7 @@ public class RealtimeUpdateService {
         for (SseEmitter emitter : emitters) {
             send(emitter, eventName, payload);
         }
+        webSocketHandler.broadcast(eventName, payload);
     }
 
     private void send(SseEmitter emitter, String eventName, Object payload) {

@@ -12,14 +12,20 @@ import {
   ChevronRight,
   ChevronUp,
   ClipboardList,
+  FileSpreadsheet,
   FileText,
   FolderKanban,
   Gauge,
+  Image as ImageIcon,
   Maximize2,
+  MessageCircle,
+  Paperclip,
   Pencil,
   Plus,
   Save,
   Search,
+  Send,
+  Smile,
   Trash2,
   Upload,
   X,
@@ -29,6 +35,7 @@ import {
   createAction,
   createActionPlanningRule,
   createClientReference,
+  createChatGroup,
   createEcrRequest,
   createFinishedProductReference,
   createProductReference,
@@ -38,6 +45,9 @@ import {
   cancelEcrRequest,
   confirmPasswordReset,
   clearSession,
+  chatAttachmentUrl,
+  chatHeartbeat,
+  chatOffline,
   addActionSuggestionToDefaults,
   acknowledgeActionDeadlineAlerts,
   archiveEcrRequest,
@@ -58,6 +68,10 @@ import {
   getPendingActionDeadlineAlerts,
   getActions,
   getChecklist,
+  getChatConversations,
+  getChatGroupMessages,
+  getChatMessages,
+  getChatUsers,
   getClientReferences,
   getCurrentUser,
   getEcrRequests,
@@ -73,6 +87,7 @@ import {
   login,
   logout,
   planningEventsUrl,
+  planningWebSocketUrl,
   requestPasswordReset,
   storeSession,
   updateAction,
@@ -102,6 +117,8 @@ import {
   rejectPhaseValidation,
   requestActionValidation,
   requestPhaseValidation,
+  sendChatMessage,
+  sendChatGroupMessage,
   uploadUserPhoto,
   verifyPasswordResetCode
 } from "./api";
@@ -133,6 +150,7 @@ const pageTitles = {
   modifications: "Modifications",
   projects: "Actions standard",
   traceability: "Tracabilite",
+  messages: "Messagerie",
   preferentials: "Préférentiels",
   users: "Utilisateurs",
   profile: "Profil"
@@ -142,11 +160,21 @@ const pageRoutes = {
   modifications: "/modifications",
   projects: "/actions",
   traceability: "/tracabilite",
+  messages: "/messagerie",
   preferentials: "/preferentiels",
   users: "/utilisateurs",
   profile: "/profil"
 };
 const routePages = Object.fromEntries(Object.entries(pageRoutes).map(([key, route]) => [route, key]));
+const chatEmojiPalette = [
+  "\u{1F600}", "\u{1F601}", "\u{1F602}", "\u{1F60A}", "\u{1F60D}", "\u{1F60E}", "\u{1F609}", "\u{1F642}", "\u{1F914}", "\u{1F62E}",
+  "\u{1F622}", "\u{1F621}", "\u{1F44D}", "\u{1F44E}", "\u{1F44F}", "\u{1F64F}", "\u{1F4AA}", "\u{1F91D}", "\u{1F44C}", "\u{270C}\u{FE0F}",
+  "\u{2705}", "\u{26A0}\u{FE0F}", "\u{274C}", "\u{1F525}", "\u{1F4A1}", "\u{1F4CC}", "\u{1F3AF}", "\u{1F680}", "\u{2B50}", "\u{1F3C6}",
+  "\u{2764}\u{FE0F}", "\u{1F49A}", "\u{1F499}", "\u{1F49B}", "\u{1F49C}", "\u{1F48C}", "\u{1F4AC}", "\u{1F441}\u{FE0F}", "\u{1F4F7}", "\u{1F4CE}",
+  "\u{1F4C4}", "\u{1F4CA}", "\u{1F4C8}", "\u{1F4DD}", "\u{1F4E6}", "\u{1F4E2}", "\u{1F514}", "\u{1F512}", "\u{1F511}", "\u{1F527}",
+  "\u{1F6E0}\u{FE0F}", "\u{1F4BB}", "\u{1F4F1}", "\u{260E}\u{FE0F}", "\u{1F4E7}", "\u{1F551}", "\u{1F4C5}", "\u{1F4CD}", "\u{1F697}", "\u{2708}\u{FE0F}",
+  "\u{1F37D}\u{FE0F}", "\u{2615}", "\u{1F382}", "\u{1F389}", "\u{1F308}", "\u{2600}\u{FE0F}", "\u{1F319}", "\u{1F331}", "\u{1F33F}", "\u{1F6A9}"
+];
 
 function pageFromPath(pathname = window.location.pathname) {
   const normalized = pathname.replace(/\/+$/, "") || "/";
@@ -228,9 +256,13 @@ function warningAlert(title, message) {
 
 function playActionSuggestionSound() {
   try {
-    const audio = new Audio("/notif.mp3");
+    const audio = new Audio("/sms-plann.mp3");
     audio.volume = 0.8;
-    audio.play().catch(() => {});
+    audio.play().catch(() => {
+      const fallback = new Audio("/notif.mp3");
+      fallback.volume = 0.8;
+      fallback.play().catch(() => {});
+    });
   } catch {
   }
 }
@@ -303,11 +335,6 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function previewText(value, maxLength = 80) {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
-}
-
 function requestDisplayName(request) {
   return request?.modificationNumber || request?.client || request?.product || "Modification sans reference";
 }
@@ -368,9 +395,24 @@ function sortedProjectDossierRequests(projectRequests) {
   );
 }
 
+function stagesForRequest(request) {
+  if (!request) return getStages(false);
+  const stages = getStages(Boolean(request.newVersion));
+  if (request.currentStage !== "CANCELLED") {
+    return stages;
+  }
+  const cancelledFromStage = request.cancelledFromStage;
+  const cancelledFromIndex = stages.findIndex(([key]) => key === cancelledFromStage);
+  const visibleStages = cancelledFromIndex >= 0 ? stages.slice(0, cancelledFromIndex + 1) : [];
+  return [
+    ...visibleStages,
+    ["CANCELLED", stageLabel("CANCELLED", Boolean(request.newVersion))]
+  ];
+}
+
 function projectDossierReviewsExportHtml(projectName, projectRequests) {
   const sortedRequests = sortedProjectDossierRequests(projectRequests);
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Extraction revue dossier - ${escapeHtml(projectName)}</title><style>
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Extraction revue dossier - ${escapeHtml(projectName)}</title><style>
     body{font-family:Arial,sans-serif;color:#111827;margin:32px;line-height:1.5}
     h1{font-size:22px;margin:0 0 8px}
     .meta{color:#4b5563;font-size:13px;margin-bottom:24px}
@@ -396,9 +438,212 @@ function projectDossierReviewsExportHtml(projectName, projectRequests) {
 
 function projectDossierReviewsExportExcel(projectName, projectRequests) {
   const sortedRequests = sortedProjectDossierRequests(projectRequests);
-  return `<!doctype html><html><head><meta charset="utf-8"></head><body><table border="1">
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Export revue dossier - ${escapeHtml(projectName || "Projet")}</title><style>
+    table{border-collapse:collapse}
+    th,td{border:1px solid #111827;padding:4px 6px}
+  </style></head><body><table>
     <thead><tr><th>Projet</th><th>Modification</th><th>Client</th><th>Produit</th><th>Pilote</th><th>Phase</th><th>Revue dossier</th></tr></thead>
     <tbody>${sortedRequests.map((request) => `<tr><td>${escapeHtml(request.modificationProject || projectName || "")}</td><td>${escapeHtml(requestDisplayName(request))}</td><td>${escapeHtml(request.client || "")}</td><td>${escapeHtml(request.product || "")}</td><td>${escapeHtml(request.pilot || "")}</td><td>${escapeHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</td><td>${escapeHtml(request.dossierReview || "Revue dossier vide.")}</td></tr>`).join("")}</tbody>
+  </table></body></html>`;
+}
+
+const modificationDossierChecklist = [
+  [1, "Donnée client : DT /Presentation/drawing", "DT", "Chef de projet"],
+  [2, "Analyse Donnée client :", "Check list de drawing/Mail/OIL", "Chef de projet"],
+  [3, "ECR form/ Demande de modification", "ECR", "Chef de projet"],
+  [4, "compte rendu de réunion", "Compte de rendu", "Chef de projet"],
+  [5, "Planning de modification et de réalisation", "Planning", "Chef de projet"],
+  [6, "Avis de modification ( était devient )/ Preuve de formation/Aide Visuelle", "Avis de modif", "Chef de projet"],
+  [7, "Fiche de présence en formation de la modification : tous les concernés : production , coupe , couture , delibera", "fiche de présence", "Chef de projet"],
+  [8, "Identification des premières cartons modifiés", "Papier A4", "Qualité projet"],
+  [9, "Check list de validation digit par rapport plan client ( tv controller/plan papier )", "check list", "CAO"],
+  [10, "Validation sur obsolète en cas de besoins", "placement", "CAO/Chef de projet"],
+  [11, "Consommation de tissu par kit par coiffe par digit", "tableau par mail", "CAO"],
+  [12, "Rapport de réalisation VP/Proto/PRS", "rapport", "Chef de projet"],
+  [13, "Rapport de faisabilité", "rapport", "Chef de projet"],
+  [14, "Validation de programme Airbag/Proces spécifiques ( campo)", "fiche de validation", "Process"],
+  [15, "Paramètres process coupe/Couture à jour", "fiche de paramètres", "Process"],
+  [16, "Amdec process", "Tableau d'indice", "Chef de projet"],
+  [17, "Plan de surveillance à jour", "Tableau d'indice", "Qualité projet"],
+  [18, "Ok 1er piéce à jour remplie lors de modification ( coupe et couture )", "document", "Qualité projet"],
+  [19, "Mise à jour de plan de coiffe", "document", "CAO"],
+  [20, "Mise à jour de fiche rebut", "document", "CAO"],
+  [21, "Instruction de travail à jour", "document", "Amelioration contunie"],
+  [22, "Chemin de contrôle à jour", "document", "Qualité projet"],
+  [23, "Instructions d'emballage à jour", "document", "Logistique"],
+  [24, "Liste des références à jour", "Liste de ref", "Chef de projet"],
+  [25, "Fiche de validation Etiquettes de traçabilité", "fiche de validation", "Chef de projet"],
+  [26, "Mise à jour Gallia : Indice/DR", "imprimer gallia", "Chef de projet"],
+  [27, "Mise à jour de BOM : composant/Kit", "Gamma/Mail/Fiche de revision sur gamma", "Chef de projet"],
+  [28, "Offre de prix composant/outillages/Machine", "document", "Chef de projet"],
+  [29, "Besoin MP diffusé et suivi de commandes MP", "document", "Chef de projet"],
+  [30, "Fiche de vérification /inventaire avant modif/Obsolete", "rapport", "Chef de projet"],
+  [31, "Isolation des restes des découpes non modifiés", "Papier A4", ""],
+  [32, "Identification des découpes/composant modifiés", "Papier A4", ""],
+  [33, "Rapport de contrôle coupe et PDCA pour les cas NOK", "rapport", "Qualité"],
+  [34, "Rapport de contrôle couture et PDCA pour les cas NOK", "rapport", "Qualité"],
+  [35, "Rapport de contrôle composants et PDCA pour les cas NOK", "rapport", "Qualité"],
+  [36, "Check list de validation prototype", "rapport", "Qualité projet"],
+  [37, "Rump up & mesure de capacité", "dossier", "Chef de projet"],
+  [38, "Capabilité & R&R", "document", "Process"],
+  [39, "PPAP PSW Validé", "psw", "Qualité"],
+  [40, "Mise à jour Gallia : ajout \"AQP\" sur GAMMA System", "Gallia/Gamma", "Qualité"],
+  [41, "Demande de dérogation", "N°dérogation/Base", "Qualité"],
+  [42, "LLS", "document", "Qualité"],
+  [43, "Document de retrait /Diffusion document", "document", "Chef de projet"],
+  [44, "Mise a jours identification shop stock selon nouveau composant", "base acces", "Chef de projet"],
+  [45, "PDFA update", "PDFA", "Chef de projet"]
+];
+
+function normalizeMatchText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function actionProofLabel(action) {
+  return [
+    action?.proofDocument,
+    action?.proofDocumentFileName,
+    ...(action?.proofDocuments || []).map((document) => document?.fileName || document?.name),
+    action?.expectedEvidence,
+    action?.evidence,
+    action?.evidenceFileName,
+    ...(action?.assets || []).map((asset) => asset?.fileName || asset?.name)
+  ].filter(Boolean).join(" / ");
+}
+
+function findChecklistAction(actions, topic, document) {
+  const topicText = normalizeMatchText(topic);
+  const documentText = normalizeMatchText(document);
+  return actions.find((action) => {
+    const titleText = normalizeMatchText([action.title, action.topicRisk, action.description].filter(Boolean).join(" "));
+    const evidenceText = normalizeMatchText(actionProofLabel(action));
+    return (titleText && (titleText.includes(topicText) || topicText.includes(titleText)))
+      || (documentText && evidenceText.includes(documentText));
+  });
+}
+
+function dossierDate(value) {
+  return value ? formatDateOnly(value) : "";
+}
+
+function dossierBoolean(value) {
+  return value ? "Oui" : "Non";
+}
+
+function modificationDossierExportExcel(request, actions = []) {
+  const sortedActions = [...actions].sort((first, second) =>
+    (Number(first.id) || 0) - (Number(second.id) || 0)
+  );
+  const generatedAt = new Date().toLocaleString("fr-FR");
+  const modificationTypes = modificationTypesLabel(request);
+  const statusLabel = request.cancelledStatus
+    ? "Annulée"
+    : request.closureStatus
+      ? "Clôturée"
+      : "Active";
+  const checklistRows = modificationDossierChecklist.map(([number, topic, document, pilot]) => {
+    const action = findChecklistAction(sortedActions, topic, document);
+    const cancelled = action?.status === "CANCELLED";
+    const applicable = Boolean(action) && !cancelled;
+    return `<tr class="body-row">
+      <td class="center">${number}</td>
+      <td class="topic" colspan="2">${escapeHtml(action?.title || topic)}</td>
+      <td>${escapeHtml(actionProofLabel(action) || document)}</td>
+      <td>${escapeHtml(action?.responsible || pilot || "")}</td>
+      <td class="center">${cancelled ? "X" : ""}</td>
+      <td class="center">${applicable ? "X" : ""}</td>
+      <td class="center">${escapeHtml(dossierDate(action?.date1 || action?.startDate || action?.deadline))}</td>
+      <td class="center">${escapeHtml(dossierDate(action?.date2 || action?.endDate))}</td>
+      <td class="center">${escapeHtml(dossierDate(action?.closedDate || action?.finalizationDate))}</td>
+    </tr>`;
+  }).join("");
+  const actionRows = sortedActions.map((action, index) => `<tr class="info-row">
+    <td class="center">${index + 1}</td>
+    <td colspan="2">${escapeHtml(action.title || "-")}</td>
+    <td>${escapeHtml(stageLabel(action.stage, Boolean(request.newVersion)))}</td>
+    <td>${escapeHtml(action.responsible || "-")}</td>
+    <td>${escapeHtml(action.validatorDisplayName || action.validator || "-")}</td>
+    <td>${escapeHtml(action.criticality || "-")}</td>
+    <td>${escapeHtml(action.status || "-")}</td>
+    <td>${escapeHtml(dossierDate(action.deadline || action.endDate))}</td>
+    <td>${escapeHtml(action.comment || action.dossierReview || "")}</td>
+  </tr>`).join("");
+  const infoRows = [
+    ["N° interne Access", request.accessInternalNumber],
+    ["N° modification", request.modificationNumber],
+    ["Client", request.client],
+    ["Projet", request.modificationProject],
+    ["Produit", request.product],
+    ["Pilote", request.pilot],
+    ["Phase courante", stageLabel(request.currentStage, Boolean(request.newVersion))],
+    ["Statut", statusLabel],
+    ["Type de modification", modificationTypes],
+    ["Nouvelle version", dossierBoolean(request.newVersion)],
+    ["Changement digit", dossierBoolean(request.digitChange)],
+    ["Changement composant", dossierBoolean(request.componentChange)],
+    ["Changement process", dossierBoolean(request.processChange)],
+    ["Changement fournisseur", dossierBoolean(request.supplierChange)],
+    ["Mixabilité", mixabilityLabel(request.mixability)],
+    ["Raison de modification", request.modificationReason],
+    ["Détail de modification", request.modificationDetail],
+    ["Revue dossier", request.dossierReview],
+    ["Photo état actuel", request.beforePhotoUrl || request.beforePhoto],
+    ["Photo devient", request.afterPhotoUrl || request.afterPhoto],
+    ["Dossier technique", request.technicalFile],
+    ["Planning client", request.clientPlanning],
+    ["Planning interne", request.internalPlanning],
+    ["OIL list", request.oilList],
+    ["Rapport", request.report],
+    ["Extraction générée le", generatedAt]
+  ].map(([label, value]) => `<tr class="info-row"><td colspan="3">${escapeHtml(label)}</td><td colspan="7">${escapeHtml(value || "-")}</td></tr>`).join("");
+
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Dossier de modification - ${escapeHtml(requestDisplayName(request))}</title><style>
+    body{font-family:Calibri,Arial,sans-serif;color:#000;margin:0;background:#fff}
+    table{border-collapse:collapse;table-layout:fixed;width:1540px}
+    col.c1{width:42px} col.c2{width:230px} col.c3{width:370px} col.c4{width:360px} col.c5{width:260px}
+    col.c6{width:145px} col.c7{width:180px} col.c8{width:124px} col.c9{width:124px} col.c10{width:140px}
+    td,th{border:1px solid #000;padding:5px 7px;vertical-align:middle;font-size:12px;white-space:normal;mso-number-format:"\\@";}
+    .title{font-size:20px;font-weight:700;text-align:center;background:#d9eaf7;height:42px}
+    .doc{font-weight:700;text-align:center;background:#d9eaf7}
+    .field{font-size:14px;font-weight:700;height:30px;background:#fff}
+    .section{font-weight:700;text-align:center;background:#d9eaf7}
+    .header th{background:#bdd7ee;font-weight:700;text-align:center;height:30px}
+    .body-row td{height:30px}
+    .topic{font-weight:600}
+    .center{text-align:center}
+    .sign{height:28px}
+    .info-title td{background:#d9eaf7;font-weight:700;text-align:center;font-size:14px}
+    .info-row td{height:26px}
+    .muted{color:#404040}
+  </style></head><body><table>
+    <colgroup><col class="c1"><col class="c2"><col class="c3"><col class="c4"><col class="c5"><col class="c6"><col class="c7"><col class="c8"><col class="c9"><col class="c10"></colgroup>
+    <tr><td colspan="2" rowspan="3"></td><td class="title" colspan="5" rowspan="3">Dossier de Modification /Nouveau Produit /Process</td><td class="doc" colspan="3">SAGE-INS-ENG-32</td></tr>
+    <tr><td class="doc" colspan="3">Révision : 05</td></tr>
+    <tr><td class="doc" colspan="3">Date : 13/05/2026</td></tr>
+    <tr><td class="field" colspan="10">Client /Projet&nbsp;&nbsp;: ${escapeHtml([request.client, request.modificationProject].filter(Boolean).join(" / ") || "-")}</td></tr>
+    <tr><td class="field" colspan="10">Produit : ${escapeHtml(request.product || "-")}</td></tr>
+    <tr><td class="field" colspan="10">Modification : ${escapeHtml([request.modificationReason, request.modificationDetail].filter(Boolean).join(" - ") || "-")}</td></tr>
+    <tr><td class="field" colspan="10">N° Modif ${escapeHtml(request.modificationNumber || "-")}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Date de réception ${escapeHtml(dossierDate(request.receptionDate) || "-")}</td></tr>
+    <tr><td class="section" colspan="3">Faisabilité interne</td><td class="section" colspan="3">validation client</td><td class="section" colspan="4">PPAP Validé le</td></tr>
+    <tr><td class="center" colspan="3">${escapeHtml(dossierDate(request.feasibilityValidationDate) || (request.feasibilityValidation ? "Oui" : ""))}</td><td class="center" colspan="3">${escapeHtml(dossierDate(request.customerValidationDate) || (request.customerValidation ? "Oui" : ""))}</td><td class="center" colspan="4">${escapeHtml(dossierDate(request.ppapValidationDate) || (request.ppapValidation ? "Oui" : ""))}</td></tr>
+    <tr><td class="section" colspan="3">SOP&nbsp;&nbsp;${escapeHtml(dossierDate(request.sopDate) || "-")}</td><td class="section">Cloture le</td><td class="center" colspan="2">${escapeHtml(dossierDate(request.closureDate) || (request.closureStatus ? "Oui" : ""))}</td><td class="section">Annulé le</td><td class="center" colspan="3">${escapeHtml(dossierDate(request.cancelledDate) || (request.cancelledStatus ? "Oui" : ""))}</td></tr>
+    <tr class="header"><th>N°</th><th colspan="2">Topic</th><th>Document de preuve</th><th>Pilote</th><th>NA</th><th>Applicable</th><th>Date1</th><th>Date2</th><th>Cloture</th></tr>
+    ${checklistRows}
+    <tr><td colspan="10"></td></tr>
+    <tr><td></td><td class="section" colspan="2">Validation Pilote Processus :</td><td class="section">Engineering</td><td class="section">Quality</td><td class="section">Logistique</td><td class="section">Finance</td><td class="section">Coupe</td><td class="section">Production</td><td></td></tr>
+    <tr class="sign"><td></td><td colspan="2">Date</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr class="sign"><td></td><td colspan="2">Nom</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr class="sign"><td></td><td colspan="2">Signature</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr class="info-title"><td colspan="10">Informations modification</td></tr>
+    ${infoRows}
+    <tr class="info-title"><td colspan="10">Actions de la modification</td></tr>
+    <tr class="header"><th>N°</th><th colspan="2">Action</th><th>Phase</th><th>Responsable</th><th>Validateur</th><th>Criticité</th><th>Statut</th><th>Échéance</th><th>Commentaire</th></tr>
+    ${actionRows || `<tr class="info-row"><td colspan="10" class="center muted">Aucune action renseignée.</td></tr>`}
   </table></body></html>`;
 }
 
@@ -486,10 +731,10 @@ function actionGanttStatusLabel(action) {
 
 function actionGanttColor(action) {
   const status = actionGanttStatusClass(action);
-  if (status === "critical") return "#df7d3f";
-  if (status === "closed") return "#16a34a";
-  if (status === "late") return "#dc2626";
-  return "#9ca3af";
+  if (status === "critical") return "#c98a2c";
+  if (status === "closed") return "#5f7f13";
+  if (status === "late") return "#b42318";
+  return "#8a9275";
 }
 
 function ganttColorBarStyle(color) {
@@ -586,49 +831,52 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
         </div>`;
       }).join("")}`;
   }).join("");
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Gantt - ${escapeHtml(requestDisplayName(request))}</title><style>
+  const tickColumns = `repeat(${Math.max(1, ticks.length)}, 1fr)`;
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Gantt - ${escapeHtml(requestDisplayName(request))}</title><style>
     @page{size:A4 landscape;margin:10mm}
     *{box-sizing:border-box}
     html,body,.gantt-table,.timeline,.left,.bar,.phase-bar,.legend i{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    body{font-family:Arial,sans-serif;color:#111;margin:0;background:#f7f7f7}
-    header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:10px;background:#fff;padding:0 0 8px}
+    body{font-family:Arial,sans-serif;color:#172008;margin:0;background:#f7f9f1}
+    header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:10px;background:#fff;padding:0 0 8px;border-bottom:3px solid #5f7f13}
+    .brand-block{display:flex;align-items:flex-start;gap:14px}
+    .gantt-logo{display:block;height:54px;width:126px;object-fit:contain;border:1px solid #bfd0a3;border-radius:4px;padding:5px;background:#fff}
     h1{font-family:Georgia,serif;font-size:28px;margin:0 0 4px;text-transform:uppercase}
-    h1 span{color:#8fb5d2}
-    .meta{font-size:11px;color:#526071;line-height:1.45}
+    h1 span{color:#5f7f13}
+    .meta{font-size:11px;color:#586148;line-height:1.45}
     .summary{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-    .summary span{border:1px solid #d8dee8;padding:5px 8px;font-size:11px;background:#fff}
-    .gantt-table{background:#fff;border:1px solid #8fb5d2}
+    .summary span{border:1px solid #bfd0a3;padding:5px 8px;font-size:11px;background:#f7f9f1}
+    .gantt-table{background:#fff;border:1px solid #5f7f13}
     .gantt-row{display:grid;grid-template-columns:260px 84px 84px minmax(760px,1fr);min-height:43px;break-inside:avoid}
-    .gantt-head{min-height:34px;background:#8fb5d2;color:#fff;font-weight:700}
-    .left{border-right:1px solid #d8d8d8;border-bottom:1px solid #d8d8d8;padding:6px 8px;background:#fff}
-    .gantt-head .left{background:#8fb5d2;border-right:1px solid #dce8f1;border-bottom:0;font-size:12px}
+    .gantt-head{min-height:34px;background:#5f7f13;color:#fff;font-weight:700}
+    .left{border-right:1px solid #d9e3c8;border-bottom:1px solid #d9e3c8;padding:6px 8px;background:#fff}
+    .gantt-head .left{background:#5f7f13;border-right:1px solid #cddaaf;border-bottom:0;font-size:12px}
     .activity{font-size:12px}
     .activity strong{display:block;font-weight:700}
-    .activity span{display:block;font-size:9.5px;color:#526071;margin-top:2px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.25;overflow-wrap:anywhere}
+    .activity span{display:block;font-size:9.5px;color:#586148;margin-top:2px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.25;overflow-wrap:anywhere}
     .date{text-align:center;font-size:11px;white-space:nowrap}
-    .timeline{position:relative;border-bottom:1px solid #d8d8d8;background-color:#f4f4f4;background-image:linear-gradient(to right,#d8d8d8 1px,transparent 1px);background-size:${gridStep}% 100%}
-    .gantt-head .timeline{display:grid;grid-template-columns:repeat(${Math.max(1, ticks.length)},1fr);background:#8fb5d2;border-bottom:0}
-    .tick{border-left:1px solid #dce8f1;padding:7px 4px;text-align:center;font-size:10px;white-space:nowrap}
-    .phase-row .left{background:#e9eef3;font-weight:700}
-    .phase-row .timeline{background:#eef3f6}
-    .phase-bar{position:absolute;top:14px;height:0;border-top:12px solid #8fb5d2;background:#8fb5d2;border-radius:2px;opacity:.95}
+    .timeline{position:relative;border-bottom:1px solid #d9e3c8;background-color:#f7f9f1;background-image:linear-gradient(to right,#d9e3c8 1px,transparent 1px);background-size:${gridStep}% 100%}
+    .gantt-head .timeline{display:grid;grid-template-columns:${tickColumns};background:#5f7f13;border-bottom:0}
+    .tick{border-left:1px solid #cddaaf;padding:7px 4px;text-align:center;font-size:10px;white-space:nowrap}
+    .phase-row .left{background:#edf3df;font-weight:700}
+    .phase-row .timeline{background:#f1f6e8}
+    .phase-bar{position:absolute;top:14px;height:0;border-top:12px solid #5f7f13;background:#5f7f13;border-radius:2px;opacity:.95}
     .bar{position:absolute;top:13px;height:0;border-top:16px solid;border-radius:1px;min-width:4px}
     .bar.late{outline:2px solid #7f1d1d}
-    .bar.critical{outline:2px solid #9a3412}
-    .legend{display:grid;grid-template-columns:repeat(4,1fr);gap:8px 28px;margin-top:10px;padding:8px;background:#fff;border-top:1px solid #8fb5d2;font-size:11px}
+    .bar.critical{outline:2px solid #8a5a12}
+    .legend{display:grid;grid-template-columns:repeat(4,1fr);gap:8px 28px;margin-top:10px;padding:8px;background:#fff;border-top:1px solid #5f7f13;font-size:11px}
     .legend span{display:flex;align-items:center;gap:8px;font-weight:700}
     .legend i{display:inline-block;width:34px;height:0;border-top:14px solid}
-    .empty{padding:24px;text-align:center;color:#64748b;background:#fff}
+    .empty{padding:24px;text-align:center;color:#586148;background:#fff}
   </style></head><body>
     <header>
-      <div><h1>DIAGRAMME <span>DE GANTT</span></h1><div class="meta">${escapeHtml(requestDisplayName(request))} | Projet: ${escapeHtml(request.modificationProject || "-")} | Client: ${escapeHtml(request.client || "-")} | Produit: ${escapeHtml(request.product || "-")} | Pilote: ${escapeHtml(request.pilot || "-")}<br>Extraction: ${escapeHtml(new Date().toLocaleString("fr-FR"))} | Periode: ${escapeHtml(formatDateOnly(timelineStart))} - ${escapeHtml(formatDateOnly(timelineEnd))}</div></div>
+      <div class="brand-block"><img class="gantt-logo" src="/sage_logo1.png" alt="SAGE Automotive Interiors" /><div><h1>DIAGRAMME <span>DE GANTT</span></h1><div class="meta">${escapeHtml(requestDisplayName(request))} | Projet: ${escapeHtml(request.modificationProject || "-")} | Client: ${escapeHtml(request.client || "-")} | Produit: ${escapeHtml(request.product || "-")} | Pilote: ${escapeHtml(request.pilot || "-")}<br>Extraction: ${escapeHtml(new Date().toLocaleString("fr-FR"))} | Periode: ${escapeHtml(formatDateOnly(timelineStart))} - ${escapeHtml(formatDateOnly(timelineEnd))}</div></div></div>
       <div class="summary"><span>Actions: ${actionRows.length}</span><span>Done: ${doneCount}</span><span>En retard: ${lateCount}</span><span>Critiques: ${criticalCount}</span><span>Phase: ${escapeHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</span></div>
     </header>
     <section class="gantt-table">
       <div class="gantt-row gantt-head"><div class="left">Activites</div><div class="left">Deb</div><div class="left">Fin</div><div class="timeline">${ticks.map((tick) => `<span class="tick">${escapeHtml(tick.label)}</span>`).join("")}</div></div>
       ${actionRows.length === 0 ? `<div class="empty">Aucune action planifiee pour cette modification.</div>` : rowHtml}
     </section>
-    <div class="legend"><span><i style="${ganttColorBarStyle("#9ca3af")}"></i>Planifié / à faire</span><span><i style="${ganttColorBarStyle("#16a34a")}"></i>Done</span><span><i style="${ganttColorBarStyle("#dc2626")}"></i>En retard</span><span><i style="${ganttColorBarStyle("#df7d3f")}"></i>Critique</span></div>
+    <div class="legend"><span><i style="${ganttColorBarStyle("#8a9275")}"></i>Planifié / à faire</span><span><i style="${ganttColorBarStyle("#5f7f13")}"></i>Done</span><span><i style="${ganttColorBarStyle("#b42318")}"></i>En retard</span><span><i style="${ganttColorBarStyle("#c98a2c")}"></i>Critique</span></div>
     <script>window.onload=function(){window.print();};</script>
   </body></html>`;
 }
@@ -800,6 +1048,16 @@ function App() {
   const [planningRules, setPlanningRules] = useState([]);
   const [actionSuggestions, setActionSuggestions] = useState([]);
   const [users, setUsers] = useState([]);
+  const [chatUsers, setChatUsers] = useState([]);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [selectedChatUserId, setSelectedChatUserId] = useState(null);
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatFile, setChatFile] = useState(null);
+  const [chatSending, setChatSending] = useState(false);
+  const [chatGroupFormOpen, setChatGroupFormOpen] = useState(false);
+  const [chatGroupName, setChatGroupName] = useState("");
+  const [chatGroupProjectName, setChatGroupProjectName] = useState("");
+  const [chatGroupMemberIds, setChatGroupMemberIds] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [auditQuery, setAuditQuery] = useState("");
   const [auditActionFilter, setAuditActionFilter] = useState("");
@@ -839,15 +1097,13 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const chatFileInputRef = useRef(null);
   const realtimeRefreshTimer = useRef(null);
   const selectedDetailsRequestId = useRef(0);
 
   const selectedRequest = requests.find((request) => request.id === selectedId);
   const selectedStages = useMemo(() => {
-    if (selectedRequest?.currentStage === "CANCELLED") {
-      return [["CANCELLED", stageLabel("CANCELLED", Boolean(selectedRequest.newVersion))]];
-    }
-    return getStages(Boolean(selectedRequest?.newVersion));
+    return stagesForRequest(selectedRequest);
   }, [selectedRequest]);
   const visibleStages = useMemo(() => {
     if (!selectedRequest || isAdminUser(currentUser)) return selectedStages;
@@ -998,6 +1254,38 @@ function App() {
     return () => window.clearInterval(intervalId);
   }, [currentUser]);
 
+  useEffect(() => {
+    if (!authSession?.token || !currentUser) {
+      setChatUsers([]);
+      setChatMessages([]);
+      setSelectedChatUserId(null);
+      return undefined;
+    }
+    refreshChatData();
+    chatHeartbeat().catch(() => {});
+    const intervalId = window.setInterval(() => {
+      chatHeartbeat().catch(() => {});
+      loadChatUsers();
+    }, 60000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        chatHeartbeat().catch(() => {});
+        refreshChatData();
+      }
+    };
+    const handleBeforeUnload = () => {
+      chatOffline().catch(() => {});
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      chatOffline().catch(() => {});
+    };
+  }, [authSession?.token, currentUser?.id]);
+
   function refreshActionSuggestions(options = {}) {
     const { notify = false, openDialog = true } = options;
     if (!isAdminUser(currentUser)) return Promise.resolve([]);
@@ -1042,6 +1330,119 @@ function App() {
         return acknowledgeActionDeadlineAlerts(alerts.map((alert) => alert.id)).then(() => alerts);
       })
       .catch(() => []);
+  }
+
+  function loadChatUsers() {
+    return getChatConversations()
+      .then((items) => {
+        const nextUsers = Array.isArray(items) ? items : [];
+        setChatUsers(nextUsers);
+        setSelectedChatUserId((currentId) => currentId ?? (nextUsers[0] ? chatTargetKey(nextUsers[0]) : null));
+        return nextUsers;
+      })
+      .catch(() => {
+        setChatUsers([]);
+        return [];
+      });
+  }
+
+  function loadChatMessages(peerId = selectedChatUserId) {
+    const target = parseChatTarget(peerId);
+    if (!target.id) {
+      setChatMessages([]);
+      return Promise.resolve([]);
+    }
+    const request = target.type === "group" ? getChatGroupMessages(target.id) : getChatMessages(target.id);
+    return request
+      .then((items) => {
+        const nextMessages = Array.isArray(items) ? items : [];
+        setChatMessages(nextMessages);
+        return nextMessages;
+      })
+      .catch(() => {
+        setChatMessages([]);
+        return [];
+      });
+  }
+
+  function refreshChatData(peerId = selectedChatUserId) {
+    return Promise.all([
+      loadChatUsers(),
+      peerId ? loadChatMessages(peerId) : Promise.resolve([])
+    ]);
+  }
+
+  function handleSelectChatUser(targetKey) {
+    setSelectedChatUserId(targetKey);
+    loadChatMessages(targetKey);
+  }
+
+  function handleChatFileChange(event) {
+    const file = event.target.files?.[0] || null;
+    setChatFile(file);
+  }
+
+  function clearChatFile() {
+    setChatFile(null);
+    if (chatFileInputRef.current) {
+      chatFileInputRef.current.value = "";
+    }
+  }
+
+  function handleSendChatMessage(event) {
+    event.preventDefault();
+    if (!selectedChatUserId || chatSending) return;
+    if (!chatDraft.trim() && !chatFile) {
+      warningAlert("Message vide", "Ecrivez un message ou joignez un fichier avant l'envoi.");
+      return;
+    }
+    setChatSending(true);
+    const target = parseChatTarget(selectedChatUserId);
+    const request = target.type === "group"
+      ? sendChatGroupMessage(target.id, chatDraft, chatFile)
+      : sendChatMessage(target.id, chatDraft, chatFile);
+    request
+      .then((message) => {
+        setChatMessages((items) => [...items, message]);
+        setChatDraft("");
+        clearChatFile();
+        return loadChatUsers();
+      })
+      .catch((message) => errorAlert(message.message || message))
+      .finally(() => setChatSending(false));
+  }
+
+  function handleToggleChatGroupMember(userId) {
+    setChatGroupMemberIds((ids) =>
+      ids.includes(userId) ? ids.filter((id) => id !== userId) : [...ids, userId]
+    );
+  }
+
+  function handleCreateChatGroup(event) {
+    event.preventDefault();
+    if (!chatGroupName.trim()) {
+      warningAlert("Nom requis", "Donnez un nom au groupe de discussion.");
+      return;
+    }
+    if (chatGroupMemberIds.length === 0) {
+      warningAlert("Membres requis", "Selectionnez au moins un utilisateur pour creer le groupe.");
+      return;
+    }
+    setChatSending(true);
+    createChatGroup(chatGroupName.trim(), chatGroupMemberIds, chatGroupProjectName.trim())
+      .then((group) => {
+        setChatGroupName("");
+        setChatGroupProjectName("");
+        setChatGroupMemberIds([]);
+        setChatGroupFormOpen(false);
+        return loadChatUsers().then(() => {
+          const key = chatTargetKey(group);
+          setSelectedChatUserId(key);
+          return loadChatMessages(key);
+        });
+      })
+      .catch((message) => errorAlert(message.message || message))
+      .finally(() => setChatSending(false));
   }
 
   function loadInitialData() {
@@ -1109,17 +1510,103 @@ function App() {
 
   useEffect(() => {
     if (!authSession?.token || !currentUser) return undefined;
-    const events = new EventSource(planningEventsUrl(authSession.token));
-    events.addEventListener("planning-updated", () => {
+    let events = null;
+    let socket = null;
+    let usingSseFallback = false;
+    let disposed = false;
+
+    const handlePlanningUpdated = () => {
       window.clearTimeout(realtimeRefreshTimer.current);
       realtimeRefreshTimer.current = window.setTimeout(refreshRealtimeData, 250);
-    });
-    events.onerror = () => {};
-    return () => {
-      window.clearTimeout(realtimeRefreshTimer.current);
-      events.close();
     };
-  }, [authSession?.token, currentUser, selectedId, selectedStage, requestArchiveView, page]);
+    const handleChatMessage = (payload = {}) => {
+      const currentId = Number(currentUser?.id);
+      const senderId = Number(payload.senderId);
+      const recipientId = Number(payload.recipientId);
+      const activeTarget = parseChatTarget(selectedChatUserId);
+      const activePeerId = activeTarget.type === "user" ? Number(activeTarget.id) : null;
+      const concernsCurrentUser = senderId === currentId || recipientId === currentId;
+      if (!concernsCurrentUser) return;
+      loadChatUsers();
+      if (activePeerId && (senderId === activePeerId || recipientId === activePeerId)) {
+        loadChatMessages(activePeerId);
+      }
+      if (recipientId === currentId && senderId !== currentId) {
+        playActionSuggestionSound();
+      }
+    };
+    const handleChatPresence = () => {
+      loadChatUsers();
+    };
+    const handleChatGroupMessage = (payload = {}) => {
+      const groupId = Number(payload.groupId);
+      const senderId = Number(payload.senderId);
+      const activeTarget = parseChatTarget(selectedChatUserId);
+      loadChatUsers();
+      if (activeTarget.type === "group" && Number(activeTarget.id) === groupId) {
+        loadChatMessages(selectedChatUserId);
+      }
+      if (senderId !== Number(currentUser?.id)) {
+        playActionSuggestionSound();
+      }
+    };
+    const startSseFallback = () => {
+      if (disposed) return;
+      if (usingSseFallback) return;
+      usingSseFallback = true;
+      events = new EventSource(planningEventsUrl(authSession.token));
+      events.addEventListener("planning-updated", handlePlanningUpdated);
+      events.addEventListener("chat-message", (event) => {
+        let payload = {};
+        try {
+          payload = JSON.parse(event.data || "{}");
+        } catch {
+          payload = {};
+        }
+        handleChatMessage(payload);
+      });
+      events.addEventListener("chat-presence", handleChatPresence);
+      events.addEventListener("chat-group-message", (event) => {
+        let payload = {};
+        try {
+          payload = JSON.parse(event.data || "{}");
+        } catch {
+          payload = {};
+        }
+        handleChatGroupMessage(payload);
+      });
+      events.onerror = () => {};
+    };
+
+    try {
+      socket = new WebSocket(planningWebSocketUrl(authSession.token));
+      socket.onmessage = (message) => {
+        let envelope = {};
+        try {
+          envelope = JSON.parse(message.data || "{}");
+        } catch {
+          envelope = {};
+        }
+        if (envelope.event === "planning-updated") handlePlanningUpdated();
+        if (envelope.event === "chat-message") handleChatMessage(envelope.data || {});
+        if (envelope.event === "chat-presence") handleChatPresence();
+        if (envelope.event === "chat-group-message") handleChatGroupMessage(envelope.data || {});
+      };
+      socket.onerror = startSseFallback;
+      socket.onclose = () => {
+        if (!usingSseFallback) startSseFallback();
+      };
+    } catch {
+      startSseFallback();
+    }
+
+    return () => {
+      disposed = true;
+      window.clearTimeout(realtimeRefreshTimer.current);
+      if (events) events.close();
+      if (socket) socket.close();
+    };
+  }, [authSession?.token, currentUser, selectedId, selectedStage, requestArchiveView, page, selectedChatUserId]);
 
   useEffect(() => {
     if (!authSession?.token) {
@@ -1166,11 +1653,15 @@ function App() {
 
   useEffect(() => {
     if (!selectedRequest) return;
+    if (!selectedStages.some(([key]) => key === selectedStage)) {
+      setSelectedStage(selectedRequest.currentStage === "CANCELLED" ? "CANCELLED" : safeStage(selectedRequest.currentStage, Boolean(selectedRequest.newVersion)));
+      return;
+    }
     const nextStage = safeStage(selectedStage, Boolean(selectedRequest.newVersion));
     if (nextStage !== selectedStage) {
       setSelectedStage(nextStage);
     }
-  }, [selectedRequest, selectedStage]);
+  }, [selectedRequest, selectedStage, selectedStages]);
 
   useEffect(() => {
     if (!showCreateForm && !showEditForm) return undefined;
@@ -2705,7 +3196,7 @@ function App() {
       .then(() => {
         resetPasswordRecoveryState();
         setLoginForm({ email: passwordResetEmail, password: "" });
-        successToast("Mot de passe modifie");
+        successToast("Mot de passe modifié");
       })
       .catch(() => {
         const message = "Changement du mot de passe impossible. Redemandez un code.";
@@ -2717,22 +3208,27 @@ function App() {
 
   function handleLogout() {
     Swal.fire({
-      title: "Se deconnecter ?",
-      text: "Votre session active sera fermee.",
+      title: "Se déconnecter ?",
+      text: "Votre session active sera fermée.",
       icon: "question",
       showCancelButton: true,
-      confirmButtonText: "Se deconnecter",
-      cancelButtonText: "Annulér",
+      confirmButtonText: "Se déconnecter",
+      cancelButtonText: "Annuler",
       ...swalButtons
     }).then((result) => {
       if (!result.isConfirmed) return;
-      logout()
+      chatOffline()
+        .catch(() => {})
+        .then(() => logout())
         .catch(() => clearSession())
         .finally(() => {
           setAuthSession(null);
           setCurrentUser(null);
           setRequests([]);
           setUsers([]);
+          setChatUsers([]);
+          setChatMessages([]);
+          setSelectedChatUserId(null);
           navigateToPage("dashboard", { replace: true });
           successToast("Déconnexion effectuée");
         });
@@ -2871,6 +3367,34 @@ function App() {
             onRefresh={() => getAuditLogs().then(setAuditLogs)}
             setActionFilter={setAuditActionFilter}
             setQuery={setAuditQuery}
+          />
+        )}
+
+        {page === "messages" && (
+          <MessagingPage
+            currentUser={currentUser}
+            draft={chatDraft}
+            file={chatFile}
+            fileInputRef={chatFileInputRef}
+            groupFormOpen={chatGroupFormOpen}
+            groupMemberIds={chatGroupMemberIds}
+            groupName={chatGroupName}
+            groupProjectName={chatGroupProjectName}
+            messages={chatMessages}
+            selectedUserId={selectedChatUserId}
+            sending={chatSending}
+            users={chatUsers}
+            onClearFile={clearChatFile}
+            onCreateGroup={handleCreateChatGroup}
+            onDraftChange={setChatDraft}
+            onFileChange={handleChatFileChange}
+            onGroupMemberToggle={handleToggleChatGroupMember}
+            onRefresh={() => refreshChatData()}
+            onSelectUser={handleSelectChatUser}
+            onSend={handleSendChatMessage}
+            setGroupFormOpen={setChatGroupFormOpen}
+            setGroupName={setChatGroupName}
+            setGroupProjectName={setChatGroupProjectName}
           />
         )}
 
@@ -3066,6 +3590,310 @@ function App() {
   );
 }
 
+function MessagingPage({
+  currentUser,
+  draft,
+  file,
+  fileInputRef,
+  groupFormOpen,
+  groupMemberIds = [],
+  groupName,
+  groupProjectName,
+  messages = [],
+  selectedUserId,
+  sending,
+  users = [],
+  onClearFile,
+  onCreateGroup,
+  onDraftChange,
+  onFileChange,
+  onGroupMemberToggle,
+  onRefresh,
+  onSelectUser,
+  onSend,
+  setGroupFormOpen,
+  setGroupName,
+  setGroupProjectName
+}) {
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const selectedUser = users.find((user) => chatTargetKey(user) === selectedUserId);
+  const selectableUsers = users.filter((user) => (user.type || "user") === "user");
+  const onlineCount = users.filter((user) => user.online).length;
+
+  function insertEmoji(emoji) {
+    onDraftChange(`${draft || ""}${emoji}`);
+    setEmojiPickerOpen(false);
+  }
+
+  return (
+    <section className="page-content messaging-page">
+      <PageHeader
+        eyebrow="Communication"
+        title="Messagerie"
+        subtitle="Discussions internes, historique des echanges et notifications instantanees."
+      />
+      <div className="messaging-layout">
+        <aside className="chat-users-panel" aria-label="Utilisateurs">
+          <div className="chat-panel-title">
+            <div>
+              <h2>Utilisateurs</h2>
+              <span>{onlineCount} connecte{onlineCount > 1 ? "s" : ""} maintenant</span>
+            </div>
+            <button className="icon-button" type="button" title="Actualiser" onClick={onRefresh}>
+              <Search size={16} />
+            </button>
+          </div>
+          <div className="chat-group-tools">
+            <button className="secondary-action compact-action" type="button" onClick={() => setGroupFormOpen((open) => !open)}>
+              <MessageCircle size={16} />
+              Nouveau groupe
+            </button>
+            {groupFormOpen && (
+              <form className="chat-group-form" onSubmit={onCreateGroup}>
+                <input
+                  value={groupName}
+                  placeholder="Nom du groupe, ex: Projet J4U"
+                  onChange={(event) => setGroupName(event.target.value)}
+                />
+                <input
+                  value={groupProjectName}
+                  placeholder="Projet associe (optionnel)"
+                  onChange={(event) => setGroupProjectName(event.target.value)}
+                />
+                <div className="chat-group-members">
+                  {selectableUsers.map((user) => (
+                    <label key={user.id}>
+                      <input
+                        checked={groupMemberIds.includes(user.id)}
+                        type="checkbox"
+                        onChange={() => onGroupMemberToggle(user.id)}
+                      />
+                      <span>{chatUserName(user)}</span>
+                    </label>
+                  ))}
+                </div>
+                <button className="primary-action compact-action" type="submit" disabled={sending}>
+                  Creer
+                </button>
+              </form>
+            )}
+          </div>
+          <div className="chat-user-list">
+            {users.length === 0 && (
+              <EmptyState
+                icon={MessageCircle}
+                title="Aucun utilisateur"
+                text="La liste sera disponible des que des comptes actifs existent."
+              />
+            )}
+            {users.map((user) => (
+              <button
+                className={chatTargetKey(user) === selectedUserId ? "chat-user-row active" : "chat-user-row"}
+                key={chatTargetKey(user)}
+                type="button"
+                onClick={() => onSelectUser(chatTargetKey(user))}
+              >
+                <UserAvatar user={user} />
+                <span className="chat-user-copy">
+                  <strong>{chatUserName(user)}</strong>
+                  <small>{user.latestMessage ? chatPreview(user.latestMessage, currentUser?.id) : presenceLabel(user)}</small>
+                </span>
+                {(user.type || "user") === "group"
+                  ? <span className="group-badge">{user.memberCount || 0}</span>
+                  : <span className={user.online ? "presence-dot online" : "presence-dot"} title={presenceLabel(user)} />}
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <section className="chat-thread-panel" aria-label="Discussion">
+          {!selectedUser && (
+            <EmptyState
+              icon={MessageCircle}
+              title="Selectionnez une discussion"
+              text="Choisissez un utilisateur pour afficher l'historique et envoyer un message."
+            />
+          )}
+          {selectedUser && (
+            <>
+              <header className="chat-thread-header">
+                <UserAvatar user={selectedUser} />
+                <div>
+                  <h2>{chatUserName(selectedUser)}</h2>
+                  <span>{presenceLabel(selectedUser)}</span>
+                </div>
+              </header>
+
+              <div className="chat-history">
+                {messages.length === 0 && (
+                  <EmptyState
+                    icon={MessageCircle}
+                    title="Aucun message"
+                    text="Demarrez la discussion avec un message ou une piece jointe."
+                  />
+                )}
+                {messages.map((message) => {
+                  const own = isOwnChatMessage(message, currentUser);
+                  const author = own ? currentUser : { fullName: message.senderName };
+                  return (
+                  <article className={own ? "chat-message own" : "chat-message"} key={message.id}>
+                    {!own && <UserAvatar user={author} small />}
+                    <div className="chat-bubble">
+                      {!own && <strong>{message.senderName}</strong>}
+                      {message.content && <p>{message.content}</p>}
+                      {message.attachmentFileName && (
+                        <ChatAttachment message={message} />
+                      )}
+                      <time dateTime={message.createdAt}>{chatMessageTime(message.createdAt)}</time>
+                    </div>
+                    {own && <UserAvatar user={author} small />}
+                  </article>
+                );
+                })}
+              </div>
+
+              <form className="chat-composer" onSubmit={onSend}>
+                <textarea
+                  value={draft}
+                  placeholder="Ecrire un message..."
+                  rows={2}
+                  onChange={(event) => onDraftChange(event.target.value)}
+                />
+                <div className="chat-composer-actions">
+                  <div className="chat-emoji-area">
+                    <button
+                      className="icon-button"
+                      type="button"
+                      title="Ajouter un emoji"
+                      onClick={() => setEmojiPickerOpen((open) => !open)}
+                    >
+                      <Smile size={18} />
+                    </button>
+                    {emojiPickerOpen && (
+                      <div className="chat-emoji-picker" role="menu" aria-label="Palette emojis">
+                        {chatEmojiPalette.map((emoji) => (
+                          <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}>
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <label className="icon-button chat-file-button" title="Joindre un fichier">
+                    <Paperclip size={18} />
+                    <input ref={fileInputRef} type="file" onChange={onFileChange} />
+                  </label>
+                  {file && (
+                    <span className="chat-file-chip">
+                      <Paperclip size={14} />
+                      {file.name}
+                      <button type="button" title="Retirer le fichier" onClick={onClearFile}>
+                        <X size={14} />
+                      </button>
+                    </span>
+                  )}
+                  <button className="primary-action chat-send-button" type="submit" disabled={sending || (!draft.trim() && !file)}>
+                    <Send size={16} />
+                    {sending ? "Envoi..." : "Envoyer"}
+                  </button>
+                </div>
+              </form>
+            </>
+          )}
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function UserAvatar({ user, small = false }) {
+  const label = chatUserName(user);
+  const initials = label
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "?";
+  return (
+    <span className={(user?.type || "") === "group" ? (small ? "chat-avatar group small" : "chat-avatar group") : (small ? "chat-avatar small" : "chat-avatar")}>
+      {user?.profilePhotoUrl ? <img src={user.profilePhotoUrl} alt={label} /> : initials}
+    </span>
+  );
+}
+
+function ChatAttachment({ message }) {
+  const href = chatAttachmentUrl(message.id);
+  const isImage = isImageAsset(message.attachmentContentType, message.attachmentFileName);
+  return (
+    <a className={isImage ? "chat-attachment image" : "chat-attachment"} href={href} target="_blank" rel="noreferrer">
+      {isImage ? (
+        <img src={href} alt={message.attachmentFileName || "Image jointe"} />
+      ) : (
+        <Paperclip size={18} />
+      )}
+      <span>
+        <strong>{message.attachmentFileName || "Piece jointe"}</strong>
+        {message.attachmentFileSize ? <small>{formatFileSize(message.attachmentFileSize)}</small> : null}
+      </span>
+      {isImage && <ImageIcon size={16} />}
+    </a>
+  );
+}
+
+function chatUserName(user) {
+  return user?.name || user?.fullName || user?.username || user?.email || "Utilisateur";
+}
+
+function isOwnChatMessage(message, currentUser) {
+  return Boolean(message) && Number(message.senderId) === Number(currentUser?.id);
+}
+
+function chatTargetKey(target) {
+  if (!target) return null;
+  return `${target.type || "user"}:${target.id}`;
+}
+
+function parseChatTarget(value) {
+  if (!value) return { type: "user", id: null };
+  const text = String(value);
+  if (!text.includes(":")) return { type: "user", id: Number(text) };
+  const [type, id] = text.split(":");
+  return { type: type || "user", id: Number(id) };
+}
+
+function chatPreview(message, currentUserId) {
+  if (!message) return "";
+  const prefix = Number(message.senderId) === Number(currentUserId) || message.own ? "Vous : " : "";
+  const text = message.content || message.attachmentFileName || "Piece jointe";
+  return `${prefix}${text}`;
+}
+
+function chatMessageTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16).replace("T", " ");
+  return new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short" }).format(date);
+}
+
+function presenceLabel(user) {
+  if ((user?.type || "user") === "group") {
+    const project = user.projectName ? `Projet ${user.projectName}` : "Groupe";
+    return `${project} - ${user.memberCount || 0} membres`;
+  }
+  if (user?.online) return "Actif maintenant";
+  if (!user?.lastSeenAt) return "Hors ligne";
+  return `Vu ${chatMessageTime(user.lastSeenAt)}`;
+}
+
+function formatFileSize(value) {
+  const size = Number(value);
+  if (!Number.isFinite(size) || size <= 0) return "";
+  if (size < 1024) return `${size} o`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} Ko`;
+  return `${(size / (1024 * 1024)).toFixed(1)} Mo`;
+}
+
 function DashboardPage({ clients = [], currentUser, planningRules = [], products = [], projects, requests, roles = [], saving, stats, users = [], onCreateRequest, onOpenRequest }) {
   const allProjectsValue = "__ALL__";
   const [dossierProject, setDossierProject] = useState(allProjectsValue);
@@ -3145,11 +3973,11 @@ function DashboardPage({ clients = [], currentUser, planningRules = [], products
 
   function exportProjectDossierReviews(format) {
     if (!dossierProject) {
-      warningAlert("Projet requis", "Selectionnez un projet avant de lancer l'extraction.");
+      warningAlert("Projet requis", "Sélectionnez un projet avant de lancer l'extraction.");
       return;
     }
     if (dossierRequests.length === 0) {
-      warningAlert("Aucune modification", "Aucune modification trouvee pour ce projet.");
+      warningAlert("Aucune modification", "Aucune modification trouvée pour ce projet.");
       return;
     }
     const fileBaseName = `revues-dossier-${exportingAllProjects ? "toutes-modifications" : `projet-${fileNameToken(dossierProject)}`}`;
@@ -5083,6 +5911,22 @@ function ModificationsPage(props) {
       });
   }
 
+  function exportModificationDossierExcel() {
+    if (!selectedRequest) return;
+    getActions(selectedRequest.id)
+      .then((requestActions) => {
+        downloadBlobFile(
+          `dossier-modification-${fileNameToken(requestDisplayName(selectedRequest))}.xls`,
+          modificationDossierExportExcel(selectedRequest, requestActions),
+          "application/vnd.ms-excel;charset=utf-8"
+        );
+        successToast("Dossier de modification Excel généré");
+      })
+      .catch(() => {
+        errorAlert("Extraction du dossier de modification impossible.");
+      });
+  }
+
   return (
     <section className="page-content modifications-content">
       <PageHeader eyebrow="Suivi ECR" title="Modifications" subtitle="Créez une demande, sélectionnez-la, puis pilotez ses phases et actions sans quitter cette page." />
@@ -5219,10 +6063,16 @@ function ModificationsPage(props) {
                   <span>Revue dossier</span>
                 </button>
                 {canExportGantt && (
-                  <button className="dossier-review-card" type="button" onClick={exportModificationGanttPdf} title="Extraire le diagramme de Gantt">
-                    <CalendarDays size={24} />
-                    <span>Gantt PDF</span>
-                  </button>
+                  <>
+                    <button className="dossier-review-card" type="button" onClick={exportModificationDossierExcel} title="Extraire le dossier de modification Excel">
+                      <FileSpreadsheet size={24} />
+                      <span>Dossier Excel</span>
+                    </button>
+                    <button className="dossier-review-card" type="button" onClick={exportModificationGanttPdf} title="Extraire le diagramme de Gantt">
+                      <CalendarDays size={24} />
+                      <span>Gantt PDF</span>
+                    </button>
+                  </>
                 )}
                 {(selectedRequest.beforePhotoUrl || selectedRequest.afterPhotoUrl) && (
                   <div className="request-image-grid">
@@ -5250,11 +6100,18 @@ function ModificationsPage(props) {
               )}
               <section className="request-workspace">
                 <nav className="stage-tabs">
-                  {selectedStages.map(([key, label]) => (
-                    <button key={key} className={`tab ${stageColorClass(key, Boolean(selectedRequest.newVersion))}${selectedStage === key ? " active" : ""}`} onClick={() => (canAdmin ? handleStageChange(key) : setSelectedStage(key))}>
-                      {label}
-                    </button>
-                  ))}
+                  {selectedStages.map(([key, label]) => {
+                    const closedByCancellation = selectedRequest.currentStage === "CANCELLED" && key !== "CANCELLED";
+                    return (
+                      <button
+                        key={key}
+                        className={`tab ${stageColorClass(key, Boolean(selectedRequest.newVersion))}${selectedStage === key ? " active" : ""}${closedByCancellation ? " closed" : ""}`}
+                        onClick={() => (canAdmin && selectedRequest.currentStage !== "CANCELLED" ? handleStageChange(key) : setSelectedStage(key))}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
                 </nav>
                 <section className="progress-row">
                   <div><span>Avancement checklist</span><strong>{completion}%</strong></div>
@@ -5426,7 +6283,7 @@ function DossierReviewDialog({ canManage, request, saving, onClose, onSubmit }) 
     const title = `Revue dossier - ${requestDisplayName(request)}`;
     const win = window.open("", "_blank");
     if (!win) return;
-    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
+    win.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
       body{font-family:Arial,sans-serif;color:#111827;margin:32px;line-height:1.5}
       h1{font-size:22px;margin:0 0 8px}
       .meta{color:#475569;font-size:13px;margin-bottom:20px}

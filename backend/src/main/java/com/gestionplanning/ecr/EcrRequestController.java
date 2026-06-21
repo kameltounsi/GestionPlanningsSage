@@ -245,6 +245,11 @@ public class EcrRequestController {
                     if (reopeningApprovedStage) {
                         reopenApprovedStage(request, stage, user);
                     }
+                    if (request.getCurrentStage() == EcrStage.CANCELLED) {
+                        request.setCancelledStatus(false);
+                        request.setCancelledDate(null);
+                        request.setCancelledFromStage(null);
+                    }
                     request.setCurrentStage(stage);
                     EcrRequest saved = requestRepository.save(request);
                     if (reopeningApprovedStage) {
@@ -271,10 +276,15 @@ public class EcrRequestController {
                     if (request.getCurrentStage() == EcrStage.CANCELLED) {
                         return ResponseEntity.badRequest().<EcrRequest>build();
                     }
+                    request.setCancelledFromStage(request.getCurrentStage());
                     request.setCurrentStage(EcrStage.CANCELLED);
+                    request.setCancelledStatus(true);
                     request.setCancelledDate(java.time.LocalDate.now());
+                    request.setClosureStatus(false);
+                    request.setClosureDate(null);
                     EcrRequest saved = requestRepository.save(request);
                     templateService.ensureMissingActionsForStage(saved, EcrStage.CANCELLED);
+                    planningService.recalculateRequest(saved);
                     auditLogService.recordBusinessEvent(
                             user,
                             "ANNULATION_MODIFICATION",

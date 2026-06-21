@@ -42,6 +42,7 @@ import {
   createProject,
   createRoleReference,
   createUser,
+  addChatGroupMember,
   cancelEcrRequest,
   confirmPasswordReset,
   clearSession,
@@ -85,6 +86,7 @@ import {
   getStoredSession,
   getUsers,
   ignoreActionSuggestion,
+  importFinishedProductReferences,
   login,
   logout,
   planningEventsUrl,
@@ -175,6 +177,12 @@ const chatEmojiPalette = [
   "\u{1F4C4}", "\u{1F4CA}", "\u{1F4C8}", "\u{1F4DD}", "\u{1F4E6}", "\u{1F4E2}", "\u{1F514}", "\u{1F512}", "\u{1F511}", "\u{1F527}",
   "\u{1F6E0}\u{FE0F}", "\u{1F4BB}", "\u{1F4F1}", "\u{260E}\u{FE0F}", "\u{1F4E7}", "\u{1F551}", "\u{1F4C5}", "\u{1F4CD}", "\u{1F697}", "\u{2708}\u{FE0F}",
   "\u{1F37D}\u{FE0F}", "\u{2615}", "\u{1F382}", "\u{1F389}", "\u{1F308}", "\u{2600}\u{FE0F}", "\u{1F319}", "\u{1F331}", "\u{1F33F}", "\u{1F6A9}"
+];
+const arabicKeyboardRows = [
+  ["ض", "ص", "ث", "ق", "ف", "غ", "ع", "ه", "خ", "ح", "ج"],
+  ["ش", "س", "ي", "ب", "ل", "ا", "ت", "ن", "م", "ك", "ط"],
+  ["ئ", "ء", "ؤ", "ر", "ى", "ة", "و", "ز", "ظ", "د", "ذ"],
+  ["لا", "أ", "إ", "آ", "،", ".", "؟"]
 ];
 
 function pageFromPath(pathname = window.location.pathname) {
@@ -1503,6 +1511,21 @@ function App() {
       .finally(() => setChatSending(false));
   }
 
+  function handleAddChatGroupMember(groupId, userId) {
+    if (!groupId || !userId) return Promise.resolve();
+    setChatSending(true);
+    return addChatGroupMember(groupId, userId)
+      .then((group) => {
+        const groupKey = chatTargetKey(group);
+        setSelectedChatUserId(groupKey);
+        return refreshChatData(groupKey).then(() => {
+          successToast("Membre ajoute au groupe");
+        });
+      })
+      .catch((message) => errorAlert(message.message || message))
+      .finally(() => setChatSending(false));
+  }
+
   function notifyIncomingChat(title = "Nouveau message") {
     if (!quickChatOpen && page !== "messages") {
       setChatNotificationCount((count) => count + 1);
@@ -2823,6 +2846,38 @@ function App() {
     });
   }
 
+  function handleImportFinishedProducts(file) {
+    if (!file) return Promise.resolve();
+    setSaving(true);
+    setError("");
+    return importFinishedProductReferences(file)
+      .then((result) => getFinishedProductReferences().then((items) => {
+        setFinishedProductReferences(items);
+        const issues = result.issues || [];
+        const issuePreview = issues
+          .slice(0, 8)
+          .map((issue) => `Ligne ${issue.rowNumber || "-"}: ${issue.message}`)
+          .join("\n");
+        Swal.fire({
+          icon: result.createdCount > 0 ? "success" : "info",
+          title: "Import produits finis",
+          text: [
+            `${result.createdCount || 0} produit(s) fini(s) ajoute(s).`,
+            `${result.skippedCount || 0} ligne(s) ignoree(s).`,
+            issuePreview,
+            issues.length > 8 ? `... ${issues.length - 8} autre(s) alerte(s).` : ""
+          ].filter(Boolean).join("\n"),
+          confirmButtonColor: "#6b7f13"
+        });
+      }))
+      .catch((exception) => {
+        const message = friendlyErrorMessage(exception?.message || "Import des produits finis impossible.");
+        setError(message);
+        errorAlert(message);
+      })
+      .finally(() => setSaving(false));
+  }
+
   function handleSaveRoleReference(event) {
     event.preventDefault();
     const name = roleReferenceForm.name.trim();
@@ -3513,6 +3568,7 @@ function App() {
             typingNotice={chatTypingNotice}
             users={chatUsers}
             onClearFile={clearChatFile}
+            onAddGroupMember={handleAddChatGroupMember}
             onCreateGroup={handleCreateChatGroup}
             onDraftChange={handleChatDraftChange}
             onFileChange={handleChatFileChange}
@@ -3576,6 +3632,7 @@ function App() {
             onEditProduct={startProductReferenceEdit}
             onEditProject={startProjectEdit}
             onEditRole={startRoleReferenceEdit}
+            onImportFinishedProducts={handleImportFinishedProducts}
             onSubmitClient={handleSaveClientReference}
             onSubmitFinishedProduct={handleSaveFinishedProductReference}
             onSubmitProduct={handleSaveProductReference}
@@ -3768,6 +3825,8 @@ function QuickChatPanel({
   onSend
 }) {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [arabicKeyboardOpen, setArabicKeyboardOpen] = useState(false);
+  const [membersDialogOpen, setMembersDialogOpen] = useState(false);
   const [messageSearch, setMessageSearch] = useState("");
   const messagesEndRef = useRef(null);
   const visibleMessages = filterChatMessages(messages, messageSearch);
@@ -3779,6 +3838,14 @@ function QuickChatPanel({
   function insertEmoji(emoji) {
     onDraftChange(`${draft || ""}${emoji}`);
     setEmojiPickerOpen(false);
+  }
+
+  function handleArabicKey(key) {
+    if (key === "backspace") {
+      onDraftChange((draft || "").slice(0, -1));
+      return;
+    }
+    onDraftChange(`${draft || ""}${key === "space" ? " " : key}`);
   }
 
   return (
@@ -3825,7 +3892,7 @@ function QuickChatPanel({
                       {!own && <UserAvatar user={author} small />}
                       <div className="chat-bubble">
                         {!own && <strong>{message.senderName}</strong>}
-                        {message.content && <p>{message.content}</p>}
+                        {message.content && <ChatMessageText text={message.content} />}
                         {message.attachmentFileName && <ChatAttachment message={message} />}
                         <time dateTime={message.createdAt}>{chatMessageTime(message.createdAt)}</time>
                       </div>
@@ -3858,6 +3925,12 @@ function QuickChatPanel({
                         ))}
                       </div>
                     )}
+                  </div>
+                  <div className="chat-keyboard-area">
+                    <button className="icon-button arabic-keyboard-toggle" type="button" title="Clavier arabe" onClick={() => setArabicKeyboardOpen((open) => !open)}>
+                      AR
+                    </button>
+                    {arabicKeyboardOpen && <ArabicKeyboard onKey={handleArabicKey} />}
                   </div>
                   <label className="icon-button chat-file-button" title="Joindre un fichier">
                     <Paperclip size={18} />
@@ -3901,6 +3974,7 @@ function MessagingPage({
   typingNotice,
   users = [],
   onClearFile,
+  onAddGroupMember,
   onCreateGroup,
   onDraftChange,
   onFileChange,
@@ -3914,21 +3988,39 @@ function MessagingPage({
   setGroupProjectName
 }) {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [arabicKeyboardOpen, setArabicKeyboardOpen] = useState(false);
   const [messageSearch, setMessageSearch] = useState("");
   const messagesEndRef = useRef(null);
   const selectedUser = users.find((user) => chatTargetKey(user) === selectedUserId);
   const selectableUsers = users.filter((user) => (user.type || "user") === "user");
   const onlineCount = users.filter((user) => user.online).length;
   const visibleMessages = filterChatMessages(messages, messageSearch);
+  const selectedGroupMembers = chatGroupMembers(selectedUser, users, currentUser);
+  const selectedGroupMemberIdSet = new Set((selectedUser?.memberIds || []).map((id) => Number(id)));
+  const addableGroupUsers = isChatGroup(selectedUser)
+    ? selectableUsers.filter((user) => !selectedGroupMemberIdSet.has(Number(user.id)))
+    : [];
 
   function insertEmoji(emoji) {
     onDraftChange(`${draft || ""}${emoji}`);
     setEmojiPickerOpen(false);
   }
 
+  function handleArabicKey(key) {
+    if (key === "backspace") {
+      onDraftChange((draft || "").slice(0, -1));
+      return;
+    }
+    onDraftChange(`${draft || ""}${key === "space" ? " " : key}`);
+  }
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
   }, [messages, selectedUserId]);
+
+  useEffect(() => {
+    setMembersDialogOpen(false);
+  }, [selectedUserId]);
 
   return (
     <section className="page-content messaging-page">
@@ -4032,7 +4124,16 @@ function MessagingPage({
                 <UserAvatar user={selectedUser} />
                 <div>
                   <h2>{chatUserName(selectedUser)}</h2>
-                  <span>{presenceLabel(selectedUser)}</span>
+                  {isChatGroup(selectedUser) ? (
+                    <span className="chat-group-header-meta">
+                      {selectedUser.projectName ? `Projet ${selectedUser.projectName}` : "Groupe"}
+                      <button type="button" onClick={() => setMembersDialogOpen(true)}>
+                        {selectedUser.memberCount || 0} membre{(selectedUser.memberCount || 0) > 1 ? "s" : ""}
+                      </button>
+                    </span>
+                  ) : (
+                    <span>{presenceLabel(selectedUser)}</span>
+                  )}
                 </div>
                 <input
                   className="chat-message-search"
@@ -4041,6 +4142,21 @@ function MessagingPage({
                   onChange={(event) => setMessageSearch(event.target.value)}
                 />
               </header>
+              {membersDialogOpen && isChatGroup(selectedUser) && (
+                <GroupMembersDialog
+                  addableUsers={addableGroupUsers}
+                  currentUser={currentUser}
+                  disabled={sending}
+                  group={selectedUser}
+                  members={selectedGroupMembers}
+                  onAddMember={(userId) => onAddGroupMember?.(selectedUser.id, userId)}
+                  onClose={() => setMembersDialogOpen(false)}
+                  onPrivateChat={(member) => {
+                    setMembersDialogOpen(false);
+                    onSelectUser(chatTargetKey(member));
+                  }}
+                />
+              )}
 
               <div className="chat-history">
                 {messages.length === 0 && (
@@ -4066,7 +4182,7 @@ function MessagingPage({
                     {!own && <UserAvatar user={author} small />}
                     <div className="chat-bubble">
                       {!own && <strong>{message.senderName}</strong>}
-                      {message.content && <p>{message.content}</p>}
+                      {message.content && <ChatMessageText text={message.content} />}
                       {message.attachmentFileName && (
                         <ChatAttachment message={message} />
                       )}
@@ -4107,6 +4223,12 @@ function MessagingPage({
                       </div>
                     )}
                   </div>
+                  <div className="chat-keyboard-area">
+                    <button className="icon-button arabic-keyboard-toggle" type="button" title="Clavier arabe" onClick={() => setArabicKeyboardOpen((open) => !open)}>
+                      AR
+                    </button>
+                    {arabicKeyboardOpen && <ArabicKeyboard onKey={handleArabicKey} />}
+                  </div>
                   <label className="icon-button chat-file-button" title="Joindre un fichier">
                     <Paperclip size={18} />
                     <input ref={fileInputRef} type="file" onChange={onFileChange} />
@@ -4131,6 +4253,26 @@ function MessagingPage({
         </section>
       </div>
     </section>
+  );
+}
+
+function ArabicKeyboard({ onKey }) {
+  return (
+    <div className="arabic-keyboard" dir="rtl" role="group" aria-label="Clavier arabe">
+      {arabicKeyboardRows.map((row, rowIndex) => (
+        <div className="arabic-keyboard-row" key={`arabic-row-${rowIndex}`}>
+          {row.map((key) => (
+            <button key={key} type="button" onClick={() => onKey(key)}>
+              {key}
+            </button>
+          ))}
+        </div>
+      ))}
+      <div className="arabic-keyboard-row controls">
+        <button type="button" onClick={() => onKey("backspace")}>⌫</button>
+        <button className="space" type="button" onClick={() => onKey("space")}>مسافة</button>
+      </div>
+    </div>
   );
 }
 
@@ -4169,8 +4311,111 @@ function ChatAttachment({ message }) {
   );
 }
 
+function ChatMessageText({ text }) {
+  const parts = splitTextWithLinks(text);
+  return (
+    <p>
+      {parts.map((part, index) => part.url ? (
+        <a href={part.url} key={`${part.text}-${index}`} target="_blank" rel="noreferrer">
+          {part.text}
+        </a>
+      ) : (
+        <Fragment key={`${part.text}-${index}`}>{part.text}</Fragment>
+      ))}
+    </p>
+  );
+}
+
+function GroupMembersDialog({ addableUsers = [], currentUser, disabled = false, group, members = [], onAddMember, onClose, onPrivateChat }) {
+  const [selectedMemberId, setSelectedMemberId] = useState("");
+
+  function submitAddMember(event) {
+    event.preventDefault();
+    if (!selectedMemberId || !onAddMember) return;
+    const result = onAddMember(Number(selectedMemberId));
+    if (result?.then) {
+      result.then(() => setSelectedMemberId(""));
+    } else {
+      setSelectedMemberId("");
+    }
+  }
+
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="chat-members-dialog" role="dialog" aria-modal="true" aria-label="Membres du groupe" onMouseDown={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <h2>Membres du groupe</h2>
+            <span>{chatUserName(group)} - {members.length} membre{members.length > 1 ? "s" : ""}</span>
+          </div>
+          <button className="icon-button" type="button" title="Fermer" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </header>
+        <div className="chat-members-list">
+          {members.length === 0 ? (
+            <EmptyState title="Aucun membre" text="La liste des membres est indisponible." compact />
+          ) : (
+            members.map((member) => {
+              const isCurrentUser = Number(member.id) === Number(currentUser?.id);
+              return (
+                <article className="chat-member-row" key={member.id || chatUserName(member)}>
+                  <UserAvatar user={member} />
+                  <div>
+                    <strong>{chatUserName(member)}</strong>
+                    <span>{isCurrentUser ? "Vous" : presenceLabel(member)}</span>
+                  </div>
+                  {!isCurrentUser && (
+                    <button className="secondary-action compact-action" type="button" onClick={() => onPrivateChat(member)}>
+                      <MessageCircle size={15} />
+                      Discuter en prive
+                    </button>
+                  )}
+                </article>
+              );
+            })
+          )}
+        </div>
+        <form className="chat-group-add-member" onSubmit={submitAddMember}>
+          <select disabled={disabled || addableUsers.length === 0} value={selectedMemberId} onChange={(event) => setSelectedMemberId(event.target.value)}>
+            <option value="">{addableUsers.length === 0 ? "Tous les utilisateurs sont deja membres" : "Ajouter un utilisateur au groupe"}</option>
+            {addableUsers.map((user) => (
+              <option key={user.id} value={user.id}>{chatUserName(user)}</option>
+            ))}
+          </select>
+          <button className="secondary-action compact-action" disabled={disabled || !selectedMemberId} type="submit">
+            <Plus size={15} />
+            Ajouter
+          </button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function chatUserName(user) {
   return user?.name || user?.fullName || user?.username || user?.email || "Utilisateur";
+}
+
+function isChatGroup(target) {
+  return (target?.type || "user") === "group";
+}
+
+function chatGroupMembers(group, conversations = [], currentUser) {
+  if (!isChatGroup(group)) return [];
+  const memberIds = Array.isArray(group.memberIds) ? group.memberIds : [];
+  const usersById = new Map(
+    conversations
+      .filter((conversation) => (conversation.type || "user") === "user")
+      .map((user) => [Number(user.id), user])
+  );
+  if (currentUser?.id) {
+    usersById.set(Number(currentUser.id), currentUser);
+  }
+  return memberIds.map((memberId) => usersById.get(Number(memberId)) || {
+    id: memberId,
+    fullName: `Utilisateur ${memberId}`
+  });
 }
 
 function isOwnChatMessage(message, currentUser) {
@@ -4216,6 +4461,33 @@ function filterChatMessages(messages = [], query = "") {
     message.attachmentFileName,
     chatMessageTime(message.createdAt)
   ].filter(Boolean).join(" ")).includes(normalized));
+}
+
+function splitTextWithLinks(text = "") {
+  const parts = [];
+  const pattern = /((?:https?:\/\/|www\.)[^\s<]+)/gi;
+  let lastIndex = 0;
+  String(text).replace(pattern, (match, _url, offset) => {
+    if (offset > lastIndex) {
+      parts.push({ text: String(text).slice(lastIndex, offset) });
+    }
+    const trailingMatch = match.match(/[),.;:!?]+$/);
+    const trailing = trailingMatch ? trailingMatch[0] : "";
+    const cleanText = trailing ? match.slice(0, -trailing.length) : match;
+    parts.push({
+      text: cleanText,
+      url: cleanText.startsWith("www.") ? `https://${cleanText}` : cleanText
+    });
+    if (trailing) {
+      parts.push({ text: trailing });
+    }
+    lastIndex = offset + match.length;
+    return match;
+  });
+  if (lastIndex < String(text).length) {
+    parts.push({ text: String(text).slice(lastIndex) });
+  }
+  return parts.length ? parts : [{ text: String(text) }];
 }
 
 function chatMessageTime(value) {
@@ -5266,6 +5538,7 @@ function PreferentialsPage({
   onEditProduct,
   onEditProject,
   onEditRole,
+  onImportFinishedProducts,
   onSubmitClient,
   onSubmitFinishedProduct,
   onSubmitProduct,
@@ -5364,6 +5637,7 @@ function PreferentialsPage({
           onCancelEdit={onCancelFinishedProductEdit}
           onDelete={onDeleteFinishedProduct}
           onEdit={onEditFinishedProduct}
+          onImport={onImportFinishedProducts}
           onSubmit={onSubmitFinishedProduct}
           setForm={setFinishedProductForm}
         />
@@ -5391,8 +5665,9 @@ function PreferentialsPage({
   );
 }
 
-function FinishedProductPreferentialPanel({ clients = [], editing, form, products, projects, references, saving, onCancelEdit, onDelete, onEdit, onSubmit, setForm }) {
+function FinishedProductPreferentialPanel({ clients = [], editing, form, products, projects, references, saving, onCancelEdit, onDelete, onEdit, onImport, onSubmit, setForm }) {
   const [searchTerm, setSearchTerm] = useState("");
+  const importInputRef = useRef(null);
   const clientNames = uniqueSorted(clients.map((client) => client.name));
   const projectNames = uniqueSorted(projects.map((project) => project.name));
   const productNames = uniqueSorted(products.map((product) => product.name));
@@ -5409,6 +5684,19 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
     reference.comments
   ]);
   const { currentPage, pageCount, pagedItems, setCurrentPage } = usePaginatedItems(filteredReferences, PREFERENTIAL_PAGE_SIZE);
+
+  function handleImportChange(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const importResult = onImport?.(file);
+    if (importResult?.finally) {
+      importResult.finally(() => {
+        event.target.value = "";
+      });
+    } else {
+      event.target.value = "";
+    }
+  }
 
   return (
     <section className="panel preferential-panel">
@@ -5483,6 +5771,11 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
             <Save size={16} />
             Enregistrer
           </button>
+          <button className="secondary-action" disabled={saving} type="button" onClick={() => importInputRef.current?.click()}>
+            <Upload size={16} />
+            Importer Excel
+          </button>
+          <input ref={importInputRef} hidden type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImportChange} />
           {editing && <button className="secondary-action" type="button" onClick={onCancelEdit}>Annulér</button>}
         </div>
         {clientNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un client.</p>}

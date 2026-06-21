@@ -189,6 +189,13 @@ export function createChatGroup(name, memberIds, projectName = "") {
   });
 }
 
+export function addChatGroupMember(groupId, userId) {
+  return request(`/chat/groups/${groupId}/members`, {
+    method: "POST",
+    body: JSON.stringify({ userId })
+  });
+}
+
 export function chatTyping(targetType, targetId, active = true) {
   return request("/chat/typing", {
     method: "POST",
@@ -388,6 +395,12 @@ export function deleteProductReference(id) {
 
 export function getFinishedProductReferences() {
   return request("/preferentials/finished-products");
+}
+
+export function importFinishedProductReferences(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return multipartRequest("/preferentials/finished-products/import", formData);
 }
 
 export function createFinishedProductReference(payload) {

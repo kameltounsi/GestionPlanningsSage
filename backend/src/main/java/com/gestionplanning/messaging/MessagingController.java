@@ -142,6 +142,29 @@ public class MessagingController {
         return ResponseEntity.ok(ChatConversationDto.group(saved, null, 0));
     }
 
+    @PostMapping("/groups/{groupId}/members")
+    @Transactional
+    public ResponseEntity<ChatConversationDto> addGroupMember(@PathVariable Long groupId,
+                                                              @RequestBody AddGroupMemberRequest request,
+                                                              @RequestAttribute("authenticatedUser") AppUser currentUser) {
+        if (request == null || request.getUserId() == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        Optional<AppUser> userToAdd = userRepository.findById(request.getUserId()).filter(AppUser::isEnabled);
+        if (!userToAdd.isPresent()) {
+            return ResponseEntity.notFound().build();
+        }
+        return groupRepository.findById(groupId)
+                .filter(group -> isGroupMember(group, currentUser))
+                .map(group -> {
+                    group.getMembers().add(userToAdd.get());
+                    ChatGroup saved = groupRepository.save(group);
+                    afterCommit(() -> realtimeUpdateService.publishChatGroupMessage(null, currentUser.getId(), saved.getId()));
+                    return ResponseEntity.ok(ChatConversationDto.group(saved, messageRepository.recentForGroup(saved.getId()).stream().findFirst().orElse(null), groupUnreadCount(saved, currentUser)));
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @PostMapping(value = "/messages", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Transactional
     public ResponseEntity<ChatMessageDto> send(@RequestParam Long recipientId,
@@ -502,6 +525,13 @@ public class MessagingController {
         public void setProjectName(String projectName) { this.projectName = projectName; }
         public List<Long> getMemberIds() { return memberIds; }
         public void setMemberIds(List<Long> memberIds) { this.memberIds = memberIds; }
+    }
+
+    public static class AddGroupMemberRequest {
+        private Long userId;
+
+        public Long getUserId() { return userId; }
+        public void setUserId(Long userId) { this.userId = userId; }
     }
 
     public static class TypingRequest {

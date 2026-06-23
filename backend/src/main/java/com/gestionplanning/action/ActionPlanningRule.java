@@ -67,6 +67,11 @@ public class ActionPlanningRule {
     @Column(nullable = false)
     private Integer durationDays = 1;
 
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean routineAction;
+
+    private Integer recurrenceIntervalDays;
+
     public Long getId() {
         return id;
     }
@@ -237,5 +242,21 @@ public class ActionPlanningRule {
 
     public void setDurationDays(Integer durationDays) {
         this.durationDays = durationDays;
+    }
+
+    public boolean isRoutineAction() {
+        return routineAction;
+    }
+
+    public void setRoutineAction(boolean routineAction) {
+        this.routineAction = routineAction;
+    }
+
+    public Integer getRecurrenceIntervalDays() {
+        return recurrenceIntervalDays;
+    }
+
+    public void setRecurrenceIntervalDays(Integer recurrenceIntervalDays) {
+        this.recurrenceIntervalDays = recurrenceIntervalDays;
     }
 }

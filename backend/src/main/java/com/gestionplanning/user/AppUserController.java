@@ -55,7 +55,8 @@ public class AppUserController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<AppUser> update(@PathVariable Long id, @RequestBody AppUser updatedUser) {
+    public ResponseEntity<AppUser> update(@PathVariable Long id, @RequestBody AppUser updatedUser,
+                                          @RequestAttribute("authenticatedUser") AppUser authenticatedUser) {
         return userRepository.findById(id)
                 .map(user -> {
                     normalize(updatedUser);
@@ -68,11 +69,14 @@ public class AppUserController {
                             || invalidChefAssignment(updatedUser, id)) {
                         return ResponseEntity.badRequest().<AppUser>build();
                     }
+                    if (hasRequestedPassword(updatedUser) && !canChangeOwnPassword(authenticatedUser, id)) {
+                        return ResponseEntity.status(403).<AppUser>build();
+                    }
                     user.setFullName(updatedUser.getFullName());
                     user.setUsername(updatedUser.getUsername());
                     user.setJobTitle(updatedUser.getJobTitle());
                     user.setEmail(updatedUser.getEmail());
-                    if (updatedUser.getPassword() != null && !updatedUser.getPassword().trim().isEmpty()) {
+                    if (hasRequestedPassword(updatedUser)) {
                         user.setPassword(passwordService.encode(updatedUser.getPassword()));
                     }
                     user.setPhone(updatedUser.getPhone());
@@ -116,7 +120,7 @@ public class AppUserController {
     @PutMapping("/{id}/password")
     public ResponseEntity<AppUser> changePassword(@PathVariable Long id, @RequestBody PasswordChangeRequest request,
                                                   @RequestAttribute("authenticatedUser") AppUser authenticatedUser) {
-        if (!canUpdateProfile(authenticatedUser, id)) {
+        if (!canChangeOwnPassword(authenticatedUser, id)) {
             return ResponseEntity.status(403).build();
         }
         if (request == null || request.getPassword() == null || request.getPassword().trim().isEmpty()) {
@@ -221,6 +225,14 @@ public class AppUserController {
 
     private boolean canUpdateProfile(AppUser authenticatedUser, Long userId) {
         return authenticatedUser != null && (accessControlService.isAdmin(authenticatedUser) || authenticatedUser.getId().equals(userId));
+    }
+
+    private boolean canChangeOwnPassword(AppUser authenticatedUser, Long userId) {
+        return authenticatedUser != null && authenticatedUser.getId().equals(userId);
+    }
+
+    private boolean hasRequestedPassword(AppUser user) {
+        return user != null && user.getPassword() != null && !user.getPassword().trim().isEmpty();
     }
 
     public static class PasswordChangeRequest {

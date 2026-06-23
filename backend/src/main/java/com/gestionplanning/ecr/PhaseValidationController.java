@@ -12,13 +12,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/ecr-requests/{requestId}/phase-validations")
@@ -77,7 +77,7 @@ public class PhaseValidationController {
                     validation.setRequestedBy(displayName(user));
                     validation.setRequestedAt(LocalDateTime.now());
                     PhaseValidationRequest saved = validationRepository.save(validation);
-                    List<EcrAction> actions = actionRepository.findByRequest_IdAndStageOrderByDeadlineAscIdAsc(requestId, stage);
+                    List<EcrAction> actions = phaseActions(requestId, stage);
                     actions.forEach(action -> {
                         action.setValidationStatus(ActionValidationStatus.PENDING);
                         action.setValidationRequestedAt(LocalDateTime.now());
@@ -294,7 +294,7 @@ public class PhaseValidationController {
     }
 
     private boolean allStageActionsDone(Long requestId, EcrStage stage) {
-        List<EcrAction> actions = actionRepository.findByRequest_IdAndStageOrderByDeadlineAscIdAsc(requestId, stage);
+        List<EcrAction> actions = phaseActions(requestId, stage);
         return !actions.isEmpty() && actions.stream().allMatch(this::isDone);
     }
 
@@ -356,7 +356,7 @@ public class PhaseValidationController {
         if (validation == null || validation.getRequestId() == null || validation.getStage() == null) {
             return validation;
         }
-        List<EcrAction> actions = actionRepository.findByRequest_IdAndStageOrderByDeadlineAscIdAsc(validation.getRequestId(), validation.getStage());
+        List<EcrAction> actions = phaseActions(validation.getRequestId(), validation.getStage());
         int total = actions.size();
         int approved = (int) actions.stream()
                 .filter(action -> action.getValidationStatus() == ActionValidationStatus.APPROVED)
@@ -365,6 +365,10 @@ public class PhaseValidationController {
         validation.setApprovedActions(approved);
         validation.setValidationRate(total == 0 ? 0 : (int) Math.round(approved * 100.0 / total));
         return validation;
+    }
+
+    private List<EcrAction> phaseActions(Long requestId, EcrStage stage) {
+        return actionRepository.findByRequest_IdAndStageOrderByDeadlineAscIdAsc(requestId, stage);
     }
 
     private EcrStage nextStage(EcrRequest request, EcrStage currentStage) {
@@ -377,33 +381,21 @@ public class PhaseValidationController {
     }
 
     private EcrRequest advanceRequestAfterPhaseApproval(EcrRequest request, EcrStage approvedStage) {
-        boolean wasCompleted = request.isClosureStatus() || request.getCurrentStage() == EcrStage.CLOSED;
         EcrStage nextStage = nextStage(request, approvedStage);
-        request.setCurrentStage(nextStage);
         if (nextStage == EcrStage.CLOSED) {
-            request.setClosureStatus(true);
-            if (request.getClosureDate() == null) {
-                request.setClosureDate(LocalDate.now());
-            }
-            request.setCancelledStatus(false);
-            request.setCancelledDate(null);
-            request.setCancelledFromStage(null);
+            request.setCurrentStage(approvedStage);
+            request.setClosureStatus(false);
+            request.setClosureDate(null);
+            request.setClosureRequested(false);
+            request.setClosureRequestedDate(null);
+            request.setClosureRequestedBy(null);
+            return requestRepository.save(request);
         }
-        EcrRequest saved = requestRepository.save(request);
-        if (nextStage == EcrStage.CLOSED && !wasCompleted) {
-            notifyModificationCompleted(saved);
-        }
-        return saved;
-    }
-
-    private void notifyModificationCompleted(EcrRequest request) {
-        Map<String, AppUser> recipients = new LinkedHashMap<>();
-        accessControlService.projectLeadFor(request)
-                .ifPresent(user -> recipients.put(normalizeEmail(user.getEmail()), user));
-        accessControlService.adminsFor(request)
-                .forEach(user -> recipients.put(normalizeEmail(user.getEmail()), user));
-        recipients.remove("");
-        accountMailService.sendModificationCompletedEmail(request, recipients.values());
+        request.setCurrentStage(nextStage);
+        request.setClosureRequested(false);
+        request.setClosureRequestedDate(null);
+        request.setClosureRequestedBy(null);
+        return requestRepository.save(request);
     }
 
     private String displayName(AppUser user) {

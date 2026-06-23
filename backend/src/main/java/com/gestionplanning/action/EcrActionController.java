@@ -20,10 +20,10 @@ import org.springframework.web.multipart.MultipartFile;
 
 import javax.validation.Valid;
 import java.net.URI;
-import java.util.Arrays;
-import java.util.HashSet;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -110,16 +110,25 @@ public class EcrActionController {
     }
 
     @PostMapping("/ecr-requests/{requestId}/actions")
+    @Transactional
     public ResponseEntity<EcrAction> create(@PathVariable Long requestId, @Valid @RequestBody EcrAction action,
                                             @RequestAttribute("authenticatedUser") AppUser user) {
         return requestRepository.findById(requestId)
                 .map(request -> {
+                    if (isTerminalRequest(request)) {
+                        return ResponseEntity.status(403).<EcrAction>build();
+                    }
                     boolean admin = accessControlService.isAdmin(user);
                     boolean pilot = accessControlService.isRequestPilot(user, request);
                     if (!admin && !pilot) {
                         return ResponseEntity.status(403).<EcrAction>build();
                     }
+                    action.setRoutineAction(false);
+                    action.setRecurrenceIntervalDays(null);
                     EcrStage actionStage = action.getStage() == null ? request.getCurrentStage() : action.getStage();
+                    if (request.getCurrentStage() == EcrStage.CANCELLED && actionStage != EcrStage.CANCELLED) {
+                        return ResponseEntity.status(403).<EcrAction>build();
+                    }
                     if (isPhaseApproved(requestId, actionStage)) {
                         return ResponseEntity.status(403).<EcrAction>build();
                     }
@@ -141,7 +150,8 @@ public class EcrActionController {
                     action.setValidatorRole(action.getValidator());
                     action.setValidator(action.getValidator());
                     syncFinalizationDate(action, action);
-                    EcrAction saved = actionRepository.save(action);
+                    EcrAction saved;
+                    saved = actionRepository.save(action);
                     if (!admin && pilot) {
                         suggestionRepository.save(suggestionFor(saved, requestLabel(request), displayName(user), request.isNewVersion()));
                     }
@@ -502,7 +512,15 @@ public class EcrActionController {
     }
 
     private boolean canMutateAction(EcrAction action) {
-        return !isActionPhaseApproved(action);
+        return action != null
+                && action.getRequest() != null
+                && !isTerminalRequest(action.getRequest())
+                && (action.getRequest().getCurrentStage() != EcrStage.CANCELLED || action.getStage() == EcrStage.CANCELLED)
+                && !isActionPhaseApproved(action);
+    }
+
+    private boolean isTerminalRequest(com.gestionplanning.ecr.EcrRequest request) {
+        return request != null && (request.getCurrentStage() == EcrStage.CLOSED || request.isClosureStatus());
     }
 
     private boolean isActionPhaseApproved(EcrAction action) {
@@ -552,7 +570,8 @@ public class EcrActionController {
         return action != null
                 && action.getRequest() != null
                 && action.getRequest().getCurrentStage() != EcrStage.CLOSED
-                && action.getRequest().getCurrentStage() != EcrStage.CANCELLED
+                && !action.getRequest().isClosureStatus()
+                && (action.getRequest().getCurrentStage() != EcrStage.CANCELLED || action.getStage() == EcrStage.CANCELLED)
                 && !isActionPhaseApproved(action);
     }
 

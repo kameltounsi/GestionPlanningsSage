@@ -10,6 +10,10 @@ public interface EcrRequestRepository extends JpaRepository<EcrRequest, Long> {
 
     List<EcrRequest> findByArchivedFalseOrderByReceptionDateDescIdDesc();
 
+    boolean existsByModificationNumberIgnoreCase(String modificationNumber);
+
+    boolean existsByModificationNumberIgnoreCaseAndIdNot(String modificationNumber, Long id);
+
     @Query("select coalesce(max(request.accessInternalNumber), 0) from EcrRequest request")
     Integer findMaxAccessInternalNumber();
 }

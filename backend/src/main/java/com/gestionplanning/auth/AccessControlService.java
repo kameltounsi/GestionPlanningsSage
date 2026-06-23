@@ -92,7 +92,7 @@ public class AccessControlService {
     }
 
     public boolean canCancelRequest(AppUser user, EcrRequest request) {
-        return isAdmin(user) || isRequestPilot(user, request);
+        return isAdmin(user);
     }
 
     public boolean isRequestPilot(AppUser user, EcrRequest request) {
@@ -112,7 +112,7 @@ public class AccessControlService {
             return true;
         }
         if (action != null && action.getRequest() != null && isRequestPilot(user, action.getRequest())
-                && action.getStage() == action.getRequest().getCurrentStage()) {
+                && (action.isRoutineAction() || action.getStage() == action.getRequest().getCurrentStage())) {
             return true;
         }
         return isActionParticipant(user, action);

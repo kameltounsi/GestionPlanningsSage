@@ -78,6 +78,8 @@ public class ActionPlanningRuleController {
                     rule.setDependencyActionTitle(updatedRule.getDependencyActionTitle());
                     rule.setDependencyAnchor(updatedRule.getDependencyAnchor());
                     rule.setDurationDays(updatedRule.getDurationDays());
+                    rule.setRoutineAction(updatedRule.isRoutineAction());
+                    rule.setRecurrenceIntervalDays(updatedRule.getRecurrenceIntervalDays());
                     ActionPlanningRule savedRule = ruleRepository.save(normalize(rule));
                     recalculateAllRequests(previousRule, savedRule);
                     return ResponseEntity.ok(savedRule);
@@ -211,6 +213,14 @@ public class ActionPlanningRuleController {
         if (rule.getDurationDays() == null) {
             rule.setDurationDays(1);
         }
+        if (rule.isRoutineAction()) {
+            rule.setDependencyActionTitle(null);
+            if (rule.getRecurrenceIntervalDays() == null || rule.getRecurrenceIntervalDays() < 1) {
+                rule.setRecurrenceIntervalDays(1);
+            }
+        } else {
+            rule.setRecurrenceIntervalDays(null);
+        }
         if (rule.getCriticality() == null || rule.getCriticality().trim().isEmpty()) {
             rule.setCriticality("3-faible");
         }
@@ -251,6 +261,8 @@ public class ActionPlanningRuleController {
         snapshot.setDependencyActionTitle(source.getDependencyActionTitle());
         snapshot.setDependencyAnchor(source.getDependencyAnchor());
         snapshot.setDurationDays(source.getDurationDays());
+        snapshot.setRoutineAction(source.isRoutineAction());
+        snapshot.setRecurrenceIntervalDays(source.getRecurrenceIntervalDays());
         snapshot.setProofDocument(source.getProofDocument());
         snapshot.setProofDocumentFileName(source.getProofDocumentFileName());
         snapshot.setProofDocumentContentType(source.getProofDocumentContentType());

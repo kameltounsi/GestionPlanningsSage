@@ -3,10 +3,13 @@ package com.gestionplanning.ecr;
 import com.gestionplanning.action.ActionPlanningService;
 import com.gestionplanning.audit.AuditLogService;
 import com.gestionplanning.auth.AccessControlService;
+import com.gestionplanning.preferential.FinishedProductReference;
+import com.gestionplanning.preferential.FinishedProductReferenceRepository;
 import com.gestionplanning.storage.CloudinaryStorageService;
 import com.gestionplanning.storage.CloudinaryStorageService.DownloadException;
 import com.gestionplanning.storage.CloudinaryStorageService.DownloadedAsset;
 import com.gestionplanning.storage.StoredAsset;
+import com.gestionplanning.user.AccountMailService;
 import com.gestionplanning.user.AppUser;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
@@ -16,8 +19,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 import javax.validation.Valid;
 import java.net.URI;
+import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 @RestController
@@ -31,11 +37,15 @@ public class EcrRequestController {
     private final AccessControlService accessControlService;
     private final PhaseValidationRequestRepository validationRepository;
     private final AuditLogService auditLogService;
+    private final AccountMailService accountMailService;
+    private final FinishedProductReferenceRepository finishedProductRepository;
 
     public EcrRequestController(EcrRequestRepository requestRepository, ChecklistItemRepository checklistItemRepository,
                                 CloudinaryStorageService storageService, EcrTemplateService templateService,
                                 ActionPlanningService planningService, AccessControlService accessControlService,
-                                PhaseValidationRequestRepository validationRepository, AuditLogService auditLogService) {
+                                PhaseValidationRequestRepository validationRepository, AuditLogService auditLogService,
+                                AccountMailService accountMailService,
+                                FinishedProductReferenceRepository finishedProductRepository) {
         this.requestRepository = requestRepository;
         this.checklistItemRepository = checklistItemRepository;
         this.storageService = storageService;
@@ -44,6 +54,8 @@ public class EcrRequestController {
         this.accessControlService = accessControlService;
         this.validationRepository = validationRepository;
         this.auditLogService = auditLogService;
+        this.accountMailService = accountMailService;
+        this.finishedProductRepository = finishedProductRepository;
     }
 
     @GetMapping
@@ -75,6 +87,11 @@ public class EcrRequestController {
     @PostMapping
     public ResponseEntity<EcrRequest> create(@Valid @RequestBody EcrRequest request,
                                              @RequestAttribute("authenticatedUser") AppUser user) {
+        normalizeRequestFields(request);
+        if (requestRepository.existsByModificationNumberIgnoreCase(request.getModificationNumber())
+                || !finishedProductsSelectionValid(request)) {
+            return ResponseEntity.badRequest().build();
+        }
         if (request.getAccessInternalNumber() == null) {
             request.setAccessInternalNumber(requestRepository.findMaxAccessInternalNumber() + 1);
         }
@@ -101,13 +118,22 @@ public class EcrRequestController {
         return requestRepository.findById(id)
                 .filter(request -> accessControlService.canAccessRequest(user, request))
                 .map(request -> {
+                    if (isTerminalRequest(request)) {
+                        return ResponseEntity.status(403).<EcrRequest>build();
+                    }
                     if (dossierReviewChanged(request.getDossierReview(), updatedRequest.getDossierReview())
                             && !canManageDossierReview(user, request)) {
                         return ResponseEntity.status(403).<EcrRequest>build();
                     }
+                    normalizeRequestFields(updatedRequest);
+                    if (requestRepository.existsByModificationNumberIgnoreCaseAndIdNot(updatedRequest.getModificationNumber(), id)
+                            || !finishedProductsSelectionValid(updatedRequest)) {
+                        return ResponseEntity.badRequest().<EcrRequest>build();
+                    }
                     request.setModificationNumber(updatedRequest.getModificationNumber());
                     request.setClient(updatedRequest.getClient());
                     request.setProduct(updatedRequest.getProduct());
+                    request.setFinishedProducts(updatedRequest.getFinishedProducts());
                     request.setModificationProject(updatedRequest.getModificationProject());
                     request.setReceptionDate(updatedRequest.getReceptionDate());
                     request.setPilot(updatedRequest.getPilot());
@@ -130,6 +156,9 @@ public class EcrRequestController {
                     EcrStage nextStage = updatedStage == EcrStage.CANCELLED || EcrStage.isAllowed(updatedStage, updatedRequest.isNewVersion())
                             ? updatedStage
                             : EcrStage.firstAllowed(updatedRequest.isNewVersion());
+                    if (nextStage == EcrStage.CLOSED && request.getCurrentStage() != EcrStage.CLOSED) {
+                        return ResponseEntity.badRequest().<EcrRequest>build();
+                    }
                     if (nextStage != request.getCurrentStage() && !accessControlService.isAdmin(user)) {
                         return ResponseEntity.status(403).<EcrRequest>build();
                     }
@@ -158,6 +187,9 @@ public class EcrRequestController {
         }
         return requestRepository.findById(id)
                 .map(request -> {
+                    if (isTerminalRequest(request)) {
+                        return ResponseEntity.status(403).<EcrRequest>build();
+                    }
                     if ("before".equalsIgnoreCase(type)) {
                         storageService.deleteQuietly(request.getBeforePhotoPublicId(), request.getBeforePhotoResourceType());
                         StoredAsset asset = storageService.upload(file, "gestion-planning/ecr-requests/" + id + "/before");
@@ -238,7 +270,10 @@ public class EcrRequestController {
         return requestRepository.findById(id)
                 .filter(request -> accessControlService.canAccessRequest(user, request))
                 .map(request -> {
-                    if (!EcrStage.isAllowed(stage, request.isNewVersion()) || stage == EcrStage.CANCELLED) {
+                    if (isTerminalRequest(request)) {
+                        return ResponseEntity.status(403).<EcrRequest>build();
+                    }
+                    if (!EcrStage.isAllowed(stage, request.isNewVersion()) || stage == EcrStage.CANCELLED || stage == EcrStage.CLOSED) {
                         return ResponseEntity.badRequest().<EcrRequest>build();
                     }
                     boolean reopeningApprovedStage = isApprovedStage(request, stage) && stage != request.getCurrentStage();
@@ -251,6 +286,13 @@ public class EcrRequestController {
                         request.setCancelledFromStage(null);
                     }
                     request.setCurrentStage(stage);
+                    request.setClosureRequested(false);
+                    request.setClosureRequestedDate(null);
+                    request.setClosureRequestedBy(null);
+                    if (stage != EcrStage.CLOSED) {
+                        request.setClosureStatus(false);
+                        request.setClosureDate(null);
+                    }
                     EcrRequest saved = requestRepository.save(request);
                     if (reopeningApprovedStage) {
                         auditLogService.recordBusinessEvent(
@@ -273,7 +315,7 @@ public class EcrRequestController {
                 .filter(request -> accessControlService.canAccessRequest(user, request))
                 .filter(request -> accessControlService.canCancelRequest(user, request))
                 .map(request -> {
-                    if (request.getCurrentStage() == EcrStage.CANCELLED) {
+                    if (isTerminalRequest(request) || request.getCurrentStage() == EcrStage.CANCELLED) {
                         return ResponseEntity.badRequest().<EcrRequest>build();
                     }
                     request.setCancelledFromStage(request.getCurrentStage());
@@ -282,7 +324,11 @@ public class EcrRequestController {
                     request.setCancelledDate(java.time.LocalDate.now());
                     request.setClosureStatus(false);
                     request.setClosureDate(null);
+                    request.setClosureRequested(false);
+                    request.setClosureRequestedDate(null);
+                    request.setClosureRequestedBy(null);
                     EcrRequest saved = requestRepository.save(request);
+                    templateService.cancelOpenActionsBeforeCancelledPhase(saved);
                     templateService.ensureMissingActionsForStage(saved, EcrStage.CANCELLED);
                     planningService.recalculateRequest(saved);
                     auditLogService.recordBusinessEvent(
@@ -291,6 +337,67 @@ public class EcrRequestController {
                             "modification",
                             requestLabel(saved),
                             "Modification annulée: " + requestLabel(saved)
+                    );
+                    return ResponseEntity.ok(saved);
+                })
+                .orElse(ResponseEntity.status(403).build());
+    }
+
+    @PatchMapping("/{id}/request-closure")
+    public ResponseEntity<EcrRequest> requestClosure(@PathVariable Long id,
+                                                     @RequestAttribute("authenticatedUser") AppUser user) {
+        return requestRepository.findById(id)
+                .filter(request -> accessControlService.canAccessRequest(user, request))
+                .filter(request -> accessControlService.isRequestPilot(user, request))
+                .map(request -> {
+                    if (isTerminalRequest(request) || !allWorkflowStagesApproved(request)) {
+                        return ResponseEntity.badRequest().<EcrRequest>build();
+                    }
+                    request.setClosureRequested(true);
+                    request.setClosureRequestedDate(LocalDate.now());
+                    request.setClosureRequestedBy(displayName(user));
+                    request.setClosureStatus(false);
+                    request.setClosureDate(null);
+                    EcrRequest saved = requestRepository.save(request);
+                    notifyClosureRequested(saved, user);
+                    auditLogService.recordBusinessEvent(
+                            user,
+                            "DEMANDE_CLOTURE_MODIFICATION",
+                            "modification",
+                            requestLabel(saved),
+                            "Demande de cloture: " + requestLabel(saved)
+                    );
+                    return ResponseEntity.ok(saved);
+                })
+                .orElse(ResponseEntity.status(403).build());
+    }
+
+    @PatchMapping("/{id}/close")
+    public ResponseEntity<EcrRequest> close(@PathVariable Long id,
+                                            @RequestAttribute("authenticatedUser") AppUser user) {
+        if (!accessControlService.isAdmin(user)) {
+            return ResponseEntity.status(403).build();
+        }
+        return requestRepository.findById(id)
+                .filter(request -> accessControlService.canAccessRequest(user, request))
+                .map(request -> {
+                    if (isTerminalRequest(request) || !request.isClosureRequested() || !allWorkflowStagesApproved(request)) {
+                        return ResponseEntity.badRequest().<EcrRequest>build();
+                    }
+                    if (!request.isCancelledStatus()) {
+                        request.setCurrentStage(EcrStage.CLOSED);
+                    }
+                    request.setClosureStatus(true);
+                    request.setClosureDate(LocalDate.now());
+                    request.setClosureRequested(false);
+                    EcrRequest saved = requestRepository.save(request);
+                    notifyModificationCompleted(saved);
+                    auditLogService.recordBusinessEvent(
+                            user,
+                            "CLOTURE_MODIFICATION",
+                            "modification",
+                            requestLabel(saved),
+                            "Modification marquee terminee/cloturee: " + requestLabel(saved)
                     );
                     return ResponseEntity.ok(saved);
                 })
@@ -340,6 +447,39 @@ public class EcrRequestController {
                 .orElse(false);
     }
 
+    private boolean allWorkflowStagesApproved(EcrRequest request) {
+        if (request == null || request.getId() == null) {
+            return false;
+        }
+        if (request.getCurrentStage() == EcrStage.CANCELLED) {
+            return isApprovedStage(request, EcrStage.CANCELLED);
+        }
+        return EcrStage.allowedStages(request.isNewVersion()).stream()
+                .allMatch(stage -> isApprovedStage(request, stage));
+    }
+
+    private void notifyClosureRequested(EcrRequest request, AppUser requester) {
+        Map<String, AppUser> recipients = new LinkedHashMap<>();
+        accessControlService.adminsFor(request)
+                .forEach(user -> recipients.put(normalizeEmail(user.getEmail()), user));
+        recipients.remove("");
+        accountMailService.sendModificationClosureRequestedEmail(request, requester, recipients.values());
+    }
+
+    private void notifyModificationCompleted(EcrRequest request) {
+        Map<String, AppUser> recipients = new LinkedHashMap<>();
+        accessControlService.projectLeadFor(request)
+                .ifPresent(user -> recipients.put(normalizeEmail(user.getEmail()), user));
+        accessControlService.adminsFor(request)
+                .forEach(user -> recipients.put(normalizeEmail(user.getEmail()), user));
+        recipients.remove("");
+        accountMailService.sendModificationCompletedEmail(request, recipients.values());
+    }
+
+    private String normalizeEmail(String email) {
+        return email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
+    }
+
     private String normalizeView(String view, boolean includeArchived) {
         if (includeArchived) {
             return "all";
@@ -384,6 +524,80 @@ public class EcrRequestController {
 
     private boolean canManageDossierReview(AppUser user, EcrRequest request) {
         return accessControlService.isAdmin(user) || accessControlService.isRequestPilot(user, request);
+    }
+
+    private void normalizeRequestFields(EcrRequest request) {
+        if (request == null) {
+            return;
+        }
+        request.setModificationNumber(trimToNull(request.getModificationNumber()));
+        request.setClient(trimToNull(request.getClient()));
+        request.setProduct(trimToNull(request.getProduct()));
+        request.setFinishedProducts(trimToNull(request.getFinishedProducts()));
+        request.setModificationProject(trimToNull(request.getModificationProject()));
+        request.setPilot(trimToNull(request.getPilot()));
+        request.setModificationReason(trimToNull(request.getModificationReason()));
+        request.setModificationDetail(trimToNull(request.getModificationDetail()));
+        request.setMixability(trimToNull(request.getMixability()));
+        request.setDossierReview(trimToNull(request.getDossierReview()));
+    }
+
+    private boolean finishedProductsSelectionValid(EcrRequest request) {
+        List<String> linkedFinishedProducts = linkedFinishedProductKeys(request);
+        if (linkedFinishedProducts.isEmpty()) {
+            return true;
+        }
+        List<String> selectedFinishedProducts = selectedTokens(request == null ? null : request.getFinishedProducts());
+        return !selectedFinishedProducts.isEmpty()
+                && selectedFinishedProducts.stream().allMatch(selected -> linkedFinishedProducts.stream().anyMatch(linked -> linked.equalsIgnoreCase(selected)));
+    }
+
+    private List<String> linkedFinishedProductKeys(EcrRequest request) {
+        if (request == null || isBlank(request.getClient()) || isBlank(request.getModificationProject()) || isBlank(request.getProduct())) {
+            return java.util.Collections.emptyList();
+        }
+        List<String> products = selectedTokens(request.getProduct());
+        if (products.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+        return finishedProductRepository.findAll().stream()
+                .filter(reference -> equalsNormalized(reference.getClient(), request.getClient()))
+                .filter(reference -> equalsNormalized(reference.getProject(), request.getModificationProject()))
+                .filter(reference -> products.stream().anyMatch(product -> equalsNormalized(reference.getProduct(), product)))
+                .map(FinishedProductReference::getPartNumber)
+                .filter(value -> !isBlank(value))
+                .map(String::trim)
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    private List<String> selectedTokens(String value) {
+        if (isBlank(value)) {
+            return java.util.Collections.emptyList();
+        }
+        return java.util.Arrays.stream(value.split("[,;]+"))
+                .map(String::trim)
+                .filter(token -> !token.isEmpty())
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    private boolean equalsNormalized(String left, String right) {
+        return normalizeText(left).equals(normalizeText(right));
+    }
+
+    private String normalizeText(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private String trimToNull(String value) {
+        return isBlank(value) ? null : value.trim();
+    }
+
+    private boolean isTerminalRequest(EcrRequest request) {
+        return request != null && (request.getCurrentStage() == EcrStage.CLOSED || request.isClosureStatus());
     }
 
     private boolean dossierReviewChanged(String currentValue, String nextValue) {
@@ -474,6 +688,8 @@ public class EcrRequestController {
                 return "Customer validation";
             case PPAP_SOP_PREPARATION:
                 return "PPAP SOP preparation";
+            case CLOSURE_STATUS:
+                return "Closure status";
             case CLOSED:
                 return "Closed";
             case CANCELLED:

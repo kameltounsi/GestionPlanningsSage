@@ -11,7 +11,8 @@ public enum EcrStage {
     CUSTOMER_VALIDATION("Customer validation", "Customer validation"),
     PPAP_SOP_PREPARATION("PPAP validation Preparation SOP", "Production Set-up & Pre-Series"),
     LAUNCH("Launch", "Launch"),
-    CLOSED("Clôture Status", "Clôture Status"),
+    CLOSURE_STATUS("Cloture status", "Cloture status"),
+    CLOSED("Cloturee", "Cloturee"),
     CANCELLED("Cancelled", "Project Cancelled");
 
     private static final List<EcrStage> MODIFICATION_STAGES = Arrays.asList(
@@ -20,7 +21,7 @@ public enum EcrStage {
             PRODUCT_DEVELOPMENT,
             CUSTOMER_VALIDATION,
             PPAP_SOP_PREPARATION,
-            CLOSED
+            CLOSURE_STATUS
     );
 
     private static final List<EcrStage> NEW_PROJECT_STAGES = Arrays.asList(
@@ -29,8 +30,7 @@ public enum EcrStage {
             PRODUCT_DEVELOPMENT,
             PROCESS_DEVELOPMENT,
             PPAP_SOP_PREPARATION,
-            LAUNCH,
-            CLOSED
+            LAUNCH
     );
 
     private final String modificationLabel;

@@ -11,7 +11,7 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
   const [dialogOpen, setDialogOpen] = useState(false);
   const [showNewProjectStages, setShowNewProjectStages] = useState(false);
   const visibleStages = useMemo(
-    () => stageDefinitions.filter((stage) => (showNewProjectStages ? stage.newProject : stage.modification)),
+    () => stageDefinitions.filter((stage) => stage.key !== "CLOSED" && (showNewProjectStages ? stage.newProject : stage.modification)),
     [showNewProjectStages]
   );
   const [selectedStage, setSelectedStage] = useState(visibleStages[0]?.key || "FEASIBILITY_VALIDATION");
@@ -59,6 +59,7 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
   }
 
   function ruleDependency(rule) {
+    if (rule.routineAction) return `Routiniere: chaque ${rule.recurrenceIntervalDays || 1} j`;
     if (!rule.dependencyActionTitle) return "Depart reception ECR";
     return `Apres ${rule.dependencyAnchor === "INPUT" ? "entree" : "sortie"}: ${rule.dependencyActionTitle}`;
   }
@@ -163,7 +164,7 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
 }
 
 function PhaseActionGrid({ label, newProject = false, rules, selectedStage, type, onCreate, onSelect }) {
-  const stages = stageDefinitions.filter((stage) => (newProject ? stage.newProject : stage.modification));
+  const stages = stageDefinitions.filter((stage) => stage.key !== "CLOSED" && (newProject ? stage.newProject : stage.modification));
 
   return (
     <section className="admin-phase-section">
@@ -173,14 +174,10 @@ function PhaseActionGrid({ label, newProject = false, rules, selectedStage, type
       </div>
       <div className="admin-phase-grid">
         {stages.map((stage) => {
-          const count = rules.filter((rule) => (
-            rule.stage === stage.key && (newProject ? rule.appliesToNewProject : rule.appliesToModification)
-          )).length;
           return (
             <article className={`admin-phase-card ${stageColorClass(stage.key, newProject)} ${selectedStage === stage.key ? "selected" : ""}`} key={`${type}-${stage.key}`}>
               <button className="phase-select-action" type="button" onClick={() => onSelect(stage.key)}>
                 <strong>{newProject ? stage.newProjectLabel : stage.modificationLabel}</strong>
-                <span>{count} action{count > 1 ? "s" : ""}</span>
               </button>
               <button className="phase-add-action" type="button" onClick={(event) => {
                 event.stopPropagation();
@@ -243,6 +240,7 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
   const dependencyOptions = previousDependencyOptions(rules, form);
   const selectedProofDocumentFiles = filesFromValue(form.proofDocumentFile);
   const savedProofDocuments = planningRuleProofDocuments(form);
+  const routineAction = Boolean(form.routineAction);
 
   function addProofDocumentFiles(event) {
     const selectedFiles = Array.from(event.currentTarget.files || []);
@@ -340,13 +338,38 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
           </label>
           <label>
             Bloquée par
-            <select value={form.dependencyActionTitle} onChange={(event) => setForm((current) => ({ ...current, dependencyActionTitle: event.target.value }))}>
+            <select disabled={routineAction} value={routineAction ? "" : form.dependencyActionTitle} onChange={(event) => setForm((current) => ({ ...current, dependencyActionTitle: event.target.value }))}>
               <option value="">Aucune action</option>
               {dependencyOptions.map((rule) => (
                 <option key={rule.id || rule.actionTitle} value={rule.actionTitle}>{rule.actionTitle}</option>
               ))}
             </select>
           </label>
+          <label className="asset-required-field user-enabled-field routine-action-toggle">
+            <input
+              checked={routineAction}
+              type="checkbox"
+              onChange={(event) => setForm((current) => ({
+                ...current,
+                routineAction: event.target.checked,
+                dependencyActionTitle: event.target.checked ? "" : current.dependencyActionTitle,
+                recurrenceIntervalDays: event.target.checked ? current.recurrenceIntervalDays || 7 : current.recurrenceIntervalDays
+              }))}
+            />
+            Action routiniere
+          </label>
+          {routineAction && (
+            <label>
+              Repetition
+              <select value={form.recurrenceIntervalDays || 7} onChange={(event) => setForm((current) => ({ ...current, recurrenceIntervalDays: event.target.value }))}>
+                <option value="1">Chaque jour</option>
+                <option value="3">Chaque 3 jours</option>
+                <option value="7">Chaque semaine</option>
+                <option value="14">Chaque 2 semaines</option>
+                <option value="30">Chaque mois</option>
+              </select>
+            </label>
+          )}
           <label>
             Jours de travail
             <input min="0" type="number" value={form.durationDays} onChange={(event) => setForm((current) => ({ ...current, durationDays: event.target.value }))} />
@@ -402,7 +425,7 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
             <Save size={16} />
             Enregistrer action
           </button>
-          <button className="secondary-action" type="button" onClick={onClose}>Annulér</button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
         </div>
       </form>
     </div>

@@ -8,6 +8,7 @@ frontend/dist/
 
 # Logs
 *.log
+.env
 
 # IDE / OS
 .idea/

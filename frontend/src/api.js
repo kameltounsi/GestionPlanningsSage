@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:3001/api";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || `${window.location.protocol}//${window.location.hostname}:3001/api`;
 const SESSION_KEY = "gestionPlanningSession";
 
 export function getStoredSession() {
@@ -265,6 +265,18 @@ export function updateEcrStage(requestId, stage) {
 
 export function cancelEcrRequest(requestId) {
   return request(`/ecr-requests/${requestId}/cancel`, {
+    method: "PATCH"
+  });
+}
+
+export function requestEcrClosure(requestId) {
+  return request(`/ecr-requests/${requestId}/request-closure`, {
+    method: "PATCH"
+  });
+}
+
+export function closeEcrRequest(requestId) {
+  return request(`/ecr-requests/${requestId}/close`, {
     method: "PATCH"
   });
 }

@@ -5,6 +5,7 @@ import com.gestionplanning.action.EcrAction;
 
 import javax.persistence.*;
 import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.NotNull;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,19 +17,31 @@ public class EcrRequest {
     private Long id;
 
     private Integer accessInternalNumber;
+    @NotBlank
+    @Column(nullable = false, unique = true)
     private String modificationNumber;
 
     @NotBlank
     @Column(nullable = false)
     private String client;
 
+    @NotBlank
+    @Column(nullable = false, length = 3000)
     private String product;
 
-    @Column(length = 3000)
+    @Column(length = 5000)
+    private String finishedProducts;
+
+    @NotBlank
+    @Column(nullable = false, length = 3000)
     private String modificationProject;
 
+    @NotNull
+    @Column(nullable = false)
     private LocalDate receptionDate;
     private LocalDate sopDate;
+    @NotBlank
+    @Column(nullable = false)
     private String pilot;
     @Column(length = 3000)
     private String modificationReason;
@@ -74,6 +87,10 @@ public class EcrRequest {
     private LocalDate ppapValidationDate;
     private boolean closureStatus;
     private LocalDate closureDate;
+    @Column(columnDefinition = "boolean default false")
+    private Boolean closureRequested = false;
+    private LocalDate closureRequestedDate;
+    private String closureRequestedBy;
     private boolean cancelledStatus;
     private LocalDate cancelledDate;
     @Enumerated(EnumType.STRING)
@@ -133,6 +150,14 @@ public class EcrRequest {
 
     public void setProduct(String product) {
         this.product = product;
+    }
+
+    public String getFinishedProducts() {
+        return finishedProducts;
+    }
+
+    public void setFinishedProducts(String finishedProducts) {
+        this.finishedProducts = finishedProducts;
     }
 
     public String getModificationProject() {
@@ -471,6 +496,30 @@ public class EcrRequest {
         this.closureDate = closureDate;
     }
 
+    public boolean isClosureRequested() {
+        return Boolean.TRUE.equals(closureRequested);
+    }
+
+    public void setClosureRequested(Boolean closureRequested) {
+        this.closureRequested = closureRequested;
+    }
+
+    public LocalDate getClosureRequestedDate() {
+        return closureRequestedDate;
+    }
+
+    public void setClosureRequestedDate(LocalDate closureRequestedDate) {
+        this.closureRequestedDate = closureRequestedDate;
+    }
+
+    public String getClosureRequestedBy() {
+        return closureRequestedBy;
+    }
+
+    public void setClosureRequestedBy(String closureRequestedBy) {
+        this.closureRequestedBy = closureRequestedBy;
+    }
+
     public boolean isCancelledStatus() {
         return cancelledStatus;
     }
@@ -582,5 +631,31 @@ public class EcrRequest {
     public void addChecklistItem(ChecklistItem item) {
         checklistItems.add(item);
         item.setRequest(this);
+    }
+
+    @PreUpdate
+    private void repairLegacyRequiredFields() {
+        if (isBlank(modificationNumber) && id != null) {
+            modificationNumber = "LEGACY-ECR-" + id;
+        }
+        if (isBlank(client)) {
+            client = "Non renseigne";
+        }
+        if (isBlank(product)) {
+            product = "Non renseigne";
+        }
+        if (isBlank(modificationProject)) {
+            modificationProject = "Non renseigne";
+        }
+        if (receptionDate == null) {
+            receptionDate = LocalDate.now();
+        }
+        if (isBlank(pilot)) {
+            pilot = "Non renseigne";
+        }
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 }

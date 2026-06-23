@@ -49,6 +49,7 @@ public class ActionPlanningService {
         for (EcrStage stage : EcrStage.allowedStages(request.isNewVersion())) {
             List<EcrAction> stageActions = actions.stream()
                     .filter(action -> action.getStage() == stage)
+                    .filter(action -> !action.isRoutineAction())
                     .sorted(this::compareActionsForPlanning)
                     .collect(Collectors.toList());
             if (stageActions.isEmpty()) {
@@ -74,6 +75,7 @@ public class ActionPlanningService {
 
         List<EcrAction> plannedActions = actions.stream()
                 .filter(action -> action.getStage() != EcrStage.CANCELLED)
+                .filter(action -> !action.isRoutineAction())
                 .collect(Collectors.toList());
         updateSopDate(request, plannedActions, fallbackStart);
         refreshActionStatuses(actions);
@@ -90,6 +92,7 @@ public class ActionPlanningService {
 
         List<EcrAction> cancelledActions = actions.stream()
                 .filter(action -> action.getStage() == EcrStage.CANCELLED)
+                .filter(action -> !action.isRoutineAction())
                 .sorted(this::compareActionsForPlanning)
                 .collect(Collectors.toList());
         for (EcrAction action : cancelledActions) {
@@ -117,6 +120,14 @@ public class ActionPlanningService {
         }
         LocalDate startDate = changedAction.getStartDate();
         if (startDate == null) {
+            recalculateRequest(changedAction.getRequest());
+            return;
+        }
+        if (changedAction.isRoutineAction()) {
+            changedAction.setWorkDurationDays(durationOrDefault(changedAction.getWorkDurationDays()));
+            changedAction.setEndDate(startDate.plusDays(changedAction.getWorkDurationDays()));
+            changedAction.setDeadline(changedAction.getEndDate());
+            actionRepository.save(changedAction);
             recalculateRequest(changedAction.getRequest());
             return;
         }

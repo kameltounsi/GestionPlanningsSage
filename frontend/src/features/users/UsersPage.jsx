@@ -137,7 +137,7 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
         <div className="form-intro">
           <div>
             <h2 id="user-dialog-title">{editingUser ? "Modifier l'utilisateur" : "Ajouter un utilisateur"}</h2>
-            <p>Le username et l'email doivent rester uniques. Le mot de passe est requis seulement à la création.</p>
+            <p>Le username et l'email doivent rester uniques. Le mot de passe initial est defini seulement a la creation.</p>
           </div>
           <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
             <X size={18} />
@@ -174,10 +174,12 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
             Email
             <input autoComplete="email" required disabled={!canAdmin} type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
           </label>
-          <label>
-            Mot de passe
-            <input required={!editingUser} disabled={!canAdmin} type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} />
-          </label>
+          {!editingUser && (
+            <label>
+              Mot de passe
+              <input required disabled={!canAdmin} type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} />
+            </label>
+          )}
           <label>
             Telephone
             <input autoComplete="tel" disabled={!canAdmin} inputMode="tel" pattern="\\+?[0-9\\s().-]{8,20}" value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
@@ -218,7 +220,7 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
             <Save size={16} />
             Enregistrer
           </button>
-          <button className="secondary-action" type="button" onClick={onClose}>Annulér</button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
         </div>
       </form>
     </div>

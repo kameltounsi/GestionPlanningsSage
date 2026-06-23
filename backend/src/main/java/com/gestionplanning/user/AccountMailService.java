@@ -35,6 +35,7 @@ public class AccountMailService {
     private final boolean smtpAuth;
     private final boolean startTlsEnabled;
     private final boolean startTlsRequired;
+    private final boolean sslEnabled;
     private final String applicationUrl;
     private final boolean accountMailEnabled;
     private final boolean alertMailEnabled;
@@ -46,6 +47,7 @@ public class AccountMailService {
                               @Value("${spring.mail.properties.mail.smtp.auth:true}") boolean smtpAuth,
                               @Value("${spring.mail.properties.mail.smtp.starttls.enable:true}") boolean startTlsEnabled,
                               @Value("${spring.mail.properties.mail.smtp.starttls.required:true}") boolean startTlsRequired,
+                              @Value("${spring.mail.properties.mail.smtp.ssl.enable:false}") boolean sslEnabled,
                               @Value("${app.frontend.url:http://localhost:3000}") String applicationUrl,
                               @Value("${app.account.mail.enabled:true}") boolean accountMailEnabled,
                               @Value("${app.alert.mail.enabled:true}") boolean alertMailEnabled) {
@@ -56,6 +58,7 @@ public class AccountMailService {
         this.smtpAuth = smtpAuth;
         this.startTlsEnabled = startTlsEnabled;
         this.startTlsRequired = startTlsRequired;
+        this.sslEnabled = sslEnabled;
         this.applicationUrl = applicationUrl;
         this.accountMailEnabled = accountMailEnabled;
         this.alertMailEnabled = alertMailEnabled;
@@ -332,6 +335,50 @@ public class AccountMailService {
         sendMessage(to, title, text, html, "modification completion");
     }
 
+    public void sendModificationClosureRequestedEmail(EcrRequest request, AppUser requester, Collection<AppUser> recipients) {
+        if (!alertMailEnabled) {
+            throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
+        }
+        if (request == null) {
+            return;
+        }
+        if (recipients == null || recipients.isEmpty()) {
+            throw new MailDeliveryException("Aucun admin destinataire pour l'email de demande de clôture.");
+        }
+        String to = recipients.stream()
+                .map(AppUser::getEmail)
+                .filter(email -> !isBlank(email))
+                .distinct()
+                .collect(Collectors.joining(","));
+        if (isBlank(to)) {
+            throw new MailDeliveryException("Les admins n'ont pas d'adresse email renseignée.");
+        }
+        if (!isMailConfigured()) {
+            LOGGER.error("Modification closure request email skipped because SMTP configuration is incomplète.");
+            throw new MailDeliveryException("Configuration SMTP incomplète: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
+        }
+        String requesterName = requester == null ? value(request.getClosureRequestedBy()) : value(requester.getFullName());
+        String modificationName = modificationName(request);
+        String title = "Demande de clôture de modification";
+        String text = "Le pilote demande la clôture de la modification " + value(request.getModificationNumber())
+                + "\nNom de la modification : " + value(modificationName)
+                + "\nProjet : " + value(request.getModificationProject())
+                + "\nPilote : " + value(requesterName)
+                + "\nDate de demande : " + value(request.getClosureRequestedDate() == null ? null : request.getClosureRequestedDate().toString())
+                + "\nLien : " + value(applicationUrl);
+        String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
+                + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
+                + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
+                + "<div style=\"background:#1d4ed8;color:#ffffff;padding:24px 30px;\"><div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#bfdbfe;\">Gestion Planning Sage</div>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Demande de clôture</h1></div>"
+                + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
+                + "<p>Le pilote <strong>" + escape(value(requesterName)) + "</strong> demande la clôture de la modification <strong>" + escape(value(request.getModificationNumber())) + "</strong>.</p>"
+                + "<p><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Client :</strong> " + escape(value(request.getClient())) + "<br><strong>Produit :</strong> " + escape(value(request.getProduct())) + "<br><strong>Date de demande :</strong> " + escape(value(request.getClosureRequestedDate() == null ? null : request.getClosureRequestedDate().toString())) + "</p>"
+                + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Marquer terminée</a></div>"
+                + "</div></div></div></body></html>";
+        sendMessage(to, title, text, html, "modification closure request");
+    }
+
     public void sendPasswordResetCodeEmail(AppUser user, String code) {
         if (!accountMailEnabled) {
             throw new MailDeliveryException("L'envoi email est désactivé par APP_ACCOUNT_MAIL_ENABLED.");
@@ -415,6 +462,7 @@ public class AccountMailService {
         properties.put("mail.smtp.auth", String.valueOf(smtpAuth));
         properties.put("mail.smtp.starttls.enable", String.valueOf(startTlsEnabled));
         properties.put("mail.smtp.starttls.required", String.valueOf(startTlsRequired));
+        properties.put("mail.smtp.ssl.enable", String.valueOf(sslEnabled));
         properties.put("mail.smtp.connectiontimeout", "10000");
         properties.put("mail.smtp.timeout", "10000");
         properties.put("mail.smtp.writetimeout", "10000");

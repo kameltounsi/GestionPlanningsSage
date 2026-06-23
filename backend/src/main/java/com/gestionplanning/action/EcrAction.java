@@ -90,6 +90,11 @@ public class EcrAction {
     private Integer workDurationDays;
     private Long dependsOnActionId;
     private String dependencyAnchor;
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean routineAction;
+    private Integer recurrenceIntervalDays;
+    private String routineSeriesId;
+    private Integer routineOccurrenceIndex;
 
     @Enumerated(EnumType.STRING)
     private EcrStage stage = EcrStage.FEASIBILITY_VALIDATION;
@@ -418,6 +423,38 @@ public class EcrAction {
 
     public void setDependencyAnchor(String dependencyAnchor) {
         this.dependencyAnchor = dependencyAnchor;
+    }
+
+    public boolean isRoutineAction() {
+        return routineAction;
+    }
+
+    public void setRoutineAction(boolean routineAction) {
+        this.routineAction = routineAction;
+    }
+
+    public Integer getRecurrenceIntervalDays() {
+        return recurrenceIntervalDays;
+    }
+
+    public void setRecurrenceIntervalDays(Integer recurrenceIntervalDays) {
+        this.recurrenceIntervalDays = recurrenceIntervalDays;
+    }
+
+    public String getRoutineSeriesId() {
+        return routineSeriesId;
+    }
+
+    public void setRoutineSeriesId(String routineSeriesId) {
+        this.routineSeriesId = routineSeriesId;
+    }
+
+    public Integer getRoutineOccurrenceIndex() {
+        return routineOccurrenceIndex;
+    }
+
+    public void setRoutineOccurrenceIndex(Integer routineOccurrenceIndex) {
+        this.routineOccurrenceIndex = routineOccurrenceIndex;
     }
 
     public EcrStage getStage() {

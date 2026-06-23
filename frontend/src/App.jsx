@@ -1,12 +1,15 @@
 import React, { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Swal from "sweetalert2";
 import "sweetalert2/dist/sweetalert2.min.css";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import {
   CalendarDays,
   CheckCircle2,
   CircleAlert,
   Archive,
   ArchiveRestore,
+  Bot,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -26,8 +29,10 @@ import {
   Search,
   Send,
   Smile,
+  Square,
   Trash2,
   Upload,
+  Volume2,
   X,
   XCircle
 } from "lucide-react";
@@ -44,6 +49,7 @@ import {
   createUser,
   addChatGroupMember,
   cancelEcrRequest,
+  closeEcrRequest,
   confirmPasswordReset,
   clearSession,
   chatAttachmentUrl,
@@ -119,6 +125,7 @@ import {
   rejectActionValidation,
   rejectPhaseValidation,
   requestActionValidation,
+  requestEcrClosure,
   requestPhaseValidation,
   sendChatMessage,
   sendChatGroupMessage,
@@ -151,6 +158,7 @@ const PREFERENTIAL_PAGE_SIZE = 5;
 const pageTitles = {
   dashboard: "Tableau de bord",
   modifications: "Modifications",
+  "ask-ai": "Ask AI",
   projects: "Actions standard",
   traceability: "Tracabilite",
   messages: "Messagerie",
@@ -161,6 +169,7 @@ const pageTitles = {
 const pageRoutes = {
   dashboard: "/dashboard",
   modifications: "/modifications",
+  "ask-ai": "/ask-ai",
   projects: "/actions",
   traceability: "/tracabilite",
   messages: "/messagerie",
@@ -308,7 +317,7 @@ function confirmDelete(title, text) {
     icon: "warning",
     showCancelButton: true,
     confirmButtonText: "Supprimer",
-    cancelButtonText: "Annulér",
+    cancelButtonText: "Annuler",
     confirmButtonColor: "#b42318",
     cancelButtonColor: "#64748b"
   });
@@ -336,12 +345,74 @@ function isActionDone(action) {
   return Boolean(action?.checked) || action?.status === "DONE" || action?.status === "DONE_LATE";
 }
 
+function actionCompletionRate(actions = []) {
+  if (!actions.length) return 0;
+  return Math.round((actions.filter(isActionDone).length / actions.length) * 100);
+}
+
+function cancelledCompletionRate(request, actions = []) {
+  if (request?.currentStage !== "CANCELLED") return null;
+  if (request.closureStatus) return 100;
+  const cancelledActions = actions.filter((action) => action.stage === "CANCELLED");
+  return cancelledActions.length > 0 ? actionCompletionRate(cancelledActions) : 0;
+}
+
+function modificationCompletionRate(request, actions = []) {
+  if (request?.currentStage === "CLOSED" || request?.closureStatus) return 100;
+  if (request?.currentStage === "CANCELLED") return cancelledCompletionRate(request, actions) ?? 0;
+  return actionCompletionRate(actions);
+}
+
+function workflowCompletionRate(request, actions = []) {
+  if (!request) return 0;
+  if (request.currentStage === "CLOSED" || request.closureStatus) return 100;
+  if (request.currentStage === "CANCELLED") return cancelledCompletionRate(request, actions) ?? 0;
+  const stages = getStages(Boolean(request.newVersion)).filter(([stage]) => stage !== "CANCELLED");
+  const currentIndex = stages.findIndex(([stage]) => stage === request.currentStage);
+  if (currentIndex < 0 || stages.length <= 1) return 0;
+  return Math.round((currentIndex / (stages.length - 1)) * 100);
+}
+
+function dashboardProgressGroups(requests = [], labelFor, limit = 5, progressFor = workflowCompletionRate) {
+  return Array.from(requests.reduce((map, request) => {
+    const label = labelFor(request) || "Non renseigne";
+    const item = map.get(label) || { label, count: 0, progressTotal: 0, late: 0, active: 0 };
+    item.count += 1;
+    item.progressTotal += progressFor(request);
+    if (request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED") {
+      item.active += 1;
+    }
+    const sopDate = parseDateOnly(request.sopDate);
+    if (sopDate && sopDate < new Date() && request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED") {
+      item.late += 1;
+    }
+    map.set(label, item);
+    return map;
+  }, new Map()).values())
+    .map((item) => ({ ...item, progress: Math.round(item.progressTotal / Math.max(1, item.count)) }))
+    .sort((first, second) => second.count - first.count || first.progress - second.progress || first.label.localeCompare(second.label, "fr", { sensitivity: "base" }))
+    .slice(0, limit);
+}
+
+function allWorkflowStagesApproved(request, validations = []) {
+  if (!request) return false;
+  if (request.currentStage === "CANCELLED") {
+    return validations.find((validation) => validation.stage === "CANCELLED")?.status === "APPROVED";
+  }
+  const workflowStages = getStages(Boolean(request.newVersion))
+    .map(([key]) => key)
+    .filter((stage) => stage !== "CLOSED");
+  return workflowStages.length > 0 && workflowStages.every((stage) => (
+    validations.find((validation) => validation.stage === stage)?.status === "APPROVED"
+  ));
+}
+
 function isTerminalRequest(request) {
-  return request?.currentStage === "CLOSED" || request?.currentStage === "CANCELLED";
+  return request?.currentStage === "CLOSED" || Boolean(request?.closureStatus);
 }
 
 function isActiveRequest(request) {
-  return Boolean(request) && !request.archived && !isTerminalRequest(request);
+  return Boolean(request) && !request.archived && request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED";
 }
 
 function requestMatchesView(request, view, canAdmin = false) {
@@ -367,6 +438,10 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function escapeExcelHtml(value) {
+  return escapeHtml(value).replace(/\r?\n/g, "<br>");
 }
 
 function requestDisplayName(request) {
@@ -398,6 +473,131 @@ function dossierReviewExportText(request, value) {
     "",
     value || "Revue dossier vide."
   ].join("\n");
+}
+
+function dossierReviewExportExcel(request, value) {
+  const generatedAt = new Date().toLocaleString("fr-FR");
+  const reviewText = value || "Revue dossier vide.";
+  const detailRows = [
+    ["N° client externe", request.modificationNumber],
+    ["Client", request.client],
+    ["Projet", request.modificationProject],
+    ["Produit", request.product],
+    ["Produits finis", request.finishedProducts],
+    ["Pilote", request.pilot],
+    ["Réception", dossierDate(request.receptionDate)],
+    ["Phase", stageLabel(request.currentStage, Boolean(request.newVersion))],
+    ["Extraction générée le", generatedAt]
+  ].map(([label, fieldValue]) => `<tr>
+    <td class="label">${escapeExcelHtml(label)}</td>
+    <td class="value" colspan="3">${escapeExcelHtml(fieldValue || "-")}</td>
+  </tr>`).join("");
+
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Revue dossier - ${escapeHtml(requestDisplayName(request))}</title><style>
+    body{font-family:Calibri,Arial,sans-serif;color:#172008;margin:0;background:#fff}
+    table{border-collapse:collapse;table-layout:fixed;width:980px}
+    col.c1{width:170px} col.c2{width:270px} col.c3{width:170px} col.c4{width:370px}
+    td,th{border:1px solid #c8d8ad;padding:7px 9px;vertical-align:top;font-size:11px;mso-number-format:"\\@";white-space:normal;line-height:1.3}
+    .brand{background:#ffffff;color:#5f7f13;font-size:18px;font-weight:800;text-align:center;vertical-align:middle;border:2px solid #5f7f13}
+    .brand small{display:block;color:#586148;font-size:10px;font-weight:700;letter-spacing:.5px}
+    .title{background:#5f7f13;color:#ffffff;font-size:18px;font-weight:800;text-align:left;vertical-align:middle}
+    .subtitle{background:#edf3df;color:#172008;font-weight:700}
+    .meta{background:#f7f9f1;color:#586148}
+    .section{background:#5f7f13;color:#ffffff;font-weight:800;text-align:left}
+    .label{background:#edf3df;color:#172008;font-weight:800}
+    .value{background:#ffffff;color:#172008}
+    .review{font-size:12px;line-height:1.4;white-space:normal;vertical-align:top}
+  </style></head><body><table>
+    <colgroup><col class="c1"><col class="c2"><col class="c3"><col class="c4"></colgroup>
+    <tr><td class="brand" rowspan="3">SAGE<small>Automotive Interiors</small></td><td class="title" colspan="3">Revue dossier - modification</td></tr>
+    <tr><td class="subtitle" colspan="3">${escapeExcelHtml(requestDisplayName(request))}</td></tr>
+    <tr><td class="meta" colspan="3">Extraction generee le ${escapeHtml(generatedAt)}</td></tr>
+    ${detailRows}
+    <tr><td class="section" colspan="4">Revue dossier</td></tr>
+    <tr><td class="review" colspan="4">${escapeExcelHtml(reviewText)}</td></tr>
+  </table></body></html>`;
+}
+
+function dossierReviewPdfHtml(request, value) {
+  const title = `Revue dossier - ${requestDisplayName(request)}`;
+  const generatedAt = new Date().toLocaleString("fr-FR");
+  const reviewText = value || "Revue dossier vide.";
+  const detailRows = [
+    ["N° client externe", request.modificationNumber],
+    ["Client", request.client],
+    ["Projet", request.modificationProject],
+    ["Produit", request.product],
+    ["Produits finis", request.finishedProducts],
+    ["Pilote", request.pilot],
+    ["Réception", dossierDate(request.receptionDate)],
+    ["Phase", stageLabel(request.currentStage, Boolean(request.newVersion))]
+  ].map(([label, fieldValue]) => `<div class="meta-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(fieldValue || "-")}</strong></div>`).join("");
+  const reviewPages = splitDossierReviewPages(reviewText);
+  const pagesHtml = reviewPages.map((pageText, index) => `<main class="pdf-export-page dossier-review-export-page">
+    <header class="brand-header">
+      <div class="brand-block">
+        <img class="sage-logo" src="/sage_logo1.png" alt="SAGE Automotive Interiors" />
+        <div>
+          <h1>REVUE <span>DOSSIER</span></h1>
+          <div class="subtitle">${escapeHtml(requestDisplayName(request))}<br>Client: ${escapeHtml(request.client || "-")} | Projet: ${escapeHtml(request.modificationProject || "-")}</div>
+        </div>
+      </div>
+      <div class="stamp"><strong>SAGE-INS-ENG-32</strong>Extraction PDF<br>${escapeHtml(generatedAt)}<br>Page ${index + 1} / ${reviewPages.length}</div>
+    </header>
+    <section class="meta-grid">${detailRows}</section>
+    <div class="section-title"><h2>Notes de revue</h2></div>
+    <section class="review-box"><pre>${escapeHtml(pageText)}</pre></section>
+    <footer class="footer"><span>SAGE Automotive Interiors</span><span>${escapeHtml(dossierReviewMetaLine(request))}</span></footer>
+  </main>`).join("");
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
+    @page{size:A4 portrait;margin:12mm}
+    *{box-sizing:border-box}
+    html,body,.pdf-export-page,.brand-header,.meta-card,.review-box{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    body{font-family:Arial,sans-serif;color:#172008;margin:0;background:#f7f9f1}
+    .pdf-export-page{width:900px;height:1240px;background:#f7f9f1;padding:24px;margin:0 0 20px;display:flex;flex-direction:column;overflow:hidden}
+    .brand-header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;background:#fff;border-bottom:4px solid #5f7f13;padding:0 0 14px;margin-bottom:18px}
+    .brand-block{display:flex;align-items:flex-start;gap:14px}
+    .sage-logo{display:block;height:58px;width:136px;object-fit:contain;border:1px solid #bfd0a3;border-radius:4px;padding:6px;background:#fff}
+    h1{font-family:Georgia,serif;font-size:30px;line-height:1.05;margin:0;text-transform:uppercase;color:#172008}
+    h1 span{color:#5f7f13}
+    .subtitle{color:#586148;font-size:12px;line-height:1.45;margin-top:7px}
+    .stamp{border:1px solid #bfd0a3;background:#edf3df;color:#172008;padding:8px 10px;text-align:right;font-size:11px;min-width:180px}
+    .stamp strong{display:block;font-size:13px;margin-bottom:3px}
+    .meta-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:18px}
+    .meta-card{background:#fff;border:1px solid #d9e3c8;border-left:4px solid #5f7f13;padding:9px 10px;min-height:54px}
+    .meta-card span{display:block;color:#586148;font-size:11px;font-weight:700;text-transform:uppercase;margin-bottom:4px}
+    .meta-card strong{display:block;font-size:14px;line-height:1.25;overflow-wrap:anywhere}
+    .section-title{display:flex;align-items:center;gap:10px;margin:12px 0 8px;color:#172008}
+    .section-title:before{content:"";display:block;width:32px;height:7px;background:#5f7f13}
+    .section-title h2{font-size:18px;margin:0;text-transform:uppercase}
+    .review-box{background:#fff;border:1px solid #bfd0a3;flex:1;min-height:0;padding:18px 20px;box-shadow:inset 0 0 0 4px #f1f6e8;overflow:hidden}
+    .review-box pre{font-family:Arial,sans-serif;font-size:13px;line-height:1.55;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#172008}
+    .footer{display:flex;justify-content:space-between;gap:12px;margin-top:16px;border-top:1px solid #bfd0a3;padding-top:10px;color:#586148;font-size:11px}
+  </style></head><body>${pagesHtml}</body></html>`;
+}
+
+function splitDossierReviewPages(value) {
+  const normalized = String(value || "Revue dossier vide.").replace(/\r\n/g, "\n");
+  const sourceLines = normalized.split("\n");
+  const maxVisualLines = 31;
+  const maxCharsPerLine = 94;
+  const pages = [];
+  let currentLines = [];
+  let currentVisualLines = 0;
+  sourceLines.forEach((line) => {
+    const visualLines = Math.max(1, Math.ceil(line.length / maxCharsPerLine));
+    if (currentLines.length > 0 && currentVisualLines + visualLines > maxVisualLines) {
+      pages.push(currentLines.join("\n"));
+      currentLines = [];
+      currentVisualLines = 0;
+    }
+    currentLines.push(line);
+    currentVisualLines += visualLines;
+  });
+  if (currentLines.length > 0) {
+    pages.push(currentLines.join("\n"));
+  }
+  return pages.length > 0 ? pages : ["Revue dossier vide."];
 }
 
 function projectDossierReviewsExportText(projectName, projectRequests) {
@@ -446,38 +646,95 @@ function stagesForRequest(request) {
 
 function projectDossierReviewsExportHtml(projectName, projectRequests) {
   const sortedRequests = sortedProjectDossierRequests(projectRequests);
+  const generatedAt = new Date().toLocaleString("fr-FR");
+  const pagesHtml = sortedRequests.flatMap((request, requestIndex) => {
+    const reviewPages = splitDossierReviewPages(request.dossierReview || "Revue dossier vide.");
+    const detailRows = [
+      ["N° client externe", request.modificationNumber],
+      ["Client", request.client],
+      ["Projet", request.modificationProject || projectName],
+      ["Produit", request.product],
+      ["Produits finis", request.finishedProducts],
+      ["Pilote", request.pilot],
+      ["Réception", dossierDate(request.receptionDate)],
+      ["Phase", stageLabel(request.currentStage, Boolean(request.newVersion))]
+    ].map(([label, value]) => `<div class="meta-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "-")}</strong></div>`).join("");
+    return reviewPages.map((pageText, pageIndex) => `<main class="pdf-export-page dossier-review-export-page">
+      <header class="brand-header">
+        <div class="brand-block"><img class="sage-logo" src="/sage_logo1.png" alt="SAGE Automotive Interiors" /><div><h1>REVUES <span>DOSSIER</span></h1><div class="subtitle">Projet: ${escapeHtml(projectName || "Projet non renseigne")}<br>${requestIndex + 1}. ${escapeHtml(requestDisplayName(request))}</div></div></div>
+        <div class="stamp"><strong>SAGE-INS-ENG-32</strong>Extraction PDF<br>${escapeHtml(generatedAt)}<br>Modification ${requestIndex + 1} / ${sortedRequests.length}<br>Page ${pageIndex + 1} / ${reviewPages.length}</div>
+      </header>
+      <section class="meta-grid">${detailRows}</section>
+      <div class="section-title"><h2>Notes de revue</h2></div>
+      <section class="review-box"><pre>${escapeHtml(pageText)}</pre></section>
+      <footer class="footer"><span>SAGE Automotive Interiors</span><span>${escapeHtml(dossierReviewMetaLine(request))}</span></footer>
+    </main>`);
+  }).join("");
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Extraction revue dossier - ${escapeHtml(projectName)}</title><style>
-    body{font-family:Arial,sans-serif;color:#111827;margin:32px;line-height:1.5}
-    h1{font-size:22px;margin:0 0 8px}
-    .meta{color:#4b5563;font-size:13px;margin-bottom:24px}
-    article{break-inside:avoid;border-top:1px solid #d1d5db;padding:18px 0}
-    h2{font-size:17px;margin:0 0 6px}
-    dl{display:grid;grid-template-columns:120px 1fr;gap:4px 12px;margin:0 0 12px;font-size:13px}
-    dt{color:#64748b;font-weight:700}
-    dd{margin:0}
-    pre{background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px;white-space:pre-wrap}
-  </style></head><body><h1>Extraction revue dossier par projet</h1><div class="meta">Projet: ${escapeHtml(projectName || "Projet non renseigne")} | Modifications: ${sortedRequests.length} | Date extraction: ${escapeHtml(new Date().toLocaleString("fr-FR"))}</div>${sortedRequests.map((request, index) => `
-    <article>
-      <h2>${index + 1}. ${escapeHtml(requestDisplayName(request))}</h2>
-      <dl>
-        <dt>Demande</dt><dd>${escapeHtml(request.modificationNumber || "-")}</dd>
-        <dt>Client</dt><dd>${escapeHtml(request.client || "-")}</dd>
-        <dt>Produit</dt><dd>${escapeHtml(request.product || "-")}</dd>
-        <dt>Pilote</dt><dd>${escapeHtml(request.pilot || "-")}</dd>
-        <dt>Phase</dt><dd>${escapeHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</dd>
-      </dl>
-      <pre>${escapeHtml(request.dossierReview || "Revue dossier vide.")}</pre>
-    </article>`).join("")}</body></html>`;
+    @page{size:A4 portrait;margin:12mm}
+    *{box-sizing:border-box}
+    html,body,.pdf-export-page,.brand-header,.meta-card,.review-box{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    body{font-family:Arial,sans-serif;color:#172008;margin:0;background:#f7f9f1}
+    .pdf-export-page{width:900px;height:1240px;background:#f7f9f1;padding:24px;margin:0 0 20px;display:flex;flex-direction:column;overflow:hidden}
+    .brand-header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;background:#fff;border-bottom:4px solid #5f7f13;padding:0 0 14px;margin-bottom:18px}
+    .brand-block{display:flex;align-items:flex-start;gap:14px}
+    .sage-logo{display:block;height:58px;width:136px;object-fit:contain;border:1px solid #bfd0a3;border-radius:4px;padding:6px;background:#fff}
+    h1{font-family:Georgia,serif;font-size:30px;line-height:1.05;margin:0;text-transform:uppercase;color:#172008}
+    h1 span{color:#5f7f13}
+    .subtitle{color:#586148;font-size:12px;line-height:1.45;margin-top:7px}
+    .stamp{border:1px solid #bfd0a3;background:#edf3df;color:#172008;padding:8px 10px;text-align:right;font-size:11px;min-width:190px}
+    .stamp strong{display:block;font-size:13px;margin-bottom:3px}
+    .meta-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:18px}
+    .meta-card{background:#fff;border:1px solid #d9e3c8;border-left:4px solid #5f7f13;padding:9px 10px;min-height:54px}
+    .meta-card span{display:block;color:#586148;font-size:11px;font-weight:700;text-transform:uppercase;margin-bottom:4px}
+    .meta-card strong{display:block;font-size:14px;line-height:1.25;overflow-wrap:anywhere}
+    .section-title{display:flex;align-items:center;gap:10px;margin:12px 0 8px;color:#172008}
+    .section-title:before{content:"";display:block;width:32px;height:7px;background:#5f7f13}
+    .section-title h2{font-size:18px;margin:0;text-transform:uppercase}
+    .review-box{background:#fff;border:1px solid #bfd0a3;flex:1;min-height:0;padding:18px 20px;box-shadow:inset 0 0 0 4px #f1f6e8;overflow:hidden}
+    .review-box pre{font-family:Arial,sans-serif;font-size:13px;line-height:1.55;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#172008}
+    .footer{display:flex;justify-content:space-between;gap:12px;margin-top:16px;border-top:1px solid #bfd0a3;padding-top:10px;color:#586148;font-size:11px}
+  </style></head><body>${pagesHtml}</body></html>`;
 }
 
 function projectDossierReviewsExportExcel(projectName, projectRequests) {
   const sortedRequests = sortedProjectDossierRequests(projectRequests);
+  const generatedAt = new Date().toLocaleString("fr-FR");
+  const rows = sortedRequests.map((request, index) => `<tr>
+      <td class="center">${index + 1}</td>
+      <td>${escapeExcelHtml(request.modificationProject || projectName || "")}</td>
+      <td>${escapeExcelHtml(requestDisplayName(request))}</td>
+      <td>${escapeExcelHtml(request.modificationNumber || "")}</td>
+      <td>${escapeExcelHtml(request.client || "")}</td>
+      <td>${escapeExcelHtml(request.product || "")}</td>
+      <td>${escapeExcelHtml(request.finishedProducts || "")}</td>
+      <td>${escapeExcelHtml(request.pilot || "")}</td>
+      <td>${escapeHtml(request.receptionDate || "")}</td>
+      <td>${escapeExcelHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</td>
+      <td class="review">${escapeExcelHtml(request.dossierReview || "Revue dossier vide.")}</td>
+    </tr>`).join("");
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Export revue dossier - ${escapeHtml(projectName || "Projet")}</title><style>
-    table{border-collapse:collapse}
-    th,td{border:1px solid #111827;padding:4px 6px}
+    body{font-family:Calibri,Arial,sans-serif;color:#172008;margin:0;background:#fff}
+    table{border-collapse:collapse;table-layout:fixed;width:1760px}
+    col.c0{width:46px} col.c1{width:160px} col.c2{width:170px} col.c3{width:145px} col.c4{width:145px}
+    col.c5{width:160px} col.c6{width:180px} col.c7{width:140px} col.c8{width:110px} col.c9{width:165px} col.c10{width:540px}
+    td,th{border:1px solid #c8d8ad;padding:6px 8px;vertical-align:top;font-size:11px;mso-number-format:"\\@";white-space:normal;line-height:1.25}
+    .brand{background:#ffffff;color:#5f7f13;font-size:18px;font-weight:800;text-align:center;vertical-align:middle;border:2px solid #5f7f13}
+    .brand small{display:block;color:#586148;font-size:10px;font-weight:700;letter-spacing:.5px}
+    .title{background:#5f7f13;color:#ffffff;font-size:18px;font-weight:800;text-align:left;vertical-align:middle}
+    .subtitle{background:#edf3df;color:#172008;font-weight:700}
+    .meta{background:#f7f9f1;color:#586148}
+    th{background:#5f7f13;color:#ffffff;font-weight:800;text-align:center}
+    .center{text-align:center;vertical-align:middle}
+    .review{width:540px;white-space:normal}
+    tr:nth-child(even) td{background:#fbfdf8}
   </style></head><body><table>
-    <thead><tr><th>Projet</th><th>Modification</th><th>Client</th><th>Produit</th><th>Pilote</th><th>Phase</th><th>Revue dossier</th></tr></thead>
-    <tbody>${sortedRequests.map((request) => `<tr><td>${escapeHtml(request.modificationProject || projectName || "")}</td><td>${escapeHtml(requestDisplayName(request))}</td><td>${escapeHtml(request.client || "")}</td><td>${escapeHtml(request.product || "")}</td><td>${escapeHtml(request.pilot || "")}</td><td>${escapeHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</td><td>${escapeHtml(request.dossierReview || "Revue dossier vide.")}</td></tr>`).join("")}</tbody>
+    <colgroup><col class="c0"><col class="c1"><col class="c2"><col class="c3"><col class="c4"><col class="c5"><col class="c6"><col class="c7"><col class="c8"><col class="c9"><col class="c10"></colgroup>
+    <tr><td class="brand" colspan="2" rowspan="3">SAGE<small>Automotive Interiors</small></td><td class="title" colspan="9">Extraction revue dossier par projet</td></tr>
+    <tr><td class="subtitle" colspan="9">Projet: ${escapeHtml(projectName || "Projet non renseigne")} | Modifications: ${sortedRequests.length}</td></tr>
+    <tr><td class="meta" colspan="9">Extraction generee le ${escapeHtml(generatedAt)} | SAGE Automotive Interiors</td></tr>
+    <tr><th>N°</th><th>Projet</th><th>Modification</th><th>N° client externe</th><th>Client</th><th>Produit</th><th>Produits finis</th><th>Pilote</th><th>Reception</th><th>Phase</th><th>Revue dossier</th></tr>
+    ${rows}
   </table></body></html>`;
 }
 
@@ -586,9 +843,9 @@ function modificationDossierExportExcel(request, actions = []) {
     const applicable = Boolean(action) && !cancelled;
     return `<tr class="body-row">
       <td class="center">${number}</td>
-      <td class="topic" colspan="2">${escapeHtml(action?.title || topic)}</td>
-      <td>${escapeHtml(actionProofLabel(action) || document)}</td>
-      <td>${escapeHtml(action?.responsible || pilot || "")}</td>
+      <td class="topic" colspan="2">${escapeExcelHtml(action?.title || topic)}</td>
+      <td>${escapeExcelHtml(actionProofLabel(action) || document)}</td>
+      <td>${escapeExcelHtml(action?.responsible || pilot || "")}</td>
       <td class="center">${cancelled ? "X" : ""}</td>
       <td class="center">${applicable ? "X" : ""}</td>
       <td class="center">${escapeHtml(dossierDate(action?.date1 || action?.startDate || action?.deadline))}</td>
@@ -598,14 +855,14 @@ function modificationDossierExportExcel(request, actions = []) {
   }).join("");
   const actionRows = sortedActions.map((action, index) => `<tr class="info-row">
     <td class="center">${index + 1}</td>
-    <td colspan="2">${escapeHtml(action.title || "-")}</td>
-    <td>${escapeHtml(stageLabel(action.stage, Boolean(request.newVersion)))}</td>
-    <td>${escapeHtml(action.responsible || "-")}</td>
-    <td>${escapeHtml(action.validatorDisplayName || action.validator || "-")}</td>
-    <td>${escapeHtml(action.criticality || "-")}</td>
-    <td>${escapeHtml(action.status || "-")}</td>
+    <td colspan="2">${escapeExcelHtml(action.title || "-")}</td>
+    <td>${escapeExcelHtml(stageLabel(action.stage, Boolean(request.newVersion)))}</td>
+    <td>${escapeExcelHtml(action.responsible || "-")}</td>
+    <td>${escapeExcelHtml(action.validatorDisplayName || action.validator || "-")}</td>
+    <td>${escapeExcelHtml(action.criticality || "-")}</td>
+    <td>${escapeExcelHtml(action.status || "-")}</td>
     <td>${escapeHtml(dossierDate(action.deadline || action.endDate))}</td>
-    <td>${escapeHtml(action.comment || action.dossierReview || "")}</td>
+    <td>${escapeExcelHtml(action.comment || action.dossierReview || "")}</td>
   </tr>`).join("");
   const infoRows = [
     ["N° interne Access", request.accessInternalNumber],
@@ -634,25 +891,25 @@ function modificationDossierExportExcel(request, actions = []) {
     ["OIL list", request.oilList],
     ["Rapport", request.report],
     ["Extraction générée le", generatedAt]
-  ].map(([label, value]) => `<tr class="info-row"><td colspan="3">${escapeHtml(label)}</td><td colspan="7">${escapeHtml(value || "-")}</td></tr>`).join("");
+  ].map(([label, value]) => `<tr class="info-row"><td colspan="3">${escapeExcelHtml(label)}</td><td colspan="7">${escapeExcelHtml(value || "-")}</td></tr>`).join("");
 
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Dossier de modification - ${escapeHtml(requestDisplayName(request))}</title><style>
     body{font-family:Calibri,Arial,sans-serif;color:#000;margin:0;background:#fff}
     table{border-collapse:collapse;table-layout:fixed;width:1540px}
     col.c1{width:42px} col.c2{width:230px} col.c3{width:370px} col.c4{width:360px} col.c5{width:260px}
     col.c6{width:145px} col.c7{width:180px} col.c8{width:124px} col.c9{width:124px} col.c10{width:140px}
-    td,th{border:1px solid #000;padding:5px 7px;vertical-align:middle;font-size:12px;white-space:normal;mso-number-format:"\\@";}
+    td,th{border:1px solid #000;padding:5px 7px;vertical-align:top;font-size:11px;white-space:normal;line-height:1.25;mso-number-format:"\\@";}
     .title{font-size:20px;font-weight:700;text-align:center;background:#d9eaf7;height:42px}
     .doc{font-weight:700;text-align:center;background:#d9eaf7}
     .field{font-size:14px;font-weight:700;height:30px;background:#fff}
     .section{font-weight:700;text-align:center;background:#d9eaf7}
     .header th{background:#bdd7ee;font-weight:700;text-align:center;height:30px}
-    .body-row td{height:30px}
+    .body-row td{height:32px}
     .topic{font-weight:600}
     .center{text-align:center}
     .sign{height:28px}
     .info-title td{background:#d9eaf7;font-weight:700;text-align:center;font-size:14px}
-    .info-row td{height:26px}
+    .info-row td{height:28px}
     .muted{color:#404040}
   </style></head><body><table>
     <colgroup><col class="c1"><col class="c2"><col class="c3"><col class="c4"><col class="c5"><col class="c6"><col class="c7"><col class="c8"><col class="c9"><col class="c10"></colgroup>
@@ -694,6 +951,12 @@ function formatDateOnly(value) {
 
 function daysBetween(start, end) {
   return Math.round((end.getTime() - start.getTime()) / 86400000);
+}
+
+function startOfLocalDay(date) {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
 }
 
 function addDays(date, days) {
@@ -747,6 +1010,7 @@ function actionTimelineEnd(action, startDate) {
 }
 
 function actionGanttStatusClass(action) {
+  if (action?.status === "CANCELLED") return "cancelled";
   if (isCriticalActionValue(action)) return "critical";
   if (isActionDone(action)) return "closed";
   const end = parseDateOnly(action.endDate) || parseDateOnly(action.deadline);
@@ -758,6 +1022,7 @@ function isCriticalActionValue(action) {
 }
 
 function actionGanttStatusLabel(action) {
+  if (action?.status === "CANCELLED") return "Annulée";
   if (isCriticalActionValue(action)) return "Critique";
   if (isActionDone(action)) return "Done";
   return actionGanttStatusClass(action) === "late" ? "En retard" : "Planifié / à faire";
@@ -766,7 +1031,8 @@ function actionGanttStatusLabel(action) {
 function actionGanttColor(action) {
   const status = actionGanttStatusClass(action);
   if (status === "critical") return "#c98a2c";
-  if (status === "closed") return "#5f7f13";
+  if (status === "cancelled") return "#6b7280";
+  if (status === "closed") return "#25D366";
   if (status === "late") return "#b42318";
   return "#8a9275";
 }
@@ -812,9 +1078,152 @@ function ganttBarStyle(start, end, timelineStart, totalDays) {
   return `left:${left}%;width:${width}%`;
 }
 
+function ganttStagesForRequest(request, selectedStages = []) {
+  const baseStages = selectedStages.length > 0 ? selectedStages : stagesForRequest(request);
+  const regularStages = baseStages.filter(([stage]) => stage !== "CANCELLED");
+  if (request?.currentStage !== "CANCELLED") {
+    return regularStages;
+  }
+  const cancelledFromStage = request.cancelledFromStage;
+  const cancelledIndex = regularStages.findIndex(([stage]) => stage === cancelledFromStage);
+  const visibleStages = cancelledIndex >= 0 ? regularStages.slice(0, cancelledIndex + 1) : regularStages;
+  return [
+    ...visibleStages,
+    ["CANCELLED", stageLabel("CANCELLED", Boolean(request?.newVersion))]
+  ];
+}
+
+function filterGanttActionsForRequest(request, actions = [], selectedStages = []) {
+  const allowedStages = new Set(ganttStagesForRequest(request, selectedStages).map(([stage]) => stage));
+  return actions.filter((action) => {
+    const stage = action.stage || request?.currentStage || "FEASIBILITY_VALIDATION";
+    return allowedStages.has(stage);
+  });
+}
+
+async function downloadHtmlAsPdf(fileName, html, options = {}) {
+  const orientation = options.orientation || "landscape";
+  const host = document.createElement("div");
+  host.style.position = "fixed";
+  host.style.left = "-10000px";
+  host.style.top = "0";
+  host.style.width = options.width || "1280px";
+  host.style.background = "#ffffff";
+    host.innerHTML = html;
+    document.body.appendChild(host);
+    try {
+      const element = host.querySelector(".pdf-export-page") || host.querySelector(".gantt-export-page") || host;
+      const images = Array.from(host.querySelectorAll("img"));
+      await inlinePdfImages(images);
+      await Promise.all(images.map((image) => image.complete ? Promise.resolve() : new Promise((resolve) => {
+        image.onload = resolve;
+        image.onerror = resolve;
+      })));
+      const pages = Array.from(host.querySelectorAll(".pdf-export-page"));
+      if (pages.length > 1) {
+        await saveHtmlPagesAsPdf(fileName, pages, { ...options, orientation });
+        return;
+      }
+      const canvas = await html2canvas(element, {
+      backgroundColor: options.backgroundColor || "#f7f9f1",
+      scale: 2,
+      useCORS: true
+    });
+    const pdf = new jsPDF({ orientation, unit: "pt", format: "a4" });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 18;
+    const imageWidth = pageWidth - margin * 2;
+    const imageHeight = (canvas.height * imageWidth) / canvas.width;
+    const pageImageHeight = pageHeight - margin * 2;
+    const pageCanvasHeight = Math.max(1, Math.floor((pageImageHeight * canvas.width) / imageWidth));
+    let sourceY = 0;
+    let pageIndex = 0;
+    while (sourceY < canvas.height) {
+      const sliceHeight = Math.min(pageCanvasHeight, canvas.height - sourceY);
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sliceHeight;
+      const context = pageCanvas.getContext("2d");
+      context.drawImage(
+        canvas,
+        0,
+        sourceY,
+        canvas.width,
+        sliceHeight,
+        0,
+        0,
+        canvas.width,
+        sliceHeight
+      );
+      const sliceImageHeight = (sliceHeight * imageWidth) / canvas.width;
+      if (pageIndex > 0) pdf.addPage("a4", orientation);
+      pdf.addImage(pageCanvas.toDataURL("image/png"), "PNG", margin, margin, imageWidth, sliceImageHeight);
+      sourceY += sliceHeight;
+      pageIndex += 1;
+    }
+    pdf.save(fileName);
+  } finally {
+    host.remove();
+  }
+}
+
+async function saveHtmlPagesAsPdf(fileName, pages, options = {}) {
+  const orientation = options.orientation || "portrait";
+  const pdf = new jsPDF({ orientation, unit: "pt", format: "a4" });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 18;
+  for (let index = 0; index < pages.length; index += 1) {
+    const canvas = await html2canvas(pages[index], {
+      backgroundColor: options.backgroundColor || "#f7f9f1",
+      scale: 2,
+      useCORS: true
+    });
+    const imageWidth = pageWidth - margin * 2;
+    const imageHeight = Math.min(pageHeight - margin * 2, (canvas.height * imageWidth) / canvas.width);
+    if (index > 0) {
+      pdf.addPage("a4", orientation);
+    }
+    pdf.addImage(canvas.toDataURL("image/png"), "PNG", margin, margin, imageWidth, imageHeight);
+  }
+  pdf.save(fileName);
+}
+
+async function inlinePdfImages(images = []) {
+  await Promise.all(images.map(async (image) => {
+    const source = image.getAttribute("src") || "";
+    if (!source || source.startsWith("data:")) {
+      return;
+    }
+    try {
+      const response = await fetch(new URL(source, window.location.href).toString());
+      if (!response.ok) {
+        return;
+      }
+      const blob = await response.blob();
+      const dataUrl = await blobToDataUrl(blob);
+      image.setAttribute("src", dataUrl);
+    } catch {
+      // Keep the original URL if the browser cannot inline it.
+    }
+  }));
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
   const fallbackStart = requestTimelineStart(request);
-  const actionRows = actions
+  const ganttStages = ganttStagesForRequest(request, selectedStages);
+  const filteredActions = filterGanttActionsForRequest(request, actions, selectedStages);
+  const actionRows = filteredActions
     .map((action) => {
       const start = actionTimelineStart(action, fallbackStart);
       const end = actionTimelineEnd(action, start);
@@ -829,32 +1238,49 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
   const totalDays = Math.max(1, daysBetween(timelineStart, timelineEnd));
   const ticks = ganttScale(timelineStart, timelineEnd);
   const gridStep = 100 / Math.max(1, ticks.length);
-  const stageOrder = new Map(selectedStages.map(([key], index) => [key, index]));
+  const stageOrder = new Map(ganttStages.map(([key], index) => [key, index]));
   const groupedRows = actionRows.reduce((groups, row) => {
     const stage = row.action.stage || request.currentStage || "FEASIBILITY_VALIDATION";
     if (!groups.has(stage)) groups.set(stage, []);
     groups.get(stage).push(row);
     return groups;
   }, new Map());
-  const sortedStages = selectedStages.length > 0
-    ? selectedStages.map(([key]) => key)
+  const sortedStages = ganttStages.length > 0
+    ? ganttStages.map(([key]) => key)
     : Array.from(groupedRows.keys()).sort((first, second) => (stageOrder.get(first) ?? 99) - (stageOrder.get(second) ?? 99));
   const doneCount = actionRows.filter(({ action }) => isActionDone(action)).length;
+  const completionRate = modificationCompletionRate(request, actionRows.map(({ action }) => action));
   const lateCount = actionRows.filter(({ action }) => actionGanttStatusClass(action) === "late").length;
   const criticalCount = actionRows.filter(({ action }) => actionGanttStatusClass(action) === "critical").length;
-  const rowHtml = sortedStages.map((stage) => {
+  const stagePages = [];
+  let currentPageRows = [];
+  const maxRowsPerPage = 12;
+  const pushCurrentGanttPage = () => {
+    if (currentPageRows.length > 0) {
+      stagePages.push(currentPageRows);
+      currentPageRows = [];
+    }
+  };
+  const pushGanttRows = (rows) => {
+    if (currentPageRows.length + rows.length > maxRowsPerPage) {
+      pushCurrentGanttPage();
+    }
+    currentPageRows.push(...rows);
+  };
+  sortedStages.forEach((stage) => {
     const stageRows = (groupedRows.get(stage) || []).sort((first, second) => first.start - second.start);
     const stageStart = stageRows.reduce((min, row) => row.start < min ? row.start : min, stageRows[0]?.start || null);
     const stageEnd = stageRows.reduce((max, row) => row.end > max ? row.end : max, stageRows[0]?.end || null);
     const phaseBar = stageStart && stageEnd
       ? `<span class="phase-bar" style="${ganttBarStyle(stageStart, stageEnd, timelineStart, totalDays)}"></span>`
       : "";
-    return `<div class="gantt-row phase-row">
+    const phaseRow = `<div class="gantt-row phase-row">
         <div class="left activity">${escapeHtml(stageLabel(stage, Boolean(request.newVersion)))}</div>
         <div class="left date">${escapeHtml(stageStart ? formatDateOnly(stageStart) : "-")}</div>
         <div class="left date">${escapeHtml(stageEnd ? formatDateOnly(stageEnd) : "-")}</div>
         <div class="timeline">${phaseBar}</div>
-      </div>${stageRows.map(({ action, start, end }) => {
+      </div>`;
+    const actionRowHtml = stageRows.map(({ action, start, end }) => {
         const assignee = action.responsible || "Responsable";
         const actionColor = actionGanttColor(action);
         return `<div class="gantt-row">
@@ -863,14 +1289,51 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
           <div class="left date">${escapeHtml(formatDateOnly(end))}</div>
           <div class="timeline"><span class="bar ${actionGanttStatusClass(action)}" style="${ganttBarStyle(start, end, timelineStart, totalDays)};${ganttColorBarStyle(actionColor)}"></span></div>
         </div>`;
-      }).join("")}`;
-  }).join("");
+      });
+    if (actionRowHtml.length === 0) {
+      pushGanttRows([phaseRow]);
+      return;
+    }
+    for (let index = 0; index < actionRowHtml.length;) {
+      if (currentPageRows.length > maxRowsPerPage - 2) {
+        pushCurrentGanttPage();
+      }
+      const availableActionRows = Math.max(1, maxRowsPerPage - currentPageRows.length - 1);
+      const actionChunk = actionRowHtml.slice(index, index + availableActionRows);
+      pushGanttRows([phaseRow, ...actionChunk]);
+      index += actionChunk.length;
+      if (index < actionRowHtml.length) {
+        pushCurrentGanttPage();
+      }
+    }
+  });
+  pushCurrentGanttPage();
+  if (stagePages.length === 0) {
+    stagePages.push([]);
+  }
   const tickColumns = `repeat(${Math.max(1, ticks.length)}, 1fr)`;
+  const tableHeadHtml = `<div class="gantt-row gantt-head"><div class="left">Activites</div><div class="left">Deb</div><div class="left">Fin</div><div class="timeline">${ticks.map((tick) => `<span class="tick">${escapeHtml(tick.label)}</span>`).join("")}</div></div>`;
+  const legendHtml = `<div class="legend"><span><i style="${ganttColorBarStyle("#8a9275")}"></i>Planifié / à faire</span><span><i style="${ganttColorBarStyle("#25D366")}"></i>Done</span><span><i style="${ganttColorBarStyle("#b42318")}"></i>En retard</span><span><i style="${ganttColorBarStyle("#c98a2c")}"></i>Critique</span></div>`;
+  const pageHtml = stagePages.map((pageRows, pageIndex) => `<main class="pdf-export-page gantt-export-page">
+    <header>
+      <div class="brand-block"><img class="gantt-logo" src="/sage_logo1.png" alt="SAGE Automotive Interiors" /><div><h1>DIAGRAMME <span>DE GANTT</span></h1><div class="meta">${escapeHtml(requestDisplayName(request))} | Projet: ${escapeHtml(request.modificationProject || "-")} | Client: ${escapeHtml(request.client || "-")} | Produit: ${escapeHtml(request.product || "-")} | Pilote: ${escapeHtml(request.pilot || "-")}<br>Extraction: ${escapeHtml(new Date().toLocaleString("fr-FR"))} | Periode: ${escapeHtml(formatDateOnly(timelineStart))} - ${escapeHtml(formatDateOnly(timelineEnd))} | Avancement global actuel: ${completionRate}%</div></div></div>
+      <div class="summary"><span>Actions: ${actionRows.length}</span><span>Done: ${doneCount}</span><span>En retard: ${lateCount}</span><span>Critiques: ${criticalCount}</span><span>Phase: ${escapeHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</span><span class="progress-summary"><span class="progress-line"><b class="progress-label">Avancement global actuel: ${completionRate}%</b><i class="progress-track"><i class="progress-fill"></i></i></span></span></div>
+    </header>
+    <section class="gantt-table">
+      ${tableHeadHtml}
+      ${actionRows.length === 0 ? `<div class="empty">Aucune action planifiee pour cette modification.</div>` : pageRows.join("")}
+    </section>
+    <footer class="gantt-footer">
+      ${legendHtml}
+      <span class="page-number">Page ${pageIndex + 1} / ${stagePages.length}</span>
+    </footer>
+  </main>`).join("");
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Gantt - ${escapeHtml(requestDisplayName(request))}</title><style>
     @page{size:A4 landscape;margin:10mm}
     *{box-sizing:border-box}
     html,body,.gantt-table,.timeline,.left,.bar,.phase-bar,.legend i{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    body{font-family:Arial,sans-serif;color:#172008;margin:0;background:#f7f9f1}
+    body{font-family:Arial,sans-serif;color:#172008;margin:0;background:#ffffff}
+    .gantt-export-page{background:#f7f9f1;display:flex;flex-direction:column;min-height:860px;padding:14px;width:1280px}
     header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:10px;background:#fff;padding:0 0 8px;border-bottom:3px solid #5f7f13}
     .brand-block{display:flex;align-items:flex-start;gap:14px}
     .gantt-logo{display:block;height:54px;width:126px;object-fit:contain;border:1px solid #bfd0a3;border-radius:4px;padding:5px;background:#fff}
@@ -878,7 +1341,12 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
     h1 span{color:#5f7f13}
     .meta{font-size:11px;color:#586148;line-height:1.45}
     .summary{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-    .summary span{border:1px solid #bfd0a3;padding:5px 8px;font-size:11px;background:#f7f9f1}
+    .summary>span{border:1px solid #bfd0a3;padding:5px 8px;font-size:11px;background:#f7f9f1}
+    .summary .progress-summary{flex-basis:100%;background:#fff}
+    .progress-line{display:flex;align-items:center;gap:8px}
+    .progress-label{font-weight:700;color:#172008;white-space:nowrap}
+    .progress-track{flex:1;min-width:150px;height:8px;border:1px solid #bfd0a3;background:#eef4e2}
+    .progress-fill{display:block;height:100%;background:#5f7f13;width:${completionRate}%}
     .gantt-table{background:#fff;border:1px solid #5f7f13}
     .gantt-row{display:grid;grid-template-columns:260px 84px 84px minmax(760px,1fr);min-height:43px;break-inside:avoid}
     .gantt-head{min-height:34px;background:#5f7f13;color:#fff;font-weight:700}
@@ -897,22 +1365,13 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
     .bar{position:absolute;top:13px;height:0;border-top:16px solid;border-radius:1px;min-width:4px}
     .bar.late{outline:2px solid #7f1d1d}
     .bar.critical{outline:2px solid #8a5a12}
+    .gantt-footer{margin-top:auto}
     .legend{display:grid;grid-template-columns:repeat(4,1fr);gap:8px 28px;margin-top:10px;padding:8px;background:#fff;border-top:1px solid #5f7f13;font-size:11px}
     .legend span{display:flex;align-items:center;gap:8px;font-weight:700}
     .legend i{display:inline-block;width:34px;height:0;border-top:14px solid}
+    .page-number{color:#586148;display:block;font-size:11px;font-weight:700;margin-top:6px;text-align:right}
     .empty{padding:24px;text-align:center;color:#586148;background:#fff}
-  </style></head><body>
-    <header>
-      <div class="brand-block"><img class="gantt-logo" src="/sage_logo1.png" alt="SAGE Automotive Interiors" /><div><h1>DIAGRAMME <span>DE GANTT</span></h1><div class="meta">${escapeHtml(requestDisplayName(request))} | Projet: ${escapeHtml(request.modificationProject || "-")} | Client: ${escapeHtml(request.client || "-")} | Produit: ${escapeHtml(request.product || "-")} | Pilote: ${escapeHtml(request.pilot || "-")}<br>Extraction: ${escapeHtml(new Date().toLocaleString("fr-FR"))} | Periode: ${escapeHtml(formatDateOnly(timelineStart))} - ${escapeHtml(formatDateOnly(timelineEnd))}</div></div></div>
-      <div class="summary"><span>Actions: ${actionRows.length}</span><span>Done: ${doneCount}</span><span>En retard: ${lateCount}</span><span>Critiques: ${criticalCount}</span><span>Phase: ${escapeHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</span></div>
-    </header>
-    <section class="gantt-table">
-      <div class="gantt-row gantt-head"><div class="left">Activites</div><div class="left">Deb</div><div class="left">Fin</div><div class="timeline">${ticks.map((tick) => `<span class="tick">${escapeHtml(tick.label)}</span>`).join("")}</div></div>
-      ${actionRows.length === 0 ? `<div class="empty">Aucune action planifiee pour cette modification.</div>` : rowHtml}
-    </section>
-    <div class="legend"><span><i style="${ganttColorBarStyle("#8a9275")}"></i>Planifié / à faire</span><span><i style="${ganttColorBarStyle("#5f7f13")}"></i>Done</span><span><i style="${ganttColorBarStyle("#b42318")}"></i>En retard</span><span><i style="${ganttColorBarStyle("#c98a2c")}"></i>Critique</span></div>
-    <script>window.onload=function(){window.print();};</script>
-  </body></html>`;
+  </style></head><body>${pageHtml}</body></html>`;
 }
 
 function downloadTextFile(fileName, content) {
@@ -965,7 +1424,9 @@ function hasApplicationRole(user, code, label) {
   return value === normalizeRoleToken(code).replaceAll("_", " ") || value === normalizeRoleToken(label);
 }
 
-function canManageActionForUser(user, action, phaseValidations = []) {
+function canManageActionForUser(user, action, phaseValidations = [], request = action?.request) {
+  if (isTerminalRequest(request)) return false;
+  if (request?.currentStage === "CANCELLED" && action?.stage !== "CANCELLED") return false;
   if (isActionPhaseApproved(action, phaseValidations)) return false;
   if (isAdminUser(user)) return true;
   const responsible = normalizeRoleToken(action?.responsible);
@@ -1008,6 +1469,8 @@ function canRequestRejectedActionValidationForUser(user, action, request) {
 }
 
 function canToggleActionForUser(user, action, request, phaseValidations = []) {
+  if (isTerminalRequest(request)) return false;
+  if (request?.currentStage === "CANCELLED" && action?.stage !== "CANCELLED") return false;
   if (isActionPhaseApproved(action, phaseValidations)) return false;
   if (!isActionPilotForUser(user, action)) return false;
   return !isActionDone(action) || action?.stage === request?.currentStage;
@@ -1018,6 +1481,8 @@ function isActionPhaseApproved(action, phaseValidations = []) {
 }
 
 function canDeleteActionForUser(user, action, request, phaseValidations = []) {
+  if (isTerminalRequest(request)) return false;
+  if (request?.currentStage === "CANCELLED" && action?.stage !== "CANCELLED") return false;
   if (isActionPhaseApproved(action, phaseValidations)) return false;
   if (isAdminUser(user)) return true;
   return isRequestPilot(user, request);
@@ -1025,7 +1490,8 @@ function canDeleteActionForUser(user, action, request, phaseValidations = []) {
 
 function canEditActionDurationForUser(user, action, request, phaseValidations = []) {
   if (!isRequestPilot(user, request)) return false;
-  if (request?.currentStage === "CLOSED" || request?.currentStage === "CANCELLED") return false;
+  if (request?.currentStage === "CLOSED") return false;
+  if (request?.currentStage === "CANCELLED" && action?.stage !== "CANCELLED") return false;
   return !isActionPhaseApproved(action, phaseValidations);
 }
 
@@ -1093,6 +1559,7 @@ function App() {
   const [chatGroupProjectName, setChatGroupProjectName] = useState("");
   const [chatGroupMemberIds, setChatGroupMemberIds] = useState([]);
   const [quickChatOpen, setQuickChatOpen] = useState(false);
+  const [quickAskAiOpen, setQuickAskAiOpen] = useState(false);
   const [chatNotificationCount, setChatNotificationCount] = useState(0);
   const [chatTypingNotice, setChatTypingNotice] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
@@ -1152,7 +1619,7 @@ function App() {
   }, [currentUser, selectedRequest, selectedStages]);
   const activeRequests = useMemo(() => requests.filter(isActiveRequest), [requests]);
   const doneCount = actions.filter(isActionDone).length;
-  const completion = actions.length ? Math.round((doneCount / actions.length) * 100) : 0;
+  const completion = modificationCompletionRate(selectedRequest, actions);
   const lateActions = actions.filter((action) => action.late).length;
 
   const filteredRequests = useMemo(() => {
@@ -1846,11 +2313,11 @@ function App() {
   }
 
   function updateEcrForm(field, value) {
-    setEcrForm((form) => updateEcrFormState(form, field, value, projects));
+    setEcrForm((form) => updateEcrFormState(form, field, value, projects, finishedProductReferences));
   }
 
   function updateEcrEditForm(field, value) {
-    setEcrEditForm((form) => updateEcrFormState(form, field, value, projects));
+    setEcrEditForm((form) => updateEcrFormState(form, field, value, projects, finishedProductReferences));
   }
 
   function updateActionForm(field, value) {
@@ -1888,10 +2355,16 @@ function App() {
 
   function handleCreateEcr(event) {
     event.preventDefault();
+    if (!validateEcrRequiredFields(ecrForm, requests, null, setError)) {
+      return;
+    }
     if (parseSelectedProducts(ecrForm.product).length === 0) {
       const message = "Selectionnez au moins un produit.";
       setError(message);
       warningAlert("Produit requis", message);
+      return;
+    }
+    if (!validateFinishedProductsSelection(ecrForm, finishedProductReferences, setError)) {
       return;
     }
     setSaving(true);
@@ -1935,6 +2408,10 @@ function App() {
   }
 
   function openEditEcr(request) {
+    if (isTerminalRequest(request)) {
+      warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. Elle est désormais en lecture seule.");
+      return;
+    }
     setEcrEditForm(requestToEcrForm(request));
     setEditingEcrRequest(request);
     setShowCreateForm(false);
@@ -1950,10 +2427,16 @@ function App() {
   function handleUpdateEcr(event) {
     event.preventDefault();
     if (!editingEcrRequest) return;
+    if (!validateEcrRequiredFields(ecrEditForm, requests, editingEcrRequest.id, setError)) {
+      return;
+    }
     if (parseSelectedProducts(ecrEditForm.product).length === 0) {
       const message = "Selectionnez au moins un produit.";
       setError(message);
       warningAlert("Produit requis", message);
+      return;
+    }
+    if (!validateFinishedProductsSelection(ecrEditForm, finishedProductReferences, setError)) {
       return;
     }
     setSaving(true);
@@ -1996,6 +2479,10 @@ function App() {
 
   function handleUpdateDossierReview(request, dossierReview) {
     if (!request) return Promise.resolve();
+    if (isTerminalRequest(request)) {
+      warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. La revue dossier est en lecture seule.");
+      return Promise.reject(new Error("Modification terminale."));
+    }
     if (!isAdminUser(currentUser) && !isRequestPilot(currentUser, request)) {
       warningAlert("Lecture seule", "Seul le pilote de la modification ou l'admin peut modifier la revue dossier.");
       return Promise.reject(new Error("Revue dossier en lecture seule."));
@@ -2024,6 +2511,10 @@ function App() {
 
   function handleStageChange(stage) {
     if (!selectedRequest) return;
+    if (isTerminalRequest(selectedRequest)) {
+      warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. La phase ne peut plus être modifiée.");
+      return;
+    }
     if (!isAdminUser(currentUser)) {
       warningAlert("Action reservee", "Seul l'admin peut rouvrir ou modifier la phase courante.");
       return;
@@ -2053,6 +2544,10 @@ function App() {
 
   function handleReopenPhase(validation) {
     if (!selectedRequest || !validation || !isAdminUser(currentUser)) return;
+    if (isTerminalRequest(selectedRequest)) {
+      warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. Elle ne peut plus être rouverte.");
+      return;
+    }
     setSaving(true);
     setError("");
     updateEcrStage(selectedRequest.id, validation.stage)
@@ -2070,9 +2565,9 @@ function App() {
       .finally(() => setSaving(false));
   }
 
-  function openRequest(request) {
+  function openRequest(request, stageOverride) {
     setSelectedId(request.id);
-    setSelectedStage(safeStage(request.currentStage, Boolean(request.newVersion)));
+    setSelectedStage(safeStage(stageOverride || request.currentStage, Boolean(request.newVersion)));
     setShowCreateForm(false);
     setShowEditForm(false);
     navigateToPage("modifications");
@@ -2138,8 +2633,8 @@ function App() {
 
   function handleCancelEcr(request) {
     if (!request) return;
-    if (!isAdminUser(currentUser) && !isRequestPilot(currentUser, request)) {
-      warningAlert("Action reservee", "Seul le chef de modification peut annuler cette modification.");
+    if (!isAdminUser(currentUser)) {
+      warningAlert("Action reservee", "Seul l'admin peut annuler une modification.");
       return;
     }
     if (request.currentStage === "CANCELLED") {
@@ -2149,11 +2644,11 @@ function App() {
     const label = requestDisplayName(request);
     Swal.fire({
       ...swalButtons,
-      title: "Annulér la modification ?",
+      title: "Annuler la modification ?",
       text: `La modification ${label} passera immediatement en phase Cancelled.`,
       icon: "warning",
       showCancelButton: true,
-      confirmButtonText: "Annulér la modification",
+      confirmButtonText: "Annuler la modification",
       cancelButtonText: "Retour",
       confirmButtonColor: "#b42318"
     }).then((result) => {
@@ -2201,6 +2696,8 @@ function App() {
       workDurationDays: Number(form.workDurationDays) || 1,
       dependsOnActionId: form.dependsOnActionId ? Number(form.dependsOnActionId) : null,
       dependencyAnchor: form.dependencyAnchor || "OUTPUT",
+      routineAction: false,
+      recurrenceIntervalDays: null,
       stage: form.stage || stage
     };
   }
@@ -2234,6 +2731,12 @@ function App() {
   function handleCreateAction(event) {
     event.preventDefault();
     if (!selectedRequest) return Promise.resolve();
+    if (isTerminalRequest(selectedRequest)) {
+      const message = "Cette modification est terminée ou clôturée. Les actions sont en lecture seule.";
+      setError(message);
+      warningAlert("Modification terminée", message);
+      return Promise.reject(new Error("Modification terminale"));
+    }
     if (isActionPhaseApproved({ stage: actionForm.stage || selectedStage }, phaseValidations)) {
       const message = "Impossible d'ajouter une action dans une phase déjà validée. Reouvrez la phase avant de la modifier.";
       setError(message);
@@ -2301,6 +2804,10 @@ function App() {
   }
 
   function handleToggleAction(action, completed) {
+    if (isTerminalRequest(selectedRequest)) {
+      warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. Les actions sont en lecture seule.");
+      return;
+    }
     if (isActionPhaseApproved(action, phaseValidations)) {
       warningAlert("Phase validée", "Impossible de modifier une action dans une phase déjà validée. Reouvrez la phase avant de la modifier.");
       return;
@@ -2347,6 +2854,10 @@ function App() {
 
   function handleUpdateActionDuration(action, durationValue) {
     if (!selectedRequest || !action?.id) return;
+    if (isTerminalRequest(selectedRequest)) {
+      warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. Les actions sont en lecture seule.");
+      return;
+    }
     if (isActionPhaseApproved(action, phaseValidations)) {
       warningAlert("Phase validée", "Impossible de modifier la duree d'une action dans une phase déjà validée. Reouvrez la phase avant de la modifier.");
       return;
@@ -2373,6 +2884,10 @@ function App() {
   function handleUploadEvidence(action, fileValue) {
     const files = filesFromValue(fileValue);
     if (files.length === 0) return;
+    if (isTerminalRequest(selectedRequest)) {
+      warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. Les assets sont en lecture seule.");
+      return;
+    }
     if (isActionPhaseApproved(action, phaseValidations)) {
       warningAlert("Phase validée", "Impossible d'ajouter un asset dans une phase déjà validée. Reouvrez la phase avant de la modifier.");
       return;
@@ -2399,6 +2914,10 @@ function App() {
   }
 
   function handleDeleteActionAsset(action, asset) {
+    if (isTerminalRequest(selectedRequest)) {
+      warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. Les assets sont en lecture seule.");
+      return;
+    }
     if (isActionPhaseApproved(action, phaseValidations)) {
       warningAlert("Phase validée", "Impossible de supprimer un asset dans une phase déjà validée. Reouvrez la phase avant de la modifier.");
       return;
@@ -2425,6 +2944,10 @@ function App() {
 
   function handleDeleteAction(action) {
     if (!selectedRequest || !action?.id) return;
+    if (isTerminalRequest(selectedRequest)) {
+      warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. Les actions sont en lecture seule.");
+      return;
+    }
     if (isActionPhaseApproved(action, phaseValidations)) {
       warningAlert("Phase validée", "Impossible de supprimer une action dans une phase déjà validée. Reouvrez la phase avant de la modifier.");
       return;
@@ -2488,6 +3011,45 @@ function App() {
       .finally(() => setSaving(false));
   }
 
+  function handleRequestClosure() {
+    if (!selectedRequest) return;
+    if (!isRequestPilot(currentUser, selectedRequest)) {
+      warningAlert("Demande reservee", "Seul le pilote de la modification peut demander la cloture.");
+      return;
+    }
+    if (!allWorkflowStagesApproved(selectedRequest, phaseValidations)) {
+      const message = selectedRequest.currentStage === "CANCELLED"
+        ? "Terminez et validez les actions de la phase Cancelled / Project Cancelled avant de demander la cloture."
+        : "Toutes les phases doivent etre terminees et validees avant la demande de cloture.";
+      warningAlert("Phases non validees", message);
+      return;
+    }
+    setSaving(true);
+    requestEcrClosure(selectedRequest.id)
+      .then((updatedRequest) => {
+        successToast("Demande de cloture envoyee a l'admin");
+        return refreshSelectedData(updatedRequest.id, safeStage(updatedRequest.currentStage, Boolean(updatedRequest.newVersion)));
+      })
+      .catch((exception) => errorAlert(exception?.message || "Demande de cloture impossible."))
+      .finally(() => setSaving(false));
+  }
+
+  function handleCloseRequest() {
+    if (!selectedRequest) return;
+    if (!isAdminUser(currentUser)) {
+      warningAlert("Action reservee", "Seul l'admin peut marquer la modification comme terminee ou cloturee.");
+      return;
+    }
+    setSaving(true);
+    closeEcrRequest(selectedRequest.id)
+      .then((updatedRequest) => {
+        successToast("Modification cloturee");
+        return refreshSelectedData(updatedRequest.id, safeStage(updatedRequest.currentStage, Boolean(updatedRequest.newVersion)));
+      })
+      .catch((exception) => errorAlert(exception?.message || "Cloture de la modification impossible."))
+      .finally(() => setSaving(false));
+  }
+
   function handleRejectPhase(validation, stageActions = actions) {
     if (!selectedRequest || !validation) return;
     const completedActions = stageActions.filter(isActionDone);
@@ -2501,7 +3063,7 @@ function App() {
       html: `<textarea id="refusal-reason" class="swal2-textarea" placeholder="Raison du refus: manque document, manque action..."></textarea><div class="swal-action-list-title">Actions à revisiter</div><div id="actions-revisit-list" class="swal-action-list">${actionsHtml}</div>`,
       showCancelButton: true,
       confirmButtonText: "Refuser",
-      cancelButtonText: "Annulér",
+      cancelButtonText: "Annuler",
       confirmButtonColor: "#b42318",
       preConfirm: () => {
         const reason = document.getElementById("refusal-reason")?.value.trim();
@@ -2558,7 +3120,7 @@ function App() {
       html: `<textarea id="action-refusal-reason" class="swal2-textarea" placeholder="Motif du refus"></textarea>`,
       showCancelButton: true,
       confirmButtonText: "Refuser",
-      cancelButtonText: "Annulér",
+      cancelButtonText: "Annuler",
       confirmButtonColor: "#b42318",
       preConfirm: () => {
         const reason = document.getElementById("action-refusal-reason")?.value.trim();
@@ -2665,17 +3227,18 @@ function App() {
     const request = isEdit
       ? updateClientReference(editingClientReference, { name })
       : createClientReference({ name });
-    request
+    return request
       .then((savedClient) => {
         setClientReferences((items) => [...items.filter((item) => item.id !== savedClient.id), savedClient].sort((a, b) => a.name.localeCompare(b.name)));
         setClientReferenceForm({ name: "" });
         setEditingClientReference(null);
         successToast(isEdit ? "Client modifie" : "Client ajoute");
       })
-      .catch(() => {
+      .catch((exception) => {
         const message = "Sauvegarde client impossible. Vérifiez le nom.";
         setError(message);
         errorAlert(message);
+        throw exception;
       })
       .finally(() => setSaving(false));
   }
@@ -2717,17 +3280,18 @@ function App() {
     const request = isEdit
       ? updateProductReference(editingProductReference, { name })
       : createProductReference({ name });
-    request
+    return request
       .then((savedProduct) => {
         setProductReferences((items) => [...items.filter((item) => item.id !== savedProduct.id), savedProduct].sort((a, b) => a.name.localeCompare(b.name)));
         setProductReferenceForm({ name: "" });
         setEditingProductReference(null);
         successToast(isEdit ? "Produit modifie" : "Produit ajoute");
       })
-      .catch(() => {
+      .catch((exception) => {
         const message = "Sauvegarde produit impossible. Vérifiez le nom.";
         setError(message);
         errorAlert(message);
+        throw exception;
       })
       .finally(() => setSaving(false));
   }
@@ -2888,17 +3452,18 @@ function App() {
     const request = isEdit
       ? updateRoleReference(editingRoleReference, { name })
       : createRoleReference({ name });
-    request
+    return request
       .then((savedRole) => {
         setRoleReferences((items) => [...items.filter((item) => item.id !== savedRole.id), savedRole].sort((a, b) => a.name.localeCompare(b.name)));
         setRoleReferenceForm({ name: "" });
         setEditingRoleReference(null);
         successToast(isEdit ? "Rôle modifié" : "Rôle ajouté");
       })
-      .catch(() => {
+      .catch((exception) => {
         const message = "Sauvegarde rôle impossible. Vérifiez le nom.";
         setError(message);
         errorAlert(message);
+        throw exception;
       })
       .finally(() => setSaving(false));
   }
@@ -2945,8 +3510,10 @@ function App() {
       validator: planningRuleForm.validator.trim() || null,
       expectedEvidence: planningRuleForm.expectedEvidence.trim() || null,
       evidenceRequired: planningRuleForm.evidenceRequired || proofDocumentFiles.length > 0 || hasPlanningRuleProofDocument(planningRuleForm),
-      dependencyActionTitle: planningRuleForm.dependencyActionTitle.trim() || null,
+      dependencyActionTitle: planningRuleForm.routineAction ? null : planningRuleForm.dependencyActionTitle.trim() || null,
       dependencyAnchor: "OUTPUT",
+      routineAction: Boolean(planningRuleForm.routineAction),
+      recurrenceIntervalDays: planningRuleForm.routineAction ? Math.max(1, Number(planningRuleForm.recurrenceIntervalDays) || 1) : null,
       durationDays: Number(planningRuleForm.durationDays) || 0
     };
     const isEdit = Boolean(editingPlanningRule);
@@ -3081,6 +3648,8 @@ function App() {
       evidenceRequired: Boolean(rule.evidenceRequired),
       dependencyActionTitle: rule.dependencyActionTitle || "",
       dependencyAnchor: rule.dependencyAnchor || "OUTPUT",
+      routineAction: Boolean(rule.routineAction),
+      recurrenceIntervalDays: rule.recurrenceIntervalDays || 7,
       durationDays: rule.durationDays ?? 1
     });
   }
@@ -3142,6 +3711,9 @@ function App() {
     setSaving(true);
     setError("");
     const isEdit = Boolean(editingUser);
+    if (isEdit) {
+      delete payload.password;
+    }
     const request = isEdit ? updateUser(editingUser, payload) : createUser(payload);
     request
       .then((savedUser) => (
@@ -3538,6 +4110,14 @@ function App() {
           />
         )}
 
+        {page === "ask-ai" && (
+          <AskAiFinishedProductPage
+            finishedProducts={finishedProductReferences}
+            requests={requests}
+            onOpenRequest={openRequest}
+          />
+        )}
+
         {page === "traceability" && (
           <TraceabilityPage
             actionFilter={auditActionFilter}
@@ -3686,10 +4266,12 @@ function App() {
             removeActionProofDocumentFile={removeActionProofDocumentFile}
             handleApprovePhase={handleApprovePhase}
             handleApproveActionValidation={handleApproveActionValidation}
+            handleCloseRequest={handleCloseRequest}
             handleRejectActionValidation={handleRejectActionValidation}
             handleRequestActionValidation={handleRequestActionValidation}
             handleRejectPhase={handleRejectPhase}
             handleReopenPhase={handleReopenPhase}
+            handleRequestClosure={handleRequestClosure}
             handleRequestPhaseValidation={handleRequestPhaseValidation}
             isCriticalAction={isCriticalAction}
             onEditRequest={openEditEcr}
@@ -3733,7 +4315,20 @@ function App() {
         )}
       </section>
 
+      <AskAiFloatingButton onClick={() => setQuickAskAiOpen(true)} />
       <ChatFloatingButton count={chatNotificationCount} onClick={openQuickChat} />
+
+      {quickAskAiOpen && (
+        <QuickAskAiPanel
+          finishedProducts={finishedProductReferences}
+          requests={requests}
+          onClose={() => setQuickAskAiOpen(false)}
+          onOpenRequest={(request) => {
+            setQuickAskAiOpen(false);
+            openRequest(request);
+          }}
+        />
+      )}
 
       {quickChatOpen && (
         <QuickChatPanel
@@ -3759,6 +4354,7 @@ function App() {
         <CreateModificationDialog
           clientOptions={clientOptions}
           ecrForm={ecrForm}
+          finishedProductReferences={finishedProductReferences}
           pilots={pilots}
           productOptions={productOptions}
           projects={projects}
@@ -3774,6 +4370,7 @@ function App() {
           clientOptions={clientOptions}
           ecrForm={ecrEditForm}
           existingRequest={editingEcrRequest}
+          finishedProductReferences={finishedProductReferences}
           pilots={pilots}
           productOptions={productOptions}
           projects={projects}
@@ -3804,6 +4401,38 @@ function ChatFloatingButton({ count = 0, onClick }) {
       <Pencil size={26} />
       {count > 0 && <span>{count > 9 ? "9+" : count}</span>}
     </button>
+  );
+}
+
+function AskAiFloatingButton({ onClick }) {
+  return (
+    <button className="chat-floating-button ask-ai-floating-button" type="button" title="Ask AI produit fini" onClick={onClick}>
+      <Bot size={26} />
+    </button>
+  );
+}
+
+function QuickAskAiPanel({ finishedProducts = [], requests = [], onClose, onOpenRequest }) {
+  return (
+    <aside className="quick-chat-panel quick-ask-ai-panel" aria-label="Ask AI rapide">
+      <header className="quick-chat-header">
+        <div>
+          <strong>Ask AI</strong>
+          <span>Recherche PN produit fini</span>
+        </div>
+        <button className="icon-button" type="button" title="Fermer" onClick={onClose}>
+          <X size={18} />
+        </button>
+      </header>
+      <div className="quick-ask-ai-body">
+        <AskAiFinishedProductPage
+          compact
+          finishedProducts={finishedProducts}
+          requests={requests}
+          onOpenRequest={onOpenRequest}
+        />
+      </div>
+    </aside>
   );
 }
 
@@ -3989,6 +4618,7 @@ function MessagingPage({
 }) {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [arabicKeyboardOpen, setArabicKeyboardOpen] = useState(false);
+  const [membersDialogOpen, setMembersDialogOpen] = useState(false);
   const [messageSearch, setMessageSearch] = useState("");
   const messagesEndRef = useRef(null);
   const selectedUser = users.find((user) => chatTargetKey(user) === selectedUserId);
@@ -4515,18 +5145,240 @@ function formatFileSize(value) {
   return `${(size / (1024 * 1024)).toFixed(1)} Mo`;
 }
 
+function AskAiFinishedProductPage({ compact = false, finishedProducts = [], requests = [], onOpenRequest }) {
+  const [pnQuery, setPnQuery] = useState("");
+  const [hasSearched, setHasSearched] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const normalizedQuery = normalizeReferenceValue(pnQuery);
+  const matchedProduct = useMemo(() => {
+    if (!normalizedQuery) return null;
+    return finishedProducts.find((product) => normalizeReferenceValue(product.partNumber) === normalizedQuery) || null;
+  }, [finishedProducts, normalizedQuery]);
+  const matchingRequests = useMemo(() => {
+    if (!matchedProduct) return [];
+    const partNumber = normalizeReferenceValue(matchedProduct.partNumber);
+    return requests
+      .filter((request) => parseSelectedProducts(request.finishedProducts).some((value) => normalizeReferenceValue(value) === partNumber))
+      .sort((first, second) => String(second.receptionDate || "").localeCompare(String(first.receptionDate || "")) || requestDisplayName(first).localeCompare(requestDisplayName(second), "fr", { sensitivity: "base" }));
+  }, [matchedProduct, requests]);
+  const productSummary = matchedProduct ? finishedProductAiSummary(matchedProduct, matchingRequests) : "";
+
+  function handleSearch(event) {
+    event.preventDefault();
+    setHasSearched(true);
+    stopFinishedProductSpeech(setSpeaking);
+  }
+
+  function handleSpeak() {
+    if (!productSummary) return;
+    speakFinishedProductSummary(productSummary, setSpeaking);
+  }
+
+  return (
+    <section className={compact ? "ask-ai-page compact-ask-ai-page" : "ask-ai-page"}>
+      {!compact && (
+        <PageHeader
+          eyebrow="Ask AI"
+          title="Assistant produit fini"
+          subtitle="Saisissez le PN d'un produit fini pour retrouver sa fiche complete et toutes les modifications ou il est inclus."
+        />
+      )}
+      <section className="ask-ai-search-panel panel">
+        <div className="ask-ai-orb" aria-hidden="true"><Bot size={30} /></div>
+        <form className="ask-ai-search-form" onSubmit={handleSearch}>
+          <label>
+            PN produit fini
+            <div className="input-with-icon">
+              <Search size={17} />
+              <input
+                autoComplete="off"
+                placeholder="Saisir le PN exact"
+                value={pnQuery}
+                onChange={(event) => {
+                  setPnQuery(event.target.value);
+                  setHasSearched(false);
+                }}
+              />
+            </div>
+          </label>
+          <button className="primary-action" disabled={!pnQuery.trim()} type="submit">
+            <Bot size={16} />
+            Analyser
+          </button>
+        </form>
+      </section>
+
+      {!hasSearched && (
+        <EmptyState title="Pret a analyser" text="Entrez un PN exact pour consulter les details du produit fini et son historique de modifications." compact />
+      )}
+      {hasSearched && !matchedProduct && (
+        <EmptyState title="Produit fini introuvable" text="Aucun produit fini ne correspond a ce PN. Verifiez la reference ou importez-la dans les preferentiels." compact />
+      )}
+      {matchedProduct && (
+        <section className="ask-ai-result-grid">
+          <article className="panel ask-ai-product-card">
+            <div className="section-title">
+              <div>
+                <h2>{matchedProduct.partNumber}</h2>
+                <span>{matchedProduct.designation || "Designation non renseignee"}</span>
+              </div>
+              <span className="stage-pill teal">{matchingRequests.length} modification{matchingRequests.length > 1 ? "s" : ""}</span>
+            </div>
+            <div className="ask-ai-detail-grid">
+              {finishedProductDetailRows(matchedProduct).map(([label, value]) => (
+                <span key={label}>
+                  <em>{label}</em>
+                  <strong>{value || "-"}</strong>
+                </span>
+              ))}
+            </div>
+            <div className="ask-ai-speech-actions">
+              <button className="primary-action" type="button" onClick={handleSpeak}>
+                <Volume2 size={16} />
+                Explication sonore
+              </button>
+              <button className="secondary-action" disabled={!speaking} type="button" onClick={() => stopFinishedProductSpeech(setSpeaking)}>
+                <Square size={14} />
+                Stop
+              </button>
+            </div>
+          </article>
+
+          <article className="panel ask-ai-summary-card">
+            <div className="section-title">
+              <div>
+                <h2>Synthese AI</h2>
+                <span>Resume lisible et vocalisable</span>
+              </div>
+            </div>
+            <p>{productSummary}</p>
+          </article>
+
+          <article className="panel ask-ai-modifications-card">
+            <div className="section-title">
+              <div>
+                <h2>Modifications liees</h2>
+                <span>Demandes ECR contenant ce produit fini</span>
+              </div>
+            </div>
+            {matchingRequests.length === 0 ? (
+              <EmptyState title="Aucune modification" text="Ce produit fini existe dans le referentiel, mais aucune modification ne l'inclut actuellement." compact />
+            ) : (
+              <div className="ask-ai-request-list">
+                {matchingRequests.map((request) => (
+                  <button className="ask-ai-request-row" key={request.id} type="button" onClick={() => onOpenRequest(request)}>
+                    <span>
+                      <strong>{requestDisplayName(request)}</strong>
+                      <small>{request.modificationProject || "-"} | {request.client || "-"} | {request.product || "-"}</small>
+                    </span>
+                    <span>
+                      <em>{stageLabel(request.currentStage, Boolean(request.newVersion))}</em>
+                      <small>Reception: {request.receptionDate || "-"}</small>
+                    </span>
+                    <span>
+                      <em>Pilote</em>
+                      <small>{request.pilot || "-"}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </article>
+        </section>
+      )}
+    </section>
+  );
+}
+
 function DashboardPage({ clients = [], currentUser, planningRules = [], products = [], projects, requests, roles = [], saving, stats, users = [], onCreateRequest, onOpenRequest }) {
   const allProjectsValue = "__ALL__";
   const [dossierProject, setDossierProject] = useState(allProjectsValue);
+  const [modificationProgressPage, setModificationProgressPage] = useState(0);
+  const [cancelledActionsByRequestId, setCancelledActionsByRequestId] = useState({});
+  const [dashboardActionsByRequestId, setDashboardActionsByRequestId] = useState({});
+  const [dashboardDialog, setDashboardDialog] = useState(null);
   const adminView = isAdminUser(currentUser);
   const dashboardRequests = requests.filter((request) => !request.archived);
+  const dashboardRequestIds = dashboardRequests.map((request) => request.id).filter(Boolean).sort((first, second) => Number(first) - Number(second));
+  const dashboardRequestIdsKey = dashboardRequestIds.join("|");
   const activeRequests = dashboardRequests.filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED");
   const closedRequests = dashboardRequests.filter((request) => request.currentStage === "CLOSED");
   const cancelledRequests = dashboardRequests.filter((request) => request.currentStage === "CANCELLED");
+  const cancelledRequestIds = cancelledRequests.map((request) => request.id).filter(Boolean).sort((first, second) => String(first).localeCompare(String(second)));
+  const cancelledRequestIdsKey = cancelledRequestIds.join("|");
+  const progressForRequest = (request) => workflowCompletionRate(
+    request,
+    request?.currentStage === "CANCELLED" ? (cancelledActionsByRequestId[request.id] || []) : []
+  );
+
+  useEffect(() => {
+    if (!cancelledRequestIds.length) {
+      setCancelledActionsByRequestId({});
+      return undefined;
+    }
+    let active = true;
+    Promise.all(cancelledRequestIds.map((requestId) =>
+      getActions(requestId, "CANCELLED")
+        .then((items) => [requestId, Array.isArray(items) ? items : []])
+        .catch(() => [requestId, []])
+    )).then((entries) => {
+      if (!active) return;
+      setCancelledActionsByRequestId(Object.fromEntries(entries));
+    });
+    return () => {
+      active = false;
+    };
+  }, [cancelledRequestIdsKey]);
+
+  useEffect(() => {
+    if (!dashboardRequestIds.length) {
+      setDashboardActionsByRequestId({});
+      return undefined;
+    }
+    let active = true;
+    Promise.all(dashboardRequestIds.map((requestId) =>
+      getActions(requestId)
+        .then((items) => [requestId, Array.isArray(items) ? items : []])
+        .catch(() => [requestId, []])
+    )).then((entries) => {
+      if (!active) return;
+      setDashboardActionsByRequestId(Object.fromEntries(entries));
+    });
+    return () => {
+      active = false;
+    };
+  }, [dashboardRequestIdsKey]);
+
   const lateRequests = activeRequests.filter((request) => {
     const sopDate = parseDateOnly(request.sopDate);
     return sopDate && sopDate < new Date();
   });
+  const today = startOfLocalDay(new Date());
+  const inThreeDays = addDays(today, 3);
+  const dashboardActionRows = dashboardRequests.flatMap((request) => (
+    dashboardActionsByRequestId[request.id] || []
+  ).map((action) => ({ action, request })));
+  const cancelledActionRows = cancelledRequests.flatMap((request) => (
+    cancelledActionsByRequestId[request.id] || []
+  ).map((action) => ({ action, request })));
+  const openActionRows = dashboardActionRows.filter(({ action, request }) => (
+    request.currentStage !== "CLOSED" &&
+    request.currentStage !== "CANCELLED" &&
+    !isActionDone(action)
+  ));
+  const lateActionRows = openActionRows
+    .filter(({ action }) => isDashboardActionLate(action, today))
+    .sort((first, second) => dashboardActionDueTime(first.action) - dashboardActionDueTime(second.action));
+  const dueSoonActionRows = openActionRows
+    .filter(({ action }) => {
+      const dueDate = dashboardActionDueDate(action);
+      return dueDate && dueDate >= today && dueDate <= inThreeDays;
+    })
+    .sort((first, second) => dashboardActionDueTime(first.action) - dashboardActionDueTime(second.action));
+  const lateOwners = dashboardLateOwners(lateActionRows, 6);
+  const projectLateRates = dashboardProjectLateRates(dashboardActionRows, 6);
+  const finishedByProject = dashboardFinishedProductGroups(dashboardRequests, "project", 6);
+  const finishedByClient = dashboardFinishedProductGroups(dashboardRequests, "client", 6);
   const newProjectRequests = dashboardRequests.filter((request) => request.newVersion);
   const stageEntries = getStages(true).map(([stage, label]) => {
     const count = dashboardRequests.filter((request) => request.currentStage === stage).length;
@@ -4569,6 +5421,27 @@ function DashboardPage({ clients = [], currentUser, planningRules = [], products
   const clientImpact = dashboardDistribution(dashboardRequests, (request) => request.client || "Client non renseigne", 6);
   const productImpact = dashboardDistribution(dashboardRequests, (request) => request.product || "Produit non renseigne", 6);
   const pilotLoad = dashboardDistribution(dashboardRequests, (request) => request.pilot || "Pilote non renseigne", 6);
+  const projectProgress = dashboardProgressGroups(dashboardRequests, (request) => request.modificationProject || "Projet non renseigne", 5, progressForRequest);
+  const pilotProgress = dashboardProgressGroups(dashboardRequests, (request) => request.pilot || "Pilote non renseigne", 5, progressForRequest);
+  const clientProgress = dashboardProgressGroups(dashboardRequests, (request) => request.client || "Client non renseigne", 5, progressForRequest);
+  const portfolioProgress = dashboardRequests.length
+    ? Math.round(dashboardRequests.reduce((total, request) => total + progressForRequest(request), 0) / dashboardRequests.length)
+    : 0;
+  const modificationProgressRows = [...dashboardRequests]
+    .map((request) => ({ request, progress: progressForRequest(request) }))
+    .sort((first, second) => {
+      const firstActive = first.request.currentStage !== "CLOSED" && first.request.currentStage !== "CANCELLED";
+      const secondActive = second.request.currentStage !== "CLOSED" && second.request.currentStage !== "CANCELLED";
+      return Number(secondActive) - Number(firstActive)
+        || first.progress - second.progress
+        || requestDisplayName(first.request).localeCompare(requestDisplayName(second.request), "fr", { sensitivity: "base" });
+    });
+  const modificationProgressPageSize = 5;
+  const modificationProgressPageCount = Math.max(1, Math.ceil(modificationProgressRows.length / modificationProgressPageSize));
+  const visibleModificationProgressRows = modificationProgressRows.slice(
+    modificationProgressPage * modificationProgressPageSize,
+    modificationProgressPage * modificationProgressPageSize + modificationProgressPageSize
+  );
   const modificationTypes = [
     { label: "Nouveau projet", count: dashboardRequests.filter((request) => request.newVersion).length },
     { label: "Digit change", count: dashboardRequests.filter((request) => request.digitChange).length },
@@ -4592,7 +5465,25 @@ function DashboardPage({ clients = [], currentUser, planningRules = [], products
   const dossierRequests = exportingAllProjects ? dashboardRequests : dashboardRequests.filter((request) => request.modificationProject === dossierProject);
   const dossierExportLabel = exportingAllProjects ? "Tous les projets" : dossierProject;
 
-  function exportProjectDossierReviews(format) {
+  useEffect(() => {
+    setModificationProgressPage((page) => Math.min(page, modificationProgressPageCount - 1));
+  }, [modificationProgressPageCount]);
+
+  function openDashboardDialog(title, subtitle, type, items) {
+    setDashboardDialog({ title, subtitle, type, items });
+  }
+
+  function handleDashboardDialogOpen(item) {
+    if (!dashboardDialog) return;
+    if (dashboardDialog.type === "actions") {
+      onOpenRequest(item.request, item.action?.stage);
+    } else {
+      onOpenRequest(item);
+    }
+    setDashboardDialog(null);
+  }
+
+  async function exportProjectDossierReviews(format) {
     if (!dossierProject) {
       warningAlert("Projet requis", "Sélectionnez un projet avant de lancer l'extraction.");
       return;
@@ -4603,10 +5494,22 @@ function DashboardPage({ clients = [], currentUser, planningRules = [], products
     }
     const fileBaseName = `revues-dossier-${exportingAllProjects ? "toutes-modifications" : `projet-${fileNameToken(dossierProject)}`}`;
     if (format === "pdf") {
-      const win = window.open("", "_blank");
-      if (!win) return;
-      win.document.write(projectDossierReviewsExportHtml(dossierExportLabel, dossierRequests).replace("</body></html>", "<script>window.onload=function(){window.print();};</script></body></html>"));
-      win.document.close();
+      try {
+        await downloadHtmlAsPdf(
+          `${fileBaseName}.pdf`,
+          projectDossierReviewsExportHtml(dossierExportLabel, dossierRequests),
+          {
+            orientation: "portrait",
+            width: "900px",
+            backgroundColor: "#f7f9f1"
+          }
+        );
+        successToast("Extraction revue dossier generee");
+      } catch (error) {
+        console.error(error);
+        errorAlert("Export PDF indisponible", "Impossible de generer le PDF de revue dossier projet.");
+      }
+      return;
     } else if (format === "excel") {
       downloadBlobFile(
         `${fileBaseName}.xls`,
@@ -4629,12 +5532,121 @@ function DashboardPage({ clients = [], currentUser, planningRules = [], products
         title={adminView ? "Dashboard direction ECR" : "Dashboard personnel ECR"}
         subtitle={adminView ? "Pilotage de toutes les modifications, priorités et charges projet." : "Synthèse des modifications où vous intervenez comme membre, pilote, responsable ou validateur."}
       />
+      {isAdminUser(currentUser) && (
+        <section className="panel">
+          <div className="section-title">
+            <div>
+              <h2>Extraction revue dossier par projet</h2>
+              <span>{dossierRequests.length} modification{dossierRequests.length > 1 ? "s" : ""}</span>
+            </div>
+            <div className="button-row compact-export-row">
+              <button className="secondary-action" type="button" onClick={() => exportProjectDossierReviews("txt")} disabled={!dossierProject || dossierRequests.length === 0}>
+                <FileText size={16} />
+                TXT
+              </button>
+              <button className="secondary-action" type="button" onClick={() => exportProjectDossierReviews("pdf")} disabled={!dossierProject || dossierRequests.length === 0}>
+                <FileText size={16} />
+                PDF
+              </button>
+              <button className="secondary-action" type="button" onClick={() => exportProjectDossierReviews("excel")} disabled={!dossierProject || dossierRequests.length === 0}>
+                <FileText size={16} />
+                Excel
+              </button>
+            </div>
+          </div>
+          <div className="modifications-toolbar dashboard-extraction-toolbar">
+            <label className="project-filter">
+              <FolderKanban size={16} />
+              <select value={dossierProject} onChange={(event) => setDossierProject(event.target.value)}>
+                <option value={allProjectsValue}>Tous les projets</option>
+                {projectOptions.map((projectName) => (
+                  <option key={projectName} value={projectName}>{projectName}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </section>
+      )}
       <div className="stat-grid">
-        <StatCard label={adminView ? "Modifications" : "Dans mon périmètre"} value={stats.requests} icon={ClipboardList} />
-        <StatCard label="Actives" value={activeRequests.length} icon={Gauge} />
-        <StatCard label="En retard SOP" value={lateRequests.length} icon={CircleAlert} />
-        <StatCard label="Clôturées" value={closedRequests.length} icon={CheckCircle2} />
+        <DashboardStatCard
+          label={adminView ? "Nombre de modifications" : "Dans mon perimetre"}
+          value={dashboardRequests.length}
+          icon={ClipboardList}
+          onClick={() => openDashboardDialog("Modifications", `${dashboardRequests.length} modification${dashboardRequests.length > 1 ? "s" : ""} affichee${dashboardRequests.length > 1 ? "s" : ""}`, "requests", dashboardRequests)}
+        />
+        <DashboardStatCard
+          label="Actives"
+          value={activeRequests.length}
+          icon={Gauge}
+          onClick={() => openDashboardDialog("Modifications actives", `${activeRequests.length} modification${activeRequests.length > 1 ? "s" : ""} en cours`, "requests", activeRequests)}
+        />
+        <DashboardStatCard
+          label="Actions en retard"
+          value={lateActionRows.length}
+          icon={CircleAlert}
+          onClick={() => openDashboardDialog("Actions en retard", `${lateActionRows.length} action${lateActionRows.length > 1 ? "s" : ""} a traiter`, "actions", lateActionRows)}
+        />
+        <DashboardStatCard
+          label="Cloturees"
+          value={closedRequests.length}
+          icon={CheckCircle2}
+          onClick={() => openDashboardDialog("Modifications cloturees", `${closedRequests.length} modification${closedRequests.length > 1 ? "s" : ""} cloturee${closedRequests.length > 1 ? "s" : ""}`, "requests", closedRequests)}
+        />
+        <DashboardStatCard
+          label="Modifications cancelled"
+          value={cancelledRequests.length}
+          icon={XCircle}
+          onClick={() => openDashboardDialog("Modifications cancelled", `${cancelledRequests.length} modification${cancelledRequests.length > 1 ? "s" : ""} annulee${cancelledRequests.length > 1 ? "s" : ""}`, "requests", cancelledRequests)}
+        />
       </div>
+      <section className="dashboard-ops-grid">
+        <DashboardActionWatchCard
+          title="Actions deja en retard"
+          subtitle={`${lateActionRows.length} action${lateActionRows.length > 1 ? "s" : ""} a traiter`}
+          items={lateActionRows.slice(0, 8)}
+          mode="late"
+          onOpenRequest={onOpenRequest}
+        />
+        <DashboardActionWatchCard
+          title="Actions qui expirent dans 3 jours"
+          subtitle={`${dueSoonActionRows.length} echeance${dueSoonActionRows.length > 1 ? "s" : ""} proche${dueSoonActionRows.length > 1 ? "s" : ""}`}
+          items={dueSoonActionRows.slice(0, 8)}
+          mode="soon"
+          onOpenRequest={onOpenRequest}
+        />
+        <DashboardLateOwnersCard items={lateOwners} totalLate={lateActionRows.length} />
+      </section>
+      <section className="dashboard-ops-grid secondary">
+        <DashboardProjectLateRateCard items={projectLateRates} />
+        <DashboardFinishedProductsCard title="Produits finis par projet" subtitle="Distribution depuis les modifications" items={finishedByProject} />
+        <DashboardFinishedProductsCard title="Produits finis par client" subtitle="Distribution depuis les modifications" items={finishedByClient} />
+      </section>
+      <section className="dashboard-progress-grid">
+        <DashboardProgressCard
+          title="Avancement par projet"
+          subtitle={`Portefeuille global ${portfolioProgress}%`}
+          items={projectProgress}
+        />
+        <DashboardProgressCard
+          title="Avancement par pilote"
+          subtitle="Moyenne des modifications suivies"
+          items={pilotProgress}
+        />
+        <DashboardProgressCard
+          title="Avancement par client"
+          subtitle="Progression moyenne dossier"
+          items={clientProgress}
+        />
+      </section>
+      <DashboardModificationProgressCard
+        page={modificationProgressPage}
+        pageCount={modificationProgressPageCount}
+        rows={visibleModificationProgressRows}
+        total={modificationProgressRows.length}
+        onNext={() => setModificationProgressPage((page) => Math.min(page + 1, modificationProgressPageCount - 1))}
+        onOpenRequest={onOpenRequest}
+        onPrevious={() => setModificationProgressPage((page) => Math.max(page - 1, 0))}
+      />
       <section className="dashboard-grid">
         <article className="panel dashboard-health-panel">
           <div className="section-title">
@@ -4649,6 +5661,7 @@ function DashboardPage({ clients = [], currentUser, planningRules = [], products
               <strong>{lateRequests.length === 0 ? "Aucun retard SOP détecté" : `${lateRequests.length} modification${lateRequests.length > 1 ? "s" : ""} à surveiller`}</strong>
               <span>{newProjectRequests.length} nouveau{newProjectRequests.length > 1 ? "x" : ""} projet{newProjectRequests.length > 1 ? "s" : ""} dans le périmètre.</span>
               <span>{activeRequests.length} modification{activeRequests.length > 1 ? "s" : ""} encore active{activeRequests.length > 1 ? "s" : ""}.</span>
+              <DashboardHealthLegend />
             </div>
           </div>
         </article>
@@ -4722,8 +5735,8 @@ function DashboardPage({ clients = [], currentUser, planningRules = [], products
         <DashboardStatusMatrix entries={stageStatusMatrix} />
       </section>
       <section className="dashboard-entity-grid">
-        <DashboardTilesCard title="Clients impactés" subtitle={`${clients.length} client${clients.length > 1 ? "s" : ""} référencé${clients.length > 1 ? "s" : ""}`} items={clientImpact} />
-        <DashboardBubbleCard title="Produits concernés" subtitle={`${products.length} produit${products.length > 1 ? "s" : ""} référencé${products.length > 1 ? "s" : ""}`} items={productImpact} />
+        <DashboardImpactCard title="Clients impactés" subtitle={`${clients.length} client${clients.length > 1 ? "s" : ""} référencé${clients.length > 1 ? "s" : ""}`} items={clientImpact} tone="client" />
+        <DashboardImpactCard title="Produits concernés" subtitle={`${products.length} produit${products.length > 1 ? "s" : ""} référencé${products.length > 1 ? "s" : ""}`} items={productImpact} tone="product" />
         <article className="panel dashboard-chart-panel">
           <div className="section-title">
             <div>
@@ -4767,41 +5780,6 @@ function DashboardPage({ clients = [], currentUser, planningRules = [], products
           </>
         )}
       </section>
-      {isAdminUser(currentUser) && (
-        <section className="panel">
-          <div className="section-title">
-            <div>
-              <h2>Extraction revue dossier par projet</h2>
-              <span>{dossierRequests.length} modification{dossierRequests.length > 1 ? "s" : ""}</span>
-            </div>
-            <div className="button-row compact-export-row">
-              <button className="secondary-action" type="button" onClick={() => exportProjectDossierReviews("txt")} disabled={!dossierProject || dossierRequests.length === 0}>
-                <FileText size={16} />
-                TXT
-              </button>
-              <button className="secondary-action" type="button" onClick={() => exportProjectDossierReviews("pdf")} disabled={!dossierProject || dossierRequests.length === 0}>
-                <FileText size={16} />
-                PDF
-              </button>
-              <button className="secondary-action" type="button" onClick={() => exportProjectDossierReviews("excel")} disabled={!dossierProject || dossierRequests.length === 0}>
-                <FileText size={16} />
-                Excel
-              </button>
-            </div>
-          </div>
-          <div className="modifications-toolbar dashboard-extraction-toolbar">
-            <label className="project-filter">
-              <FolderKanban size={16} />
-              <select value={dossierProject} onChange={(event) => setDossierProject(event.target.value)}>
-                <option value={allProjectsValue}>Tous les projets</option>
-                {projectOptions.map((projectName) => (
-                  <option key={projectName} value={projectName}>{projectName}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </section>
-      )}
       <section className="panel">
         <div className="section-title">
           <div>
@@ -4853,6 +5831,254 @@ function DashboardDonut({ active, closed, cancelled, late }) {
   );
 }
 
+function DashboardStatCard({ icon: Icon, label, value, onClick }) {
+  const openedRef = useRef(false);
+
+  function open(event) {
+    if (openedRef.current) return;
+    openedRef.current = true;
+    window.setTimeout(() => {
+      openedRef.current = false;
+    }, 250);
+    if (event) event.preventDefault();
+    onClick();
+  }
+
+  return (
+    <button className="stat-card clickable" type="button" onClick={open} onPointerDown={open}>
+      <Icon size={20} />
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </button>
+  );
+}
+
+function DashboardHealthLegend() {
+  return (
+    <div className="dashboard-health-legend" aria-label="Legende sante portefeuille">
+      <span><i className="late" />Retard SOP</span>
+      <span><i className="active" />Active sans retard</span>
+      <span><i className="closed" />Cloturee</span>
+      <span><i className="cancelled" />Cancelled</span>
+    </div>
+  );
+}
+
+function DashboardDrilldownDialog({ dialog, onClose, onOpen }) {
+  const items = Array.isArray(dialog?.items) ? dialog.items : [];
+  const isActions = dialog?.type === "actions";
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        aria-labelledby="dashboard-drilldown-title"
+        aria-modal="true"
+        className="dialog-card dashboard-drilldown-dialog"
+        onMouseDown={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <header className="actions-dialog-header">
+          <div>
+            <p className="eyebrow">Dashboard</p>
+            <h2 id="dashboard-drilldown-title">{dialog.title}</h2>
+            <span>{dialog.subtitle}</span>
+          </div>
+          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
+            <X size={18} />
+          </button>
+        </header>
+        <div className="dashboard-drilldown-list">
+          {items.length === 0 ? (
+            <EmptyState title="Aucun element" text="Aucune donnee disponible pour ce filtre." compact />
+          ) : isActions ? items.map((item) => (
+            <button className="dashboard-drilldown-row action" key={`${item.request?.id}-${item.action?.id}`} type="button" onClick={() => onOpen(item)}>
+              <span className={isDashboardActionLate(item.action) ? "drilldown-dot late" : "drilldown-dot"} />
+              <strong>{item.action?.title || "Action sans titre"}</strong>
+              <small>{requestDisplayName(item.request)} | {item.request?.modificationProject || "-"} | {stageLabel(item.action?.stage, Boolean(item.request?.newVersion))}</small>
+              <em>{dashboardActionDueDate(item.action) ? formatDateOnly(dashboardActionDueDate(item.action)) : "-"}</em>
+            </button>
+          )) : items.map((request) => (
+            <button className="dashboard-drilldown-row" key={request.id} type="button" onClick={() => onOpen(request)}>
+              <span className={`drilldown-dot ${request.currentStage === "CLOSED" ? "closed" : request.currentStage === "CANCELLED" ? "cancelled" : ""}`} />
+              <strong>{requestDisplayName(request)}</strong>
+              <small>{request.modificationProject || "-"} | {request.client || "-"} | {request.product || "-"}</small>
+              <em>{stageLabel(request.currentStage, Boolean(request.newVersion))}</em>
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function dashboardActionDueDate(action) {
+  return parseDateOnly(action?.endDate) || parseDateOnly(action?.deadline) || null;
+}
+
+function dashboardActionDueTime(action) {
+  return dashboardActionDueDate(action)?.getTime() || Number.MAX_SAFE_INTEGER;
+}
+
+function isDashboardActionLate(action, today = startOfLocalDay(new Date())) {
+  const dueDate = dashboardActionDueDate(action);
+  return Boolean(action?.late) || Boolean(dueDate && dueDate < today);
+}
+
+function dashboardLateOwners(rows = [], limit = 6) {
+  return Array.from(rows.reduce((map, { action }) => {
+    const label = action.responsible || "Responsable non renseigne";
+    const item = map.get(label) || { label, count: 0, critical: 0 };
+    item.count += 1;
+    if (String(action.criticality || "").startsWith("1")) item.critical += 1;
+    map.set(label, item);
+    return map;
+  }, new Map()).values())
+    .sort((first, second) => second.count - first.count || second.critical - first.critical || first.label.localeCompare(second.label, "fr", { sensitivity: "base" }))
+    .slice(0, limit);
+}
+
+function dashboardProjectLateRates(rows = [], limit = 6) {
+  return Array.from(rows.reduce((map, { action, request }) => {
+    if (request.currentStage === "CLOSED" || request.currentStage === "CANCELLED") return map;
+    const label = request.modificationProject || "Projet non renseigne";
+    const item = map.get(label) || { label, total: 0, late: 0, rate: 0 };
+    if (!isActionDone(action)) {
+      item.total += 1;
+      if (isDashboardActionLate(action)) item.late += 1;
+    }
+    map.set(label, item);
+    return map;
+  }, new Map()).values())
+    .map((item) => ({ ...item, rate: item.total > 0 ? Math.round((item.late / item.total) * 100) : 0 }))
+    .filter((item) => item.total > 0)
+    .sort((first, second) => second.rate - first.rate || second.late - first.late || first.label.localeCompare(second.label, "fr", { sensitivity: "base" }))
+    .slice(0, limit);
+}
+
+function dashboardFinishedProductGroups(requests = [], mode = "project", limit = 6) {
+  return Array.from(requests.reduce((map, request) => {
+    const group = mode === "client" ? request.client || "Client non renseigne" : request.modificationProject || "Projet non renseigne";
+    const item = map.get(group) || { label: group, count: 0, modifications: 0, products: new Set() };
+    item.modifications += 1;
+    const selectedProducts = parseSelectedProducts(request.finishedProducts);
+    selectedProducts.forEach((productKey) => {
+      item.products.add(productKey);
+    });
+    item.count = item.products.size;
+    map.set(group, item);
+    return map;
+    }, new Map()).values())
+      .map((item) => ({ label: item.label, count: item.count, modifications: item.modifications }))
+      .filter((item) => item.count > 0)
+      .sort((first, second) => second.count - first.count || second.modifications - first.modifications || first.label.localeCompare(second.label, "fr", { sensitivity: "base" }))
+      .slice(0, limit);
+}
+
+function DashboardActionWatchCard({ title, subtitle, items = [], mode = "late", onOpenRequest }) {
+  return (
+    <article className={`panel dashboard-action-watch ${mode}`}>
+      <div className="section-title">
+        <div>
+          <h2>{title}</h2>
+          <span>{subtitle}</span>
+        </div>
+      </div>
+      <div className="dashboard-action-watch-list">
+        {items.length === 0 ? (
+          <EmptyState title="Aucune action" text={mode === "late" ? "Aucun retard action detecte." : "Aucune action n'expire dans les 3 jours."} compact />
+        ) : items.map(({ action, request }) => {
+          const dueDate = dashboardActionDueDate(action);
+          const dayDelta = dueDate ? daysBetween(startOfLocalDay(new Date()), dueDate) : null;
+          return (
+            <button className="dashboard-action-watch-row" key={`${request.id}-${action.id}`} type="button" onClick={() => onOpenRequest(request)}>
+              <span className="watch-indicator" />
+              <strong>{action.title || "Action sans titre"}</strong>
+              <small>{requestDisplayName(request)} | {request.modificationProject || "-"} | {stageLabel(action.stage, Boolean(request.newVersion))}</small>
+              <em>{dueDate ? mode === "late" ? `${Math.abs(dayDelta)} j retard` : `J-${Math.max(0, dayDelta)}` : "-"}</em>
+            </button>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
+function DashboardLateOwnersCard({ items = [], totalLate = 0 }) {
+  const maxCount = Math.max(1, ...items.map((item) => item.count));
+  return (
+    <article className="panel dashboard-late-owners">
+      <div className="section-title">
+        <div>
+          <h2>Utilisateurs qui font le plus de retard</h2>
+          <span>{totalLate} action{totalLate > 1 ? "s" : ""} en retard</span>
+        </div>
+      </div>
+      <div className="dashboard-late-owner-list">
+        {items.length === 0 ? (
+          <EmptyState title="Aucun retard" text="Aucun responsable avec action en retard." compact />
+        ) : items.map((item, index) => (
+          <div className="dashboard-late-owner-row" key={item.label}>
+            <span>{index + 1}</span>
+            <strong>{item.label}</strong>
+            <div className="dashboard-row-track"><i style={{ width: `${Math.max(8, (item.count / maxCount) * 100)}%` }} /></div>
+            <em>{item.count}</em>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function DashboardProjectLateRateCard({ items = [] }) {
+  return (
+    <article className="panel dashboard-project-rate">
+      <div className="section-title">
+        <div>
+          <h2>Taux de retard par projet</h2>
+          <span>Actions ouvertes en retard / total ouvert</span>
+        </div>
+      </div>
+      <div className="dashboard-project-rate-list">
+        {items.length === 0 ? (
+          <EmptyState title="Aucun retard projet" text="Les taux apparaitront avec les actions ouvertes." compact />
+        ) : items.map((item) => (
+          <div className="dashboard-project-rate-row" key={item.label}>
+            <strong>{item.label}</strong>
+            <em>{item.rate}%</em>
+            <span>{item.late}/{item.total} action{item.total > 1 ? "s" : ""}</span>
+            <div className="dashboard-row-track"><i style={{ width: `${Math.max(4, item.rate)}%` }} /></div>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function DashboardFinishedProductsCard({ title, subtitle, items = [] }) {
+  const maxCount = Math.max(1, ...items.map((item) => item.count));
+  return (
+    <article className="panel dashboard-finished-products-card">
+      <div className="section-title">
+        <div>
+          <h2>{title}</h2>
+          <span>{subtitle}</span>
+        </div>
+      </div>
+      <div className="dashboard-finished-products-list">
+        {items.length === 0 ? (
+          <EmptyState title="Aucun produit fini" text="Les produits finis selectionnes dans les modifications apparaitront ici." compact />
+        ) : items.map((item, index) => (
+          <div className="dashboard-finished-product-row" key={item.label}>
+            <span className={`impact-rank product-${(index % 4) + 1}`}>{item.count}</span>
+            <strong>{item.label}</strong>
+            <em>{item.modifications} modification{item.modifications > 1 ? "s" : ""}</em>
+            <div className="dashboard-row-track"><i style={{ width: `${Math.max(8, (item.count / maxCount) * 100)}%` }} /></div>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
 function dashboardDistribution(items, labelFor, limit = 6) {
   return Array.from(items.reduce((map, item) => {
     const label = labelFor(item);
@@ -4862,6 +6088,109 @@ function dashboardDistribution(items, labelFor, limit = 6) {
     .map(([label, count]) => ({ label, count }))
     .sort((first, second) => second.count - first.count || first.label.localeCompare(second.label, "fr", { sensitivity: "base" }))
     .slice(0, limit);
+}
+
+function DashboardProgressCard({ title, subtitle, items = [] }) {
+  return (
+    <article className="panel dashboard-progress-card">
+      <div className="section-title">
+        <div>
+          <h2>{title}</h2>
+          <span>{subtitle}</span>
+        </div>
+      </div>
+      <div className="dashboard-progress-list">
+        {items.length === 0 ? (
+          <EmptyState title="Aucune donnee" text="Les taux apparaitront selon les modifications accessibles." compact />
+        ) : items.map((item) => (
+          <div className="dashboard-progress-row" key={item.label}>
+            <div className="dashboard-progress-head">
+              <strong>{item.label}</strong>
+              <span>{item.progress}%</span>
+            </div>
+            <div className="dashboard-progress-track">
+              <i style={{ width: `${Math.max(4, item.progress)}%` }} />
+            </div>
+            <small>
+              {item.count} modification{item.count > 1 ? "s" : ""}
+              {item.active > 0 ? ` | ${item.active} active${item.active > 1 ? "s" : ""}` : ""}
+              {item.late > 0 ? ` | ${item.late} retard` : ""}
+            </small>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function DashboardModificationProgressCard({ page, pageCount, rows = [], total = 0, onNext, onOpenRequest, onPrevious }) {
+  return (
+    <article className="panel dashboard-modification-progress-panel">
+      <div className="section-title">
+        <div>
+          <h2>Avancement par modification</h2>
+          <span>{total} modification{total > 1 ? "s" : ""} | 5 par page</span>
+        </div>
+        <div className="dashboard-pager">
+          <button className="icon-button" type="button" title="Page precedente" disabled={page <= 0} onClick={onPrevious}>
+            <ChevronLeft size={17} />
+          </button>
+          <span>{page + 1} / {pageCount}</span>
+          <button className="icon-button" type="button" title="Page suivante" disabled={page >= pageCount - 1} onClick={onNext}>
+            <ChevronRight size={17} />
+          </button>
+        </div>
+      </div>
+      <div className="dashboard-modification-progress-list">
+        {rows.length === 0 ? (
+          <EmptyState title="Aucune modification" text="Les taux apparaitront apres creation des modifications." compact />
+        ) : rows.map(({ request, progress }) => (
+          <button className="dashboard-modification-progress-row" key={request.id} type="button" onClick={() => onOpenRequest(request)}>
+            <span>
+              <strong>{requestDisplayName(request)}</strong>
+              <small>{request.modificationProject || "-"} | {request.client || "-"} | {stageLabel(request.currentStage, Boolean(request.newVersion))}</small>
+            </span>
+            <div className="dashboard-progress-track">
+              <i style={{ width: `${Math.max(4, progress)}%` }} />
+            </div>
+            <em>{progress}%</em>
+          </button>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function DashboardImpactCard({ title, subtitle, items = [], tone = "client" }) {
+  const total = items.reduce((sum, item) => sum + item.count, 0);
+  const maxCount = Math.max(1, ...items.map((item) => item.count));
+  return (
+    <article className="panel dashboard-impact-card">
+      <div className="section-title">
+        <div>
+          <h2>{title}</h2>
+          <span>{subtitle}</span>
+        </div>
+      </div>
+      <div className="dashboard-impact-list">
+        {items.length === 0 ? (
+          <EmptyState title="Aucune donnee" text="Les donnees apparaitront selon les dossiers accessibles." compact />
+        ) : items.map((item, index) => {
+          const share = Math.round((item.count / Math.max(1, total)) * 100);
+          return (
+            <div className="dashboard-impact-row" key={item.label}>
+              <span className={`impact-rank ${tone}-${(index % 4) + 1}`}>{index + 1}</span>
+              <span className="impact-label">
+                <strong>{item.label}</strong>
+                <small>{item.count} dossier{item.count > 1 ? "s" : ""} | {share}% du portefeuille visible</small>
+              </span>
+              <div><i className={`${tone}-${(index % 4) + 1}`} style={{ width: `${Math.max(8, (item.count / maxCount) * 100)}%` }} /></div>
+            </div>
+          );
+        })}
+      </div>
+    </article>
+  );
 }
 
 function DashboardDistributionCard({ title, subtitle, items = [] }) {
@@ -5045,6 +6374,13 @@ function TraceabilityPage({ actionFilter, actionOptions, logs, query, total, onR
           </div>
         )}
       </section>
+      {dashboardDialog && (
+        <DashboardDrilldownDialog
+          dialog={dashboardDialog}
+          onClose={() => setDashboardDialog(null)}
+          onOpen={handleDashboardDialogOpen}
+        />
+      )}
     </section>
   );
 }
@@ -5246,7 +6582,7 @@ function userFriendlyStoredAuditDetail(detail) {
   return allowedPrefixes.some((prefix) => value.startsWith(prefix)) ? value : "";
 }
 
-function CreateModificationDialog({ clientOptions, ecrForm, pilots, productOptions, projects, saving, users, onClose, onSubmit, updateEcrForm }) {
+function CreateModificationDialog({ clientOptions, ecrForm, finishedProductReferences, pilots, productOptions, projects, saving, users, onClose, onSubmit, updateEcrForm }) {
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <div
@@ -5259,6 +6595,7 @@ function CreateModificationDialog({ clientOptions, ecrForm, pilots, productOptio
         <NewModificationPage
           clientOptions={clientOptions}
           ecrForm={ecrForm}
+          finishedProductReferences={finishedProductReferences}
           pilots={pilots}
           productOptions={productOptions}
           projects={projects}
@@ -5275,7 +6612,7 @@ function CreateModificationDialog({ clientOptions, ecrForm, pilots, productOptio
   );
 }
 
-function EditModificationDialog({ clientOptions, ecrForm, existingRequest, pilots, productOptions, projects, saving, users, onClose, onSubmit, updateEcrForm }) {
+function EditModificationDialog({ clientOptions, ecrForm, existingRequest, finishedProductReferences, pilots, productOptions, projects, saving, users, onClose, onSubmit, updateEcrForm }) {
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <div
@@ -5289,6 +6626,7 @@ function EditModificationDialog({ clientOptions, ecrForm, existingRequest, pilot
           clientOptions={clientOptions}
           ecrForm={ecrForm}
           existingRequest={existingRequest}
+          finishedProductReferences={finishedProductReferences}
           mode="edit"
           pilots={pilots}
           productOptions={productOptions}
@@ -5306,7 +6644,7 @@ function EditModificationDialog({ clientOptions, ecrForm, existingRequest, pilot
   );
 }
 
-function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, mode = "create", pilots, productOptions, projects, saving, submitIcon: SubmitIcon = Plus, submitLabel = "Créer et ouvrir le suivi", users, onCancel, onSubmit, updateEcrForm }) {
+function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, finishedProductReferences = [], mode = "create", pilots, productOptions, projects, saving, submitIcon: SubmitIcon = Plus, submitLabel = "Créer et ouvrir le suivi", users, onCancel, onSubmit, updateEcrForm }) {
   const availableStages = getStages(ecrForm.newVersion);
   const selectedProject = projects.find((project) => project.name === ecrForm.modificationProject);
   const projectTeamMembers = parseProjectTeam(selectedProject?.projectTeam);
@@ -5315,6 +6653,29 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
   const displayedClientOptions = includeCurrentOption(clientOptions, ecrForm.client);
   const selectedProducts = parseSelectedProducts(ecrForm.product);
   const displayedProductOptions = includeCurrentOptions(productOptions, selectedProducts);
+  const availableFinishedProducts = finishedProductsForForm(ecrForm, finishedProductReferences);
+  const selectedFinishedProducts = parseSelectedProducts(ecrForm.finishedProducts);
+  const displayedFinishedProducts = includeCurrentFinishedProducts(availableFinishedProducts, selectedFinishedProducts);
+  const coordinatesReady = Boolean(ecrForm.client && ecrForm.modificationProject && selectedProducts.length > 0);
+  const finishedProductsRequired = availableFinishedProducts.length > 0;
+  const requiredFieldsReady = Boolean(
+    ecrForm.modificationNumber.trim()
+    && ecrForm.client
+    && ecrForm.modificationProject
+    && selectedProducts.length > 0
+    && ecrForm.pilot
+    && ecrForm.receptionDate
+    && (!finishedProductsRequired || selectedFinishedProducts.length > 0)
+  );
+  const submitBlockReason = ecrSubmitBlockReason({
+    canCreateModification,
+    finishedProductsRequired,
+    form: ecrForm,
+    projects,
+    projectPilotOptions,
+    selectedFinishedProducts,
+    selectedProducts
+  });
   const titleId = mode === "edit" ? "edit-modification-title" : "create-modification-title";
   const currentBeforePhoto = existingRequest?.beforePhotoUrl;
   const currentAfterPhoto = existingRequest?.afterPhotoUrl;
@@ -5350,7 +6711,7 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
         <div className="field-grid">
           <label>
             Numéro client externe
-            <input value={ecrForm.modificationNumber} onChange={(event) => updateEcrForm("modificationNumber", event.target.value)} />
+            <input required value={ecrForm.modificationNumber} onChange={(event) => updateEcrForm("modificationNumber", event.target.value)} />
           </label>
           <label>
             Client
@@ -5388,6 +6749,33 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
             {displayedProductOptions.length === 0 && <span className="form-hint">Ajoutez d'abord des produits dans le referentiel.</span>}
             <span className="form-hint">{selectedProducts.length} produit{selectedProducts.length > 1 ? "s" : ""} sélectionné{selectedProducts.length > 1 ? "s" : ""}</span>
           </fieldset>
+          <fieldset className="product-picker-field finished-product-picker-field">
+            <legend>Produits finis</legend>
+            {!coordinatesReady && <span className="form-hint">Selectionnez d'abord le client, le projet et au moins un produit.</span>}
+            {coordinatesReady && displayedFinishedProducts.length === 0 && <span className="form-hint">Aucun produit fini lie a ces coordonnees.</span>}
+            {coordinatesReady && displayedFinishedProducts.length > 0 && (
+              <div className="product-picker-options finished-product-picker-options">
+                {displayedFinishedProducts.map((finishedProduct) => {
+                  const key = finishedProductKey(finishedProduct);
+                  const checked = selectedFinishedProducts.includes(key);
+                  return (
+                    <label className={checked ? "product-option finished-product-option selected" : "product-option finished-product-option"} key={key}>
+                      <input
+                        checked={checked}
+                        type="checkbox"
+                        onChange={(event) => updateEcrForm("finishedProducts", toggleSelectedProduct(selectedFinishedProducts, key, event.target.checked).join("; "))}
+                      />
+                      <span>
+                        <strong>{finishedProduct.partNumber || key}</strong>
+                        <small>{[finishedProduct.designation, finishedProduct.customerPn && "PN client: " + finishedProduct.customerPn, "Code reduit: " + finishedProduct.reducedCode].filter(Boolean).join(" | ")}</small>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            <span className="form-hint">{selectedFinishedProducts.length} produit{selectedFinishedProducts.length > 1 ? "s" : ""} fini{selectedFinishedProducts.length > 1 ? "s" : ""} selectionne{selectedFinishedProducts.length > 1 ? "s" : ""}</span>
+          </fieldset>
           <label>
             Pilote
             <select required disabled={!ecrForm.modificationProject || projectPilotOptions.length === 0} value={ecrForm.pilot} onChange={(event) => updateEcrForm("pilot", event.target.value)}>
@@ -5399,7 +6787,7 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
           </label>
           <label>
             Réception
-            <input type="date" value={ecrForm.receptionDate} onChange={(event) => updateEcrForm("receptionDate", event.target.value)} />
+            <input required type="date" value={ecrForm.receptionDate} onChange={(event) => updateEcrForm("receptionDate", event.target.value)} />
           </label>
           <div className="calculated-field">
             <span>SOP</span>
@@ -5470,12 +6858,13 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, m
           <textarea value={ecrForm.dossierReview} onChange={(event) => updateEcrForm("dossierReview", event.target.value)} placeholder="Historique de suivi, OIL list, revues planifiées" />
         </label>
         <div className="button-row">
-          <button className="primary-action" disabled={saving || !canCreateModification} type="submit">
+          <button className="primary-action" disabled={saving || !canCreateModification || !requiredFieldsReady} type="submit">
             <SubmitIcon size={16} />
             {submitLabel}
           </button>
-          <button className="secondary-action" type="button" onClick={onCancel}>Annulér</button>
+          <button className="secondary-action" type="button" onClick={onCancel}>Annuler</button>
         </div>
+        {submitBlockReason && <p className="form-hint project-team-warning">{submitBlockReason}</p>}
         {projects.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un projet dans le référentiel projets.</p>}
         {ecrForm.modificationProject && projectTeamMembers.length === 0 && <p className="form-hint project-team-warning">Ce projet n'a pas encore d'Équipe projet.</p>}
         {projectTeamMembers.length > 0 && projectPilotOptions.length === 0 && <p className="form-hint project-team-warning">Ajoutez un chef de projet dans l'équipe projet pour choisir le pilote.</p>}
@@ -5665,7 +7054,9 @@ function PreferentialsPage({
   );
 }
 
+
 function FinishedProductPreferentialPanel({ clients = [], editing, form, products, projects, references, saving, onCancelEdit, onDelete, onEdit, onImport, onSubmit, setForm }) {
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const importInputRef = useRef(null);
   const clientNames = uniqueSorted(clients.map((client) => client.name));
@@ -5685,6 +7076,31 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
   ]);
   const { currentPage, pageCount, pagedItems, setCurrentPage } = usePaginatedItems(filteredReferences, PREFERENTIAL_PAGE_SIZE);
 
+  useEffect(() => {
+    if (editing) {
+      setDialogOpen(true);
+    }
+  }, [editing]);
+
+  function openCreateDialog() {
+    onCancelEdit();
+    setForm(emptyFinishedProductForm);
+    setDialogOpen(true);
+  }
+
+  function closeDialog() {
+    onCancelEdit();
+    setDialogOpen(false);
+  }
+
+  function submitDialog(event) {
+    const result = onSubmit(event);
+    if (!result?.then) return result;
+    return result
+      .then(() => setDialogOpen(false))
+      .catch(() => {});
+  }
+
   function handleImportChange(event) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -5700,88 +7116,26 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
 
   return (
     <section className="panel preferential-panel">
-      <form className="form-page compact-preferential-form finished-product-form" onSubmit={onSubmit}>
-        <div className="section-title">
-          <div>
-            <h2>Produits finis</h2>
-            <span>{references.length} element{references.length > 1 ? "s" : ""}</span>
-          </div>
+      <div className="section-title">
+        <div>
+          <h2>Produits finis</h2>
+          <span>{references.length} element{references.length > 1 ? "s" : ""}</span>
         </div>
-        <div className="finished-product-grid">
-          <label>
-            Client
-            <select required value={form.client} onChange={(event) => setForm((current) => ({ ...current, client: event.target.value }))}>
-              <option value="">Selectionner un client</option>
-              {includeCurrentOption(clientNames, form.client).map((client) => <option key={client} value={client}>{client}</option>)}
-            </select>
-          </label>
-          <label>
-            Projet
-            <select required value={form.project} onChange={(event) => setForm((current) => ({ ...current, project: event.target.value }))}>
-              <option value="">Selectionner un projet</option>
-              {projectNames.map((project) => <option key={project} value={project}>{project}</option>)}
-            </select>
-          </label>
-          <label>
-            Part number
-            <input required value={form.partNumber} onChange={(event) => setForm((current) => ({ ...current, partNumber: event.target.value }))} />
-          </label>
-          <label>
-            Designation
-            <input value={form.designation} onChange={(event) => setForm((current) => ({ ...current, designation: event.target.value }))} />
-          </label>
-          <label>
-            Customer PN
-            <input value={form.customerPn} onChange={(event) => setForm((current) => ({ ...current, customerPn: event.target.value }))} />
-          </label>
-          <label>
-            Produit
-            <select required value={form.product} onChange={(event) => setForm((current) => ({ ...current, product: event.target.value }))}>
-              <option value="">Selectionner un produit</option>
-              {productNames.map((product) => <option key={product} value={product}>{product}</option>)}
-            </select>
-          </label>
-          <label>
-            Indice coiffe
-            <input value={form.coiffeIndex} onChange={(event) => setForm((current) => ({ ...current, coiffeIndex: event.target.value }))} />
-          </label>
-          <label>
-            Indice drawing
-            <input value={form.drawingIndex} onChange={(event) => setForm((current) => ({ ...current, drawingIndex: event.target.value }))} />
-          </label>
-          <label>
-            Code réduit
-            <input required value={form.reducedCode} onChange={(event) => setForm((current) => ({ ...current, reducedCode: event.target.value }))} />
-          </label>
-          <label>
-            Prix vente
-            <input min="0" step="0.001" type="number" value={form.salePrice} onChange={(event) => setForm((current) => ({ ...current, salePrice: event.target.value }))} />
-          </label>
-          <label>
-            Date integration production
-            <input type="date" value={form.productionIntegrationDate} onChange={(event) => setForm((current) => ({ ...current, productionIntegrationDate: event.target.value }))} />
-          </label>
-          <label className="finished-product-comments">
-            Commentaires
-            <textarea value={form.comments} onChange={(event) => setForm((current) => ({ ...current, comments: event.target.value }))} />
-          </label>
-        </div>
-        <div className="button-row">
-          <button className="primary-action" disabled={saving || clientNames.length === 0 || projectNames.length === 0 || productNames.length === 0} type="submit">
-            <Save size={16} />
-            Enregistrer
-          </button>
-          <button className="secondary-action" disabled={saving} type="button" onClick={() => importInputRef.current?.click()}>
+        <div className="row-actions">
+          <button className="secondary-action compact-action" disabled={saving} type="button" onClick={() => importInputRef.current?.click()}>
             <Upload size={16} />
             Importer Excel
           </button>
           <input ref={importInputRef} hidden type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImportChange} />
-          {editing && <button className="secondary-action" type="button" onClick={onCancelEdit}>Annulér</button>}
+          <button className="primary-action compact-action" disabled={saving || clientNames.length === 0 || projectNames.length === 0 || productNames.length === 0} type="button" onClick={openCreateDialog}>
+            <Plus size={15} />
+            Ajouter
+          </button>
         </div>
-        {clientNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un client.</p>}
-        {projectNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un projet.</p>}
-        {productNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un produit.</p>}
-      </form>
+      </div>
+      {clientNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un client.</p>}
+      {projectNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un projet.</p>}
+      {productNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un produit.</p>}
       <label className="preferential-search">
         Rechercher
         <div className="input-with-icon">
@@ -5800,15 +7154,15 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
               <article className="project-table-row preferential-table-row finished-product-row" key={reference.id}>
                 <div>
                   <strong>{reference.partNumber}</strong>
-                  <span>{reference.project} | {reference.product} | Code réduit: {reference.reducedCode}</span>
+                  <span>{reference.project} | {reference.product} | Code reduit: {reference.reducedCode}</span>
                   <small>{[reference.client, reference.designation, reference.customerPn].filter(Boolean).join(" | ") || "Details non renseignes"}</small>
                 </div>
                 <div className="finished-product-meta">
-                  <span>{reference.salePrice != null ? `${reference.salePrice} EUR` : "-"}</span>
+                  <span>{reference.salePrice != null ? String(reference.salePrice) + " EUR" : "-"}</span>
                   <span>{reference.productionIntegrationDate || "-"}</span>
                 </div>
                 <div className="row-actions">
-                  <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(reference)} aria-label={`Modifier ${reference.partNumber}`} title="Modifier">
+                  <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(reference)} aria-label={"Modifier " + reference.partNumber} title="Modifier">
                     <Pencil size={15} />
                   </button>
                   <button className="ghost-icon" type="button" onClick={() => onDelete(reference.id)} title="Supprimer">
@@ -5826,23 +7180,230 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
           </>
         )}
       </div>
+      {dialogOpen && (
+        <FinishedProductDialog
+          clientNames={clientNames}
+          editing={editing}
+          form={form}
+          productNames={productNames}
+          projectNames={projectNames}
+          saving={saving}
+          onClose={closeDialog}
+          onSubmit={submitDialog}
+          setForm={setForm}
+        />
+      )}
     </section>
   );
 }
 
+function FinishedProductDialog({ clientNames, editing, form, productNames, projectNames, saving, onClose, onSubmit, setForm }) {
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <form
+        aria-labelledby="finished-product-dialog-title"
+        aria-modal="true"
+        className="dialog-card finished-product-dialog panel form-page"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={onSubmit}
+        role="dialog"
+      >
+        <div className="form-intro">
+          <div>
+            <p className="eyebrow">Produit fini</p>
+            <h2 id="finished-product-dialog-title">{editing ? "Modifier le produit fini" : "Ajouter un produit fini"}</h2>
+          </div>
+          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="finished-product-grid">
+          <label>
+            Client
+            <select required value={form.client} onChange={(event) => setForm((current) => ({ ...current, client: event.target.value }))}>
+              <option value="">Selectionner un client</option>
+              {includeCurrentOption(clientNames, form.client).map((client) => <option key={client} value={client}>{client}</option>)}
+            </select>
+          </label>
+          <label>
+            Projet
+            <select required value={form.project} onChange={(event) => setForm((current) => ({ ...current, project: event.target.value }))}>
+              <option value="">Selectionner un projet</option>
+              {includeCurrentOption(projectNames, form.project).map((project) => <option key={project} value={project}>{project}</option>)}
+            </select>
+          </label>
+          <label>
+            Part number
+            <input required value={form.partNumber} onChange={(event) => setForm((current) => ({ ...current, partNumber: event.target.value }))} />
+          </label>
+          <label>
+            Designation
+            <input value={form.designation} onChange={(event) => setForm((current) => ({ ...current, designation: event.target.value }))} />
+          </label>
+          <label>
+            Customer PN
+            <input value={form.customerPn} onChange={(event) => setForm((current) => ({ ...current, customerPn: event.target.value }))} />
+          </label>
+          <label>
+            Produit
+            <select required value={form.product} onChange={(event) => setForm((current) => ({ ...current, product: event.target.value }))}>
+              <option value="">Selectionner un produit</option>
+              {includeCurrentOption(productNames, form.product).map((product) => <option key={product} value={product}>{product}</option>)}
+            </select>
+          </label>
+          <label>
+            Indice coiffe
+            <input value={form.coiffeIndex} onChange={(event) => setForm((current) => ({ ...current, coiffeIndex: event.target.value }))} />
+          </label>
+          <label>
+            Indice drawing
+            <input value={form.drawingIndex} onChange={(event) => setForm((current) => ({ ...current, drawingIndex: event.target.value }))} />
+          </label>
+          <label>
+            Code reduit
+            <input required value={form.reducedCode} onChange={(event) => setForm((current) => ({ ...current, reducedCode: event.target.value }))} />
+          </label>
+          <label>
+            Prix vente
+            <input min="0" step="0.001" type="number" value={form.salePrice} onChange={(event) => setForm((current) => ({ ...current, salePrice: event.target.value }))} />
+          </label>
+          <label>
+            Date integration production
+            <input type="date" value={form.productionIntegrationDate} onChange={(event) => setForm((current) => ({ ...current, productionIntegrationDate: event.target.value }))} />
+          </label>
+          <label className="finished-product-comments">
+            Commentaires
+            <textarea value={form.comments} onChange={(event) => setForm((current) => ({ ...current, comments: event.target.value }))} />
+          </label>
+        </div>
+        <div className="button-row">
+          <button className="primary-action" disabled={saving} type="submit">
+            <Save size={16} />
+            Enregistrer
+          </button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function PreferentialPanel({ count, editing, emptyText, emptyTitle, form, references, saving, title, onCancelEdit, onDelete, onEdit, onSubmit, setForm }) {
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const filteredReferences = useFilteredItems(references, searchTerm, (reference) => [reference.name]);
   const { currentPage, pageCount, pagedItems, setCurrentPage } = usePaginatedItems(filteredReferences, PREFERENTIAL_PAGE_SIZE);
 
+  useEffect(() => {
+    if (editing) {
+      setDialogOpen(true);
+    }
+  }, [editing]);
+
+  function openCreateDialog() {
+    onCancelEdit();
+    setForm({ name: "" });
+    setDialogOpen(true);
+  }
+
+  function closeDialog() {
+    onCancelEdit();
+    setDialogOpen(false);
+  }
+
+  function submitDialog(event) {
+    const result = onSubmit(event);
+    if (!result?.then) return result;
+    return result
+      .then(() => setDialogOpen(false))
+      .catch(() => {});
+  }
+
   return (
     <section className="panel preferential-panel">
-      <form className="form-page compact-preferential-form" onSubmit={onSubmit}>
-        <div className="section-title">
+      <div className="section-title">
+        <div>
+          <h2>{title}</h2>
+          <span>{count} element{count > 1 ? "s" : ""}</span>
+        </div>
+        <button className="primary-action compact-action" disabled={saving} type="button" onClick={openCreateDialog}>
+          <Plus size={15} />
+          Ajouter
+        </button>
+      </div>
+      <label className="preferential-search">
+        Rechercher
+        <div className="input-with-icon">
+          <Search size={16} />
+          <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder={"Rechercher dans " + title.toLowerCase()} />
+        </div>
+      </label>
+      <div className="table-list">
+        {references.length === 0 ? (
+          <EmptyState title={emptyTitle} text={emptyText} compact />
+        ) : filteredReferences.length === 0 ? (
+          <EmptyState title="Aucun resultat" text="Essayez un autre terme de recherche." compact />
+        ) : (
+          <>
+            {pagedItems.map((reference) => (
+              <article className="project-table-row preferential-table-row" key={reference.id}>
+                <div>
+                  <strong>{reference.name}</strong>
+                </div>
+                <div className="row-actions">
+                  <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(reference)} aria-label={"Modifier " + reference.name} title="Modifier">
+                    <Pencil size={15} />
+                  </button>
+                  <button className="ghost-icon" type="button" onClick={() => onDelete(reference.id)} title="Supprimer">
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </article>
+            ))}
+            <PaginationControls
+              currentPage={currentPage}
+              pageCount={pageCount}
+              totalCount={filteredReferences.length}
+              onPageChange={setCurrentPage}
+            />
+          </>
+        )}
+      </div>
+      {dialogOpen && (
+        <PreferentialDialog
+          editing={editing}
+          form={form}
+          saving={saving}
+          title={title}
+          onClose={closeDialog}
+          onSubmit={submitDialog}
+          setForm={setForm}
+        />
+      )}
+    </section>
+  );
+}
+
+function PreferentialDialog({ editing, form, saving, title, onClose, onSubmit, setForm }) {
+  const singularTitle = title.endsWith("s") ? title.slice(0, -1) : title;
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <form
+        aria-labelledby="preferential-dialog-title"
+        aria-modal="true"
+        className="dialog-card preferential-dialog panel form-page"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={onSubmit}
+        role="dialog"
+      >
+        <div className="form-intro">
           <div>
-            <h2>{title}</h2>
-            <span>{count} élément{count > 1 ? "s" : ""}</span>
+            <p className="eyebrow">Referentiel</p>
+            <h2 id="preferential-dialog-title">{editing ? "Modifier " + singularTitle.toLowerCase() : "Ajouter " + singularTitle.toLowerCase()}</h2>
           </div>
+          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
+            <X size={18} />
+          </button>
         </div>
         <label>
           Nom
@@ -5853,48 +7414,10 @@ function PreferentialPanel({ count, editing, emptyText, emptyTitle, form, refere
             <Save size={16} />
             Enregistrer
           </button>
-          {editing && <button className="secondary-action" type="button" onClick={onCancelEdit}>Annulér</button>}
+          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
         </div>
       </form>
-      <label className="preferential-search">
-        Rechercher
-        <div className="input-with-icon">
-          <Search size={16} />
-          <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder={`Rechercher dans ${title.toLowerCase()}`} />
-        </div>
-      </label>
-      <div className="table-list">
-        {references.length === 0 ? (
-          <EmptyState title={emptyTitle} text={emptyText} compact />
-        ) : filteredReferences.length === 0 ? (
-          <EmptyState title="Aucun résultat" text="Essayez un autre terme de recherche." compact />
-        ) : (
-          <>
-            {pagedItems.map((reference) => (
-              <article className="project-table-row preferential-table-row" key={reference.id}>
-                <div>
-                  <strong>{reference.name}</strong>
-                </div>
-                <div className="row-actions">
-                  <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(reference)} aria-label={`Modifier ${reference.name}`} title="Modifier">
-                    <Pencil size={15} />
-                  </button>
-                  <button className="ghost-icon" type="button" onClick={() => onDelete(reference.id)} title="Supprimer">
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              </article>
-            ))}
-            <PaginationControls
-              currentPage={currentPage}
-              pageCount={pageCount}
-              totalCount={filteredReferences.length}
-              onPageChange={setCurrentPage}
-            />
-          </>
-        )}
-      </div>
-    </section>
+    </div>
   );
 }
 
@@ -6032,7 +7555,7 @@ function ProjectDialog({ editingProject, projectForm, saving, users, onClose, on
             <Save size={16} />
             Enregistrer
           </button>
-          <button className="secondary-action" type="button" onClick={onClose}>Annulér</button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
         </div>
       </form>
     </div>
@@ -6201,7 +7724,7 @@ function parseProjectTeam(projectTeam) {
     .filter(Boolean);
 }
 
-function updateEcrFormState(form, field, value, projects) {
+function updateEcrFormState(form, field, value, projects, finishedProductReferences = []) {
   const nextForm = { ...form, [field]: value };
   if (field === "newVersion") {
     nextForm.currentStage = safeStage(form.currentStage, value);
@@ -6219,6 +7742,9 @@ function updateEcrFormState(form, field, value, projects) {
       nextForm.pilot = "";
     }
   }
+  if (["client", "modificationProject", "product"].includes(field)) {
+    nextForm.finishedProducts = selectedFinishedProductsForForm(nextForm, finishedProductReferences).join("; ");
+  }
   return nextForm;
 }
 
@@ -6229,6 +7755,7 @@ function requestToEcrForm(request) {
     modificationNumber: request.modificationNumber || "",
     client: request.client || "",
     product: request.product || "",
+    finishedProducts: request.finishedProducts || "",
     modificationProject: request.modificationProject || "",
     modificationReason: request.modificationReason || "",
     modificationDetail: request.modificationDetail || "",
@@ -6273,6 +7800,173 @@ function toggleSelectedProduct(selectedProducts, product, checked) {
     return uniqueSorted([...selectedProducts, product]);
   }
   return selectedProducts.filter((selectedProduct) => selectedProduct !== product);
+}
+
+function normalizeReferenceValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function finishedProductKey(finishedProduct) {
+  return String(finishedProduct?.partNumber || "").trim();
+}
+
+function finishedProductDetailRows(product) {
+  return [
+    ["Client", product.client],
+    ["Projet", product.project],
+    ["PN produit fini", product.partNumber],
+    ["Designation", product.designation],
+    ["PN client", product.customerPn],
+    ["Produit", product.product],
+    ["Indice coiffe", product.coiffeIndex],
+    ["Indice drawing", product.drawingIndex],
+    ["Code reduit", product.reducedCode],
+    ["Prix de vente", product.salePrice],
+    ["Date integration production", product.productionIntegrationDate],
+    ["Commentaires", product.comments]
+  ];
+}
+
+function finishedProductAiSummary(product, requests = []) {
+  const requestLines = requests.length === 0
+    ? "Aucune modification ne contient actuellement ce produit fini."
+    : requests.map((request, index) => `${index + 1}. ${requestDisplayName(request)}, projet ${request.modificationProject || "-"}, client ${request.client || "-"}, phase ${stageLabel(request.currentStage, Boolean(request.newVersion))}, pilote ${request.pilot || "-"}, reception ${request.receptionDate || "-"}.`).join(" ");
+  return [
+    `Produit fini ${product.partNumber || "-"}: ${product.designation || "designation non renseignee"}.`,
+    `Il est lie au client ${product.client || "-"}, au projet ${product.project || "-"} et au produit ${product.product || "-"}.`,
+    `PN client: ${product.customerPn || "-"}, code reduit: ${product.reducedCode || "-"}, indice coiffe: ${product.coiffeIndex || "-"}, indice drawing: ${product.drawingIndex || "-"}.`,
+    `Date d'integration production: ${product.productionIntegrationDate || "-"}, prix de vente: ${product.salePrice || "-"}.`,
+    product.comments ? `Commentaires: ${product.comments}.` : "",
+    `Modifications trouvees: ${requests.length}. ${requestLines}`
+  ].filter(Boolean).join(" ");
+}
+
+function speakFinishedProductSummary(text, setSpeaking) {
+  if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+    warningAlert("Lecture sonore indisponible", "La synthese vocale n'est pas disponible dans ce navigateur.");
+    return;
+  }
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "fr-FR";
+  utterance.rate = 0.95;
+  utterance.pitch = 1;
+  utterance.onend = () => setSpeaking(false);
+  utterance.onerror = () => setSpeaking(false);
+  setSpeaking(true);
+  window.speechSynthesis.speak(utterance);
+}
+
+function stopFinishedProductSpeech(setSpeaking) {
+  if ("speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
+  setSpeaking(false);
+}
+
+function finishedProductsForForm(form, references = []) {
+  const client = normalizeReferenceValue(form.client);
+  const project = normalizeReferenceValue(form.modificationProject);
+  const selectedProducts = parseSelectedProducts(form.product).map(normalizeReferenceValue);
+  if (!client || !project || selectedProducts.length === 0) {
+    return [];
+  }
+  return references
+    .filter((reference) => normalizeReferenceValue(reference.client) === client)
+    .filter((reference) => normalizeReferenceValue(reference.project) === project)
+    .filter((reference) => selectedProducts.includes(normalizeReferenceValue(reference.product)))
+    .filter((reference) => finishedProductKey(reference));
+}
+
+function includeCurrentFinishedProducts(options, selectedKeys) {
+  const optionKeys = new Set(options.map(finishedProductKey));
+  const missingOptions = selectedKeys
+    .filter((key) => key && !optionKeys.has(key))
+    .map((key) => ({ partNumber: key, designation: "Produit fini deja selectionne", reducedCode: "-" }));
+  return [...options, ...missingOptions].sort((a, b) => finishedProductKey(a).localeCompare(finishedProductKey(b)));
+}
+
+function selectedFinishedProductsForForm(form, references = []) {
+  const availableKeys = new Set(finishedProductsForForm(form, references).map(finishedProductKey));
+  return parseSelectedProducts(form.finishedProducts).filter((key) => availableKeys.has(key));
+}
+
+function validateEcrRequiredFields(form, requests = [], currentRequestId, setError) {
+  const requiredChecks = [
+    [form.modificationNumber?.trim(), "Numero client externe obligatoire."],
+    [form.client, "Client obligatoire."],
+    [form.modificationProject, "Projet obligatoire."],
+    [parseSelectedProducts(form.product).length > 0, "Produit obligatoire."],
+    [form.pilot, "Pilote obligatoire."],
+    [form.receptionDate, "Date de reception obligatoire."]
+  ];
+  const missing = requiredChecks.find(([valid]) => !valid);
+  if (missing) {
+    const message = missing[1];
+    setError(message);
+    warningAlert("Champ obligatoire", message);
+    return false;
+  }
+  const normalizedNumber = normalizeReferenceValue(form.modificationNumber);
+  const duplicate = requests.some((request) => (
+    request.id !== currentRequestId && normalizeReferenceValue(request.modificationNumber) === normalizedNumber
+  ));
+  if (duplicate) {
+    const message = "Numéro client externe déjà utilisé par une autre modification.";
+    setError(message);
+    warningAlert("Numero unique", message);
+    return false;
+  }
+  return true;
+}
+
+function ecrSubmitBlockReason({ canCreateModification, finishedProductsRequired, form, projects = [], projectPilotOptions = [], selectedFinishedProducts = [], selectedProducts = [] }) {
+  if (!form.modificationNumber?.trim()) {
+    return "Renseignez le numero client externe.";
+  }
+  if (!form.client) {
+    return "Selectionnez un client.";
+  }
+  if (!form.modificationProject) {
+    return "Selectionnez un projet.";
+  }
+  if (selectedProducts.length === 0) {
+    return "Selectionnez au moins un produit.";
+  }
+  if (finishedProductsRequired && selectedFinishedProducts.length === 0) {
+    return "Selectionnez au moins un produit fini lie a ces coordonnees.";
+  }
+  if (!form.pilot) {
+    if (projects.length === 0) {
+      return "Ajoutez d'abord au moins un projet dans le referentiel projets.";
+    }
+    if (projectPilotOptions.length === 0) {
+      return "Ajoutez un chef de projet dans l'equipe projet pour choisir le pilote.";
+    }
+    return "Selectionnez un chef de projet comme pilote.";
+  }
+  if (!form.receptionDate) {
+    return "Renseignez la date de reception.";
+  }
+  if (!canCreateModification) {
+    return "Verifiez que le projet selectionne contient le pilote choisi.";
+  }
+  return "";
+}
+
+function validateFinishedProductsSelection(form, references, setError) {
+  const availableFinishedProducts = finishedProductsForForm(form, references);
+  if (availableFinishedProducts.length === 0) {
+    return true;
+  }
+  const selectedFinishedProducts = selectedFinishedProductsForForm(form, references);
+  if (selectedFinishedProducts.length === 0) {
+    const message = "Selectionnez au moins un produit fini.";
+    setError(message);
+    warningAlert("Produit fini requis", message);
+    return false;
+  }
+  return true;
 }
 
 function mixabilityLabel(value) {
@@ -6491,10 +8185,12 @@ function ModificationsPage(props) {
     removeActionProofDocumentFile,
     handleApprovePhase,
     handleApproveActionValidation,
+    handleCloseRequest,
     handleRejectActionValidation,
     handleRequestActionValidation,
     handleRejectPhase,
     handleReopenPhase,
+    handleRequestClosure,
     handleRequestPhaseValidation,
     isCriticalAction,
     lateActions,
@@ -6523,9 +8219,14 @@ function ModificationsPage(props) {
   const canAdmin = isAdminUser(currentUser);
   const canValidate = canValidatePhases(currentUser);
   const canRequestValidation = isRequestPilot(currentUser, selectedRequest);
-  const canManageDossierReview = canAdmin || canRequestValidation;
+  const requestTerminal = isTerminalRequest(selectedRequest);
+  const canManageDossierReview = !requestTerminal && (canAdmin || canRequestValidation);
+  const canExportDossierReview = canAdmin || canRequestValidation;
   const canExportGantt = canAdmin || canRequestValidation;
-  const canCancelRequest = (canAdmin || canRequestValidation) && selectedRequest?.currentStage !== "CANCELLED";
+  const canCancelRequest = !requestTerminal && canAdmin && selectedRequest?.currentStage !== "CANCELLED";
+  const workflowApproved = allWorkflowStagesApproved(selectedRequest, phaseValidations);
+  const canRequestClosure = !requestTerminal && canRequestValidation && workflowApproved && !selectedRequest?.closureRequested;
+  const canCloseRequest = !requestTerminal && canAdmin && workflowApproved && selectedRequest?.closureRequested;
   const currentValidation = phaseValidations.find((validation) => validation.stage === selectedStage && validation.status === "PENDING");
   const latestStageValidation = phaseValidations.find((validation) => validation.stage === selectedStage);
   const stageActionsDone = actions.length > 0 && actions.every(isActionDone);
@@ -6549,12 +8250,12 @@ function ModificationsPage(props) {
   function exportModificationGanttPdf() {
     if (!selectedRequest) return;
     getActions(selectedRequest.id)
-      .then((requestActions) => {
-        const win = window.open("", "_blank");
-        if (!win) return;
-        win.document.write(modificationGanttPdfHtml(selectedRequest, requestActions, selectedStages));
-        win.document.close();
-        successToast("Gantt PDF genere");
+      .then(async (requestActions) => {
+        await downloadHtmlAsPdf(
+          `diagramme-gantt-${fileNameToken(requestDisplayName(selectedRequest))}.pdf`,
+          modificationGanttPdfHtml(selectedRequest, requestActions, selectedStages)
+        );
+        successToast("Diagramme de Gantt PDF telecharge");
       })
       .catch(() => {
         errorAlert("Generation du diagramme de Gantt impossible.");
@@ -6659,7 +8360,7 @@ function ModificationsPage(props) {
                 )}
                 <button
                   className="ghost-icon details-edit-button"
-                  disabled={!canAdmin || saving}
+                  disabled={!canAdmin || saving || requestTerminal}
                   type="button"
                   onClick={() => onEditRequest(selectedRequest)}
                   title="Modifier la modification"
@@ -6673,11 +8374,38 @@ function ModificationsPage(props) {
                     disabled={saving}
                     type="button"
                     onClick={() => handleCancelEcr(selectedRequest)}
-                    title="Annulér la modification"
-                    aria-label="Annulér la modification"
+                    title="Annuler la modification"
+                    aria-label="Annuler la modification"
                   >
                     <XCircle size={18} />
-                    <span>Annulér la modification</span>
+                    <span>Annuler la modification</span>
+                  </button>
+                )}
+                {canRequestClosure && (
+                  <button
+                    className="primary-action compact-action"
+                    disabled={saving}
+                    type="button"
+                    onClick={handleRequestClosure}
+                    title="Demander la cloture"
+                  >
+                    <CheckCircle2 size={18} />
+                    <span>Demander cloture</span>
+                  </button>
+                )}
+                {selectedRequest.closureRequested && !requestTerminal && !canCloseRequest && (
+                  <span className="stage-pill stage-closed">Cloture demandee</span>
+                )}
+                {canCloseRequest && (
+                  <button
+                    className="primary-action compact-action"
+                    disabled={saving}
+                    type="button"
+                    onClick={handleCloseRequest}
+                    title="Marquer terminee ou cloturee"
+                  >
+                    <CheckCircle2 size={18} />
+                    <span>Marquer cloturée</span>
                   </button>
                 )}
                 <button
@@ -6702,6 +8430,7 @@ function ModificationsPage(props) {
                   <div><ClipboardList size={16} /><span>Projet</span><strong>{selectedRequest.modificationProject || "À définir"}</strong></div>
                   <div><ClipboardList size={16} /><span>Client</span><strong>{selectedRequest.client || "-"}</strong></div>
                   <div><ClipboardList size={16} /><span>Produit</span><strong>{selectedRequest.product || "-"}</strong></div>
+                  <div><ClipboardList size={16} /><span>Produits finis</span><strong>{selectedRequest.finishedProducts || "-"}</strong></div>
                   <div><Gauge size={16} /><span>Pilote</span><strong>{selectedRequest.pilot || "À définir"}</strong></div>
                   <div><CalendarDays size={16} /><span>Réception</span><strong>{selectedRequest.receptionDate || "-"}</strong></div>
                   <div><CalendarDays size={16} /><span>SOP</span><strong>{selectedRequest.sopDate || "-"}</strong></div>
@@ -6756,7 +8485,7 @@ function ModificationsPage(props) {
                       <button
                         key={key}
                         className={`tab ${stageColorClass(key, Boolean(selectedRequest.newVersion))}${selectedStage === key ? " active" : ""}${closedByCancellation ? " closed" : ""}`}
-                        onClick={() => (canAdmin && selectedRequest.currentStage !== "CANCELLED" ? handleStageChange(key) : setSelectedStage(key))}
+                        onClick={() => (canAdmin && !requestTerminal ? handleStageChange(key) : setSelectedStage(key))}
                       >
                         {label}
                       </button>
@@ -6773,6 +8502,7 @@ function ModificationsPage(props) {
                   canValidate={canValidate}
                   isCurrentStage={isCurrentStage}
                   latestValidation={latestStageValidation}
+                  readOnly={requestTerminal}
                   saving={saving}
                   stageActionsDone={stageActionsDone}
                   validationRate={latestStageValidation?.validationRate ?? 0}
@@ -6806,6 +8536,7 @@ function ModificationsPage(props) {
                   selectedRequest={selectedRequest}
                   phaseValidation={currentValidation}
                   phaseValidations={phaseValidations}
+                  readOnly={requestTerminal}
                   stageNewProject={Boolean(selectedRequest.newVersion)}
                   selectedStages={selectedStages}
                   selectedStage={selectedStage}
@@ -6899,6 +8630,7 @@ function ModificationsPage(props) {
       )}
       {dossierDialogOpen && selectedRequest && (
         <DossierReviewDialog
+          canExport={canExportDossierReview}
           canManage={canManageDossierReview}
           request={selectedRequest}
           saving={saving}
@@ -6910,7 +8642,7 @@ function ModificationsPage(props) {
   );
 }
 
-function DossierReviewDialog({ canManage, request, saving, onClose, onSubmit }) {
+function DossierReviewDialog({ canExport, canManage, request, saving, onClose, onSubmit }) {
   const [value, setValue] = useState(request.dossierReview || "");
   const fileBaseName = `revue-dossier-${fileNameToken(requestDisplayName(request))}`;
 
@@ -6924,23 +8656,32 @@ function DossierReviewDialog({ canManage, request, saving, onClose, onSubmit }) 
   }
 
   function exportTxt() {
-    if (!canManage) return;
+    if (!canExport) return;
     downloadTextFile(`${fileBaseName}.txt`, dossierReviewExportText(request, value));
   }
 
-  function exportPdf() {
-    if (!canManage) return;
-    const title = `Revue dossier - ${requestDisplayName(request)}`;
-    const win = window.open("", "_blank");
-    if (!win) return;
-    win.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
-      body{font-family:Arial,sans-serif;color:#111827;margin:32px;line-height:1.5}
-      h1{font-size:22px;margin:0 0 8px}
-      .meta{color:#475569;font-size:13px;margin-bottom:20px}
-      pre{white-space:pre-wrap;border:1px solid #d7dee8;border-radius:8px;padding:16px;font-family:Arial,sans-serif;min-height:360px}
-      @media print{body{margin:18mm}}
-    </style></head><body><h1>${escapeHtml(title)}</h1><div class="meta">${escapeHtml(dossierReviewMetaLine(request))}</div><pre>${escapeHtml(value || "Revue dossier vide.")}</pre><script>window.onload=function(){window.print();};</script></body></html>`);
-    win.document.close();
+  function exportExcel() {
+    if (!canExport) return;
+    downloadBlobFile(
+      `${fileBaseName}.xls`,
+      dossierReviewExportExcel(request, value),
+      "application/vnd.ms-excel;charset=utf-8"
+    );
+    successToast("Revue dossier Excel generee");
+  }
+
+  async function exportPdf() {
+    if (!canExport) return;
+    try {
+      await downloadHtmlAsPdf(`${fileBaseName}.pdf`, dossierReviewPdfHtml(request, value), {
+        orientation: "portrait",
+        width: "900px",
+        backgroundColor: "#f7f9f1"
+      });
+      successToast("Revue dossier PDF telechargee");
+    } catch {
+      errorAlert("Generation de la revue dossier PDF impossible.");
+    }
   }
 
   return (
@@ -6965,30 +8706,40 @@ function DossierReviewDialog({ canManage, request, saving, onClose, onSubmit }) 
         </header>
         <textarea className="dossier-review-editor" readOnly={!canManage} value={value} onChange={(event) => setValue(event.target.value)} placeholder="Ajouter les notes de revue, décisions, points ouverts, actions à suivre..." />
         <div className="button-row dossier-review-actions">
-          {canManage && (
+          {(canManage || canExport) && (
             <>
-              <button className="primary-action" disabled={saving} type="submit">
-                <Save size={16} />
-                Enregistrer
-              </button>
+              {canManage && (
+                <button className="primary-action" disabled={saving} type="submit">
+                  <Save size={16} />
+                  Enregistrer
+                </button>
+              )}
+              {canExport && (
+                <>
               <button className="secondary-action" type="button" onClick={exportTxt}>
                 <FileText size={16} />
                 Export TXT
+              </button>
+              <button className="secondary-action" type="button" onClick={exportExcel}>
+                <FileText size={16} />
+                Export Excel
               </button>
               <button className="secondary-action" type="button" onClick={exportPdf}>
                 <FileText size={16} />
                 Export PDF
               </button>
+                </>
+              )}
             </>
           )}
-          <button className="secondary-action" type="button" onClick={onClose}>{canManage ? "Annulér" : "Fermer"}</button>
+          <button className="secondary-action" type="button" onClick={onClose}>{canManage ? "Annuler" : "Fermer"}</button>
         </div>
       </form>
     </div>
   );
 }
 
-function PhaseValidationPanel({ canAdmin, canRequestValidation, canValidate, isCurrentStage, latestValidation, saving, stageActionsDone, validation, validationRate, onApprove, onReject, onReopen, onRequest }) {
+function PhaseValidationPanel({ canAdmin, canRequestValidation, canValidate, isCurrentStage, latestValidation, readOnly = false, saving, stageActionsDone, validation, validationRate, onApprove, onReject, onReopen, onRequest }) {
   const phaseApproved = latestValidation?.status === "APPROVED";
   const phaseReopened = latestValidation?.status === "REOPENED";
   const displayedRate = latestValidation?.validationRate ?? validationRate ?? 0;
@@ -7029,22 +8780,22 @@ function PhaseValidationPanel({ canAdmin, canRequestValidation, canValidate, isC
       </div>
       <div className="row-actions">
         {!validation && !phaseApproved && (
-          <button className="secondary-action compact-action" disabled={!canRequestValidation || !isCurrentStage || !stageActionsDone || saving} type="button" onClick={onRequest}>
+          <button className="secondary-action compact-action" disabled={readOnly || !canRequestValidation || !isCurrentStage || !stageActionsDone || saving} type="button" onClick={onRequest}>
             Demander validation
           </button>
         )}
         {validation && canValidate && (
           <>
-            <button className="secondary-action compact-action" disabled={!isCurrentStage || saving} type="button" onClick={() => onReject(validation)}>
+            <button className="secondary-action compact-action" disabled={readOnly || !isCurrentStage || saving} type="button" onClick={() => onReject(validation)}>
               Refuser
             </button>
-            <button className="primary-action compact-action" disabled={!isCurrentStage || !allActionsValidated || saving} type="button" onClick={() => onApprove(validation)}>
+            <button className="primary-action compact-action" disabled={readOnly || !isCurrentStage || !allActionsValidated || saving} type="button" onClick={() => onApprove(validation)}>
               Valider phase
             </button>
           </>
         )}
         {canAdmin && phaseApproved && !isCurrentStage && (
-          <button className="primary-action compact-action" disabled={saving} type="button" onClick={() => onReopen(latestValidation)}>
+          <button className="primary-action compact-action" disabled={readOnly || saving} type="button" onClick={() => onReopen(latestValidation)}>
             Rouvrir la phase
           </button>
         )}
@@ -7059,11 +8810,11 @@ function phaseValidationStatusLabel(status) {
   return "Phase refusée";
 }
 
-function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleDeleteAction, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, isCriticalAction, lateActions, phaseValidation, phaseValidations = [], requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm, removeActionProofDocumentFile }) {
+function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleDeleteAction, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, isCriticalAction, lateActions, phaseValidation, phaseValidations = [], readOnly = false, requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm, removeActionProofDocumentFile }) {
   const [expanded, setExpanded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const stageTitle = stageLabel(selectedStage, stageNewProject);
-  const canCreateAction = canAdmin || isRequestPilot(currentUser, selectedRequest);
+  const canCreateAction = !readOnly && (canAdmin || isRequestPilot(currentUser, selectedRequest));
 
   function openCreateAction() {
     updateActionForm("stage", selectedRequest?.currentStage || selectedStage);
@@ -7109,6 +8860,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
         isCriticalAction={isCriticalAction}
         requiresEvidence={requiresEvidence}
         phaseValidations={phaseValidations}
+        readOnly={readOnly}
         saving={saving}
         selectedRequest={selectedRequest}
       />
@@ -7149,6 +8901,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
               isCriticalAction={isCriticalAction}
               requiresEvidence={requiresEvidence}
               phaseValidations={phaseValidations}
+              readOnly={readOnly}
               saving={saving}
               selectedRequest={selectedRequest}
             />
@@ -7174,7 +8927,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
   );
 }
 
-function ActionList({ actions, currentUser, expanded = false, phaseValidation, phaseValidations = [], handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteAction, handleDeleteActionAsset, handleUploadEvidence, requiresEvidence, saving, selectedRequest }) {
+function ActionList({ actions, currentUser, expanded = false, phaseValidation, phaseValidations = [], readOnly = false, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteAction, handleDeleteActionAsset, handleUploadEvidence, requiresEvidence, saving, selectedRequest }) {
   const [durationValues, setDurationValues] = useState({});
 
   useEffect(() => {
@@ -7196,10 +8949,10 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
           actions.map((action) => {
             const blockingAction = blockingActionFor(action, actions);
             const isBlocked = Boolean(action.dependsOnActionId && (!blockingAction || !isActionDone(blockingAction)));
-            const canDeleteAction = canDeleteActionForUser(currentUser, action, selectedRequest, phaseValidations);
-            const canEditDuration = canEditActionDurationForUser(currentUser, action, selectedRequest, phaseValidations);
-            const canManageAction = canManageActionForUser(currentUser, action, phaseValidations);
-            const canToggleAction = canToggleActionForUser(currentUser, action, selectedRequest, phaseValidations);
+            const canDeleteAction = !readOnly && canDeleteActionForUser(currentUser, action, selectedRequest, phaseValidations);
+            const canEditDuration = !readOnly && canEditActionDurationForUser(currentUser, action, selectedRequest, phaseValidations);
+            const canManageAction = !readOnly && canManageActionForUser(currentUser, action, phaseValidations, selectedRequest);
+            const canToggleAction = !readOnly && canToggleActionForUser(currentUser, action, selectedRequest, phaseValidations);
 
             return (
             <article className={action.late ? "action-row late" : "action-row"} key={action.id}>
@@ -7209,6 +8962,11 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
               <div className="action-main">
                 <h3>{action.title}</h3>
                 <p>{action.topicRisk || "-"}</p>
+                {action.routineAction && (
+                  <span className="routine-action-badge">
+                    Routiniere - chaque {action.recurrenceIntervalDays || 1} jour{Number(action.recurrenceIntervalDays || 1) > 1 ? "s" : ""}{action.routineOccurrenceIndex ? ` - #${action.routineOccurrenceIndex}` : ""}
+                  </span>
+                )}
               </div>
               <div className="action-meta">
                 <span><em>Pilote</em><strong>{action.responsible || "À définir"}</strong></span>
@@ -7302,7 +9060,7 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
                     <small className={`status ${action.validationStatus === "APPROVED" ? "done" : action.validationStatus === "REJECTED" ? "late" : "in_progress"}`}>
                       {action.validationStatus === "APPROVED" ? "Validee" : action.validationStatus === "REJECTED" ? "Refusee" : "En attente"}
                     </small>
-                    {isActionAwaitingValidation(action, phaseValidation) && canValidateActionForUser(currentUser, action) && (
+                    {!readOnly && isActionAwaitingValidation(action, phaseValidation) && canValidateActionForUser(currentUser, action) && (
                       <span className="action-validation-actions">
                         <button className="secondary-action compact-action action-validation-button reject" disabled={saving} type="button" onClick={() => handleRejectActionValidation(phaseValidation, action)}>
                           <XCircle size={14} />
@@ -7314,7 +9072,7 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
                         </button>
                       </span>
                     )}
-                    {canRequestRejectedActionValidationForUser(currentUser, action, selectedRequest) && phaseValidation?.status === "PENDING" && (
+                    {!readOnly && canRequestRejectedActionValidationForUser(currentUser, action, selectedRequest) && phaseValidation?.status === "PENDING" && (
                       <button className="primary-action compact-action action-validation-button" disabled={saving} type="button" onClick={() => handleRequestActionValidation(phaseValidation, action)}>
                         <CheckCircle2 size={14} />
                         Redemander validation
@@ -7518,7 +9276,7 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
             <Save size={16} />
             Enregistrer
           </button>
-          <button className="secondary-action" type="button" onClick={onClose}>Annulér</button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
         </div>
       </form>
     </div>

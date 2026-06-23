@@ -3,6 +3,7 @@ export const emptyEcrForm = {
   modificationNumber: "",
   client: "",
   product: "",
+  finishedProducts: "",
   modificationProject: "",
   modificationReason: "",
   modificationDetail: "",
@@ -62,6 +63,8 @@ export const emptyPlanningRuleForm = {
   evidenceRequired: false,
   dependencyActionTitle: "",
   dependencyAnchor: "OUTPUT",
+  routineAction: false,
+  recurrenceIntervalDays: 7,
   durationDays: 1
 };
 

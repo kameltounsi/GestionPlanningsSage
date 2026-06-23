@@ -218,6 +218,10 @@ public class AccountMailService {
     }
 
     public void sendActionDeadlineEmail(EcrRequest request, EcrAction action, AppUser recipient, Collection<AppUser> ccRecipients, String timingLabel, String timingMessage) {
+        sendActionDeadlineEmail(request, action, recipient, ccRecipients, timingLabel, timingMessage, false, false);
+    }
+
+    public void sendActionDeadlineEmail(EcrRequest request, EcrAction action, AppUser recipient, Collection<AppUser> ccRecipients, String timingLabel, String timingMessage, boolean lateAlert, boolean escalation) {
         if (!alertMailEnabled) {
             throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
         }
@@ -233,7 +237,11 @@ public class AccountMailService {
         }
         String phase = action.getStage() == null ? "-" : action.getStage().getLabel(request.isNewVersion());
         String modificationName = modificationName(request);
-        String title = "Alerte échéance action - " + value(timingLabel);
+        String alertTitle = escalation ? "Escalation : Alerte échéance action" : "Alerte échéance action";
+        String headerBackground = lateAlert ? "#7f1d1d" : "#3f6212";
+        String headerAccent = lateAlert ? "#fecaca" : "#d9f99d";
+        String buttonBackground = lateAlert ? "#b42318" : "#4d7c0f";
+        String title = alertTitle + " - " + value(timingLabel);
         String text = value(timingMessage)
                 + "\nAction : " + value(action.getTitle())
                 + "\nDate de fin : " + value(action.getEndDate() == null ? null : action.getEndDate().toString())
@@ -246,12 +254,12 @@ public class AccountMailService {
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
-                + "<div style=\"background:#3f6212;color:#ffffff;padding:24px 30px;\"><div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#d9f99d;\">Gestion Planning Sage</div>"
-                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Alerte échéance action</h1></div>"
+                + "<div style=\"background:" + headerBackground + ";color:#ffffff;padding:24px 30px;\"><div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:" + headerAccent + ";\">Gestion Planning Sage</div>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">" + escape(alertTitle) + "</h1></div>"
                 + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
                 + "<p><strong>" + escape(value(timingLabel)) + "</strong> - " + escape(value(timingMessage)) + "</p>"
                 + "<p><strong>Action :</strong> " + escape(value(action.getTitle())) + "<br><strong>Date de fin :</strong> " + escape(value(action.getEndDate() == null ? null : action.getEndDate().toString())) + "<br><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Phase :</strong> " + escape(value(phase)) + "<br><strong>Pilote action :</strong> " + escape(value(action.getResponsible())) + "</p>"
-                + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#4d7c0f;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
+                + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:" + buttonBackground + ";color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
                 + "</div></div></div></body></html>";
         sendMessage(recipient.getEmail(), ccRecipients, title, text, html, "action deadline");
     }

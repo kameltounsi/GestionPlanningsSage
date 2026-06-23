@@ -139,7 +139,9 @@ public class ActionDeadlineAlertService {
         }
         alert.setMailAttemptedAt(now);
         try {
-            mailService.sendActionDeadlineEmail(alert.getAction().getRequest(), alert.getAction(), recipient, escalationCcFor(alert.getAction(), alert.getAlertType(), recipient), timingLabel(alert.getAlertType()), timingMessage(alert.getAlertType()));
+            List<AppUser> escalationCc = escalationCcFor(alert.getAction(), alert.getAlertType(), recipient);
+            boolean lateAlert = isLateAlert(alert.getAlertType());
+            mailService.sendActionDeadlineEmail(alert.getAction().getRequest(), alert.getAction(), recipient, escalationCc, timingLabel(alert.getAlertType()), timingMessage(alert.getAlertType()), lateAlert, lateAlert && !escalationCc.isEmpty());
             alert.setMailSentAt(now);
             alert.setMailError(null);
             alertRepository.save(alert);
@@ -251,6 +253,10 @@ public class ActionDeadlineAlertService {
 
     private boolean isDone(EcrAction action) {
         return action.isChecked() || action.getStatus() == ActionStatus.DONE || action.getStatus() == ActionStatus.DONE_LATE;
+    }
+
+    private boolean isLateAlert(ActionDeadlineAlertType type) {
+        return type == ActionDeadlineAlertType.J_PLUS_1 || type == ActionDeadlineAlertType.J_PLUS_2;
     }
 
     private String timingLabel(ActionDeadlineAlertType type) {

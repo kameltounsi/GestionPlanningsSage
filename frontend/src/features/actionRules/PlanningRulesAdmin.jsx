@@ -240,6 +240,7 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
   const dependencyOptions = previousDependencyOptions(rules, form);
   const selectedProofDocumentFiles = filesFromValue(form.proofDocumentFile);
   const savedProofDocuments = planningRuleProofDocuments(form);
+  const hasProofDocumentLink = Boolean(String(form.proofDocumentLinkUrl || "").trim());
   const routineAction = Boolean(form.routineAction);
 
   function addProofDocumentFiles(event) {
@@ -414,9 +415,21 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
                 ))}
               </div>
             )}
+            <div className="asset-link-inputs proof-document-link-inputs">
+              <input
+                placeholder="Nom du lien preuve"
+                value={form.proofDocumentLinkName || ""}
+                onChange={(event) => setForm((current) => ({ ...current, proofDocumentLinkName: event.target.value }))}
+              />
+              <input
+                placeholder="Lien fichier partagé"
+                value={form.proofDocumentLinkUrl || ""}
+                onChange={(event) => setForm((current) => ({ ...current, proofDocumentLinkUrl: event.target.value }))}
+              />
+            </div>
           </div>
           <label className="asset-required-field user-enabled-field">
-            <input checked={form.evidenceRequired || selectedProofDocumentFiles.length > 0 || savedProofDocuments.length > 0} disabled={selectedProofDocumentFiles.length > 0 || savedProofDocuments.length > 0} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, evidenceRequired: event.target.checked }))} />
+            <input checked={form.evidenceRequired || selectedProofDocumentFiles.length > 0 || savedProofDocuments.length > 0 || hasProofDocumentLink} disabled={selectedProofDocumentFiles.length > 0 || savedProofDocuments.length > 0 || hasProofDocumentLink} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, evidenceRequired: event.target.checked }))} />
             Asset obligatoire
           </label>
         </div>
@@ -461,11 +474,14 @@ function planningRuleProofDocuments(rule) {
   return [{
     id: `legacy-proof-${rule.id}`,
     legacy: true,
-    fileName: rule.proofDocumentFileName || rule.proofDocument || "Element preuve"
+    fileName: rule.proofDocumentFileName || rule.proofDocument || "Element preuve",
+    fileUrl: rule.proofDocumentFileUrl,
+    resourceType: rule.proofDocumentResourceType
   }];
 }
 
 function planningRuleProofDocumentItemUrl(rule, proofDocument) {
+  if (proofDocument?.resourceType === "link" && proofDocument.fileUrl) return proofDocument.fileUrl;
   return proofDocument?.legacy ? actionPlanningRuleProofDocumentUrl(rule.id) : actionPlanningRuleProofDocumentDownloadUrl(proofDocument.id);
 }
 

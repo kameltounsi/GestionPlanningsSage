@@ -91,7 +91,7 @@ public class EcrActionController {
             if (!accessControlService.canAccessRequest(user, request)) {
                 return ResponseEntity.status(403).<List<EcrAction>>build();
             }
-            if (!accessControlService.isAdmin(user) && !canViewStage(request, stage)) {
+            if (!accessControlService.canSeeAllActions(user, request) && !canViewStage(request, stage)) {
                 return ResponseEntity.status(403).<List<EcrAction>>build();
             }
             templateService.ensureActionsFor(request);
@@ -317,6 +317,38 @@ public class EcrActionController {
                 .orElse(ResponseEntity.status(403).build());
     }
 
+    @PostMapping("/actions/{id}/evidence-link")
+    public ResponseEntity<EcrAction> addEvidenceLink(@PathVariable Long id, @RequestBody LinkPayload payload,
+                                                     @RequestAttribute("authenticatedUser") AppUser user) {
+        String url = normalizeSharedLink(payload == null ? null : payload.getUrl());
+        if (url == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        return actionRepository.findById(id)
+                .filter(action -> accessControlService.canManageAction(user, action) && canMutateAction(action))
+                .map(action -> {
+                    String label = normalizeText(payload.getName());
+                    EcrActionAsset actionAsset = new EcrActionAsset();
+                    actionAsset.setAction(action);
+                    actionAsset.setFileName(label == null ? url : label);
+                    actionAsset.setContentType("text/uri-list");
+                    actionAsset.setFileSize(null);
+                    actionAsset.setFileUrl(url);
+                    actionAsset.setPublicId(null);
+                    actionAsset.setResourceType("link");
+                    assetRepository.save(actionAsset);
+                    action.setEvidenceFileName(actionAsset.getFileName());
+                    action.setEvidenceContentType(actionAsset.getContentType());
+                    action.setEvidenceFileSize(null);
+                    action.setEvidenceFileUrl(url);
+                    action.setEvidencePublicId(null);
+                    action.setEvidenceResourceType("link");
+                    action.setEvidence(actionAsset.getFileName());
+                    return ResponseEntity.ok(enrichAction(actionRepository.save(action)));
+                })
+                .orElse(ResponseEntity.status(403).build());
+    }
+
     @PostMapping(value = "/actions/{id}/proof-document", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<EcrAction> uploadProofDocument(@PathVariable Long id, @RequestParam("file") MultipartFile file,
                                                          @RequestAttribute("authenticatedUser") AppUser user) {
@@ -351,9 +383,47 @@ public class EcrActionController {
                 .orElse(ResponseEntity.status(403).build());
     }
 
+    @PostMapping("/actions/{id}/proof-document-link")
+    public ResponseEntity<EcrAction> addProofDocumentLink(@PathVariable Long id, @RequestBody LinkPayload payload,
+                                                          @RequestAttribute("authenticatedUser") AppUser user) {
+        String url = normalizeSharedLink(payload == null ? null : payload.getUrl());
+        if (url == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        return actionRepository.findById(id)
+                .filter(action -> accessControlService.canManageAction(user, action) && canMutateAction(action))
+                .map(action -> {
+                    String label = normalizeText(payload.getName());
+                    EcrActionProofDocument proofDocument = new EcrActionProofDocument();
+                    proofDocument.setAction(action);
+                    proofDocument.setFileName(label == null ? url : label);
+                    proofDocument.setContentType("text/uri-list");
+                    proofDocument.setFileSize(null);
+                    proofDocument.setFileUrl(url);
+                    proofDocument.setPublicId(null);
+                    proofDocument.setResourceType("link");
+                    proofDocumentRepository.save(proofDocument);
+                    action.setProofDocument(proofDocument.getFileName());
+                    action.setProofDocumentFileName(proofDocument.getFileName());
+                    action.setProofDocumentContentType(proofDocument.getContentType());
+                    action.setProofDocumentFileSize(null);
+                    action.setProofDocumentFileUrl(url);
+                    action.setProofDocumentPublicId(null);
+                    action.setProofDocumentResourceType("link");
+                    action.setEvidenceRequired(true);
+                    EcrAction saved = actionRepository.save(action);
+                    syncPendingSuggestionProofDocument(saved);
+                    return ResponseEntity.ok(enrichAction(saved));
+                })
+                .orElse(ResponseEntity.status(403).build());
+    }
+
     @GetMapping("/actions/{id}/evidence")
     public ResponseEntity<?> downloadEvidence(@PathVariable Long id) {
         return actionRepository.findById(id).<ResponseEntity<?>>map(action -> {
+            if (isExternalLink(action.getEvidenceFileUrl(), action.getEvidencePublicId(), action.getEvidenceResourceType())) {
+                return ResponseEntity.status(302).location(URI.create(action.getEvidenceFileUrl())).build();
+            }
             if (action.getEvidenceFileUrl() != null && !action.getEvidenceFileUrl().trim().isEmpty()) {
                 DownloadedAsset asset = storageService.download(action.getEvidencePublicId(), action.getEvidenceResourceType(), action.getEvidenceFileUrl(), action.getEvidenceContentType());
                 return ResponseEntity.ok()
@@ -376,6 +446,9 @@ public class EcrActionController {
             if (action.getProofDocumentFileUrl() == null || action.getProofDocumentFileUrl().trim().isEmpty()) {
                 return ResponseEntity.notFound().build();
             }
+            if (isExternalLink(action.getProofDocumentFileUrl(), action.getProofDocumentPublicId(), action.getProofDocumentResourceType())) {
+                return ResponseEntity.status(302).location(URI.create(action.getProofDocumentFileUrl())).build();
+            }
             try {
                 DownloadedAsset asset = storageService.download(action.getProofDocumentPublicId(), action.getProofDocumentResourceType(), action.getProofDocumentFileUrl(), action.getProofDocumentContentType());
                 return ResponseEntity.ok()
@@ -394,6 +467,9 @@ public class EcrActionController {
     public ResponseEntity<?> downloadActionProofDocument(@PathVariable Long proofDocumentId) {
         return proofDocumentRepository.findById(proofDocumentId)
                 .<ResponseEntity<?>>map(proofDocument -> {
+                    if (isExternalLink(proofDocument.getFileUrl(), proofDocument.getPublicId(), proofDocument.getResourceType())) {
+                        return ResponseEntity.status(302).location(URI.create(proofDocument.getFileUrl())).build();
+                    }
                     try {
                         DownloadedAsset asset = storageService.download(proofDocument.getPublicId(), proofDocument.getResourceType(), proofDocument.getFileUrl(), proofDocument.getContentType());
                         return ResponseEntity.ok()
@@ -447,6 +523,9 @@ public class EcrActionController {
     public ResponseEntity<?> downloadActionAsset(@PathVariable Long assetId) {
         return assetRepository.findById(assetId)
                 .<ResponseEntity<?>>map(actionAsset -> {
+                    if (isExternalLink(actionAsset.getFileUrl(), actionAsset.getPublicId(), actionAsset.getResourceType())) {
+                        return ResponseEntity.status(302).location(URI.create(actionAsset.getFileUrl())).build();
+                    }
                     try {
                         DownloadedAsset asset = storageService.download(actionAsset.getPublicId(), actionAsset.getResourceType(), actionAsset.getFileUrl(), actionAsset.getContentType());
                         return ResponseEntity.ok()
@@ -901,5 +980,53 @@ public class EcrActionController {
         return ResponseEntity.status(exception.isNotFound() ? 404 : 502)
                 .contentType(MediaType.TEXT_PLAIN)
                 .body(message);
+    }
+
+    private String normalizeSharedLink(String value) {
+        String url = normalizeText(value);
+        if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) {
+            return null;
+        }
+        try {
+            URI.create(url);
+            return url;
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
+    }
+
+    private String normalizeText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String text = value.trim();
+        return text.isEmpty() ? null : text;
+    }
+
+    private boolean isExternalLink(String fileUrl, String publicId, String resourceType) {
+        return normalizeSharedLink(fileUrl) != null
+                && (publicId == null || publicId.trim().isEmpty())
+                && "link".equalsIgnoreCase(String.valueOf(resourceType));
+    }
+
+    public static class LinkPayload {
+        private String name;
+        private String url;
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getUrl() {
+            return url;
+        }
+
+        public void setUrl(String url) {
+            this.url = url;
+        }
     }
 }

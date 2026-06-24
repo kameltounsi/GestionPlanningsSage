@@ -532,6 +532,13 @@ export function uploadActionEvidence(actionId, file) {
   return multipartRequest(`/actions/${actionId}/evidence`, formData);
 }
 
+export function addActionEvidenceLink(actionId, payload) {
+  return request(`/actions/${actionId}/evidence-link`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 export function actionEvidenceUrl(actionId) {
   return `${API_BASE}/actions/${actionId}/evidence`;
 }
@@ -540,6 +547,13 @@ export function uploadActionProofDocument(actionId, file) {
   const formData = new FormData();
   formData.append("file", file);
   return multipartRequest(`/actions/${actionId}/proof-document`, formData);
+}
+
+export function addActionProofDocumentLink(actionId, payload) {
+  return request(`/actions/${actionId}/proof-document-link`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function actionProofDocumentUrl(actionId) {
@@ -554,6 +568,13 @@ export function uploadActionPlanningRuleProofDocument(ruleId, file) {
   const formData = new FormData();
   formData.append("file", file);
   return multipartRequest(`/action-planning-rules/${ruleId}/proof-document`, formData);
+}
+
+export function addActionPlanningRuleProofDocumentLink(ruleId, payload) {
+  return request(`/action-planning-rules/${ruleId}/proof-document-link`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function deleteActionPlanningRuleProofDocument(ruleId) {

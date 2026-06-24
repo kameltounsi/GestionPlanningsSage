@@ -104,15 +104,11 @@ public class AccessControlService {
     }
 
     public boolean canSeeAllActions(AppUser user, EcrRequest request) {
-        return isAdmin(user);
+        return isAdmin(user) || isRequestPilot(user, request);
     }
 
     public boolean canViewAction(AppUser user, EcrAction action) {
         if (canSeeAllActions(user, action == null ? null : action.getRequest())) {
-            return true;
-        }
-        if (action != null && action.getRequest() != null && isRequestPilot(user, action.getRequest())
-                && (action.isRoutineAction() || action.getStage() == action.getRequest().getCurrentStage())) {
             return true;
         }
         return isActionParticipant(user, action);

@@ -218,10 +218,10 @@ public class AccountMailService {
     }
 
     public void sendActionDeadlineEmail(EcrRequest request, EcrAction action, AppUser recipient, Collection<AppUser> ccRecipients, String timingLabel, String timingMessage) {
-        sendActionDeadlineEmail(request, action, recipient, ccRecipients, timingLabel, timingMessage, false, false);
+        sendActionDeadlineEmail(request, action, recipient, ccRecipients, timingLabel, timingMessage, false);
     }
 
-    public void sendActionDeadlineEmail(EcrRequest request, EcrAction action, AppUser recipient, Collection<AppUser> ccRecipients, String timingLabel, String timingMessage, boolean lateAlert, boolean escalation) {
+    public void sendActionDeadlineEmail(EcrRequest request, EcrAction action, AppUser recipient, Collection<AppUser> ccRecipients, String timingLabel, String timingMessage, boolean escalation) {
         if (!alertMailEnabled) {
             throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
         }
@@ -238,9 +238,9 @@ public class AccountMailService {
         String phase = action.getStage() == null ? "-" : action.getStage().getLabel(request.isNewVersion());
         String modificationName = modificationName(request);
         String alertTitle = escalation ? "Escalation : Alerte échéance action" : "Alerte échéance action";
-        String headerBackground = lateAlert ? "#7f1d1d" : "#3f6212";
-        String headerAccent = lateAlert ? "#fecaca" : "#d9f99d";
-        String buttonBackground = lateAlert ? "#b42318" : "#4d7c0f";
+        String headerBackground = "#7f1d1d";
+        String headerAccent = "#fecaca";
+        String buttonBackground = "#b42318";
         String title = alertTitle + " - " + value(timingLabel);
         String text = value(timingMessage)
                 + "\nAction : " + value(action.getTitle())

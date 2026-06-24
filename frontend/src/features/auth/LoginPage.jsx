@@ -1,5 +1,5 @@
-import React, { useRef } from "react";
-import { CircleAlert, Lock, Mail, RotateCcw, ShieldCheck } from "lucide-react";
+import React, { useRef, useState } from "react";
+import { CircleAlert, Eye, EyeOff, Lock, Mail, RotateCcw, ShieldCheck } from "lucide-react";
 
 export function LoginPage({
   error,
@@ -22,6 +22,7 @@ export function LoginPage({
   setPasswordResetForm
 }) {
   const codeRefs = useRef([]);
+  const [showPassword, setShowPassword] = useState(false);
 
   function updateCode(index, value) {
     const digit = value.replace(/\D/g, "").slice(-1);
@@ -87,11 +88,19 @@ export function LoginPage({
                 <input
                   autoComplete="current-password"
                   required
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   value={form.password}
                   onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
                   placeholder="Votre mot de passe"
                 />
+                <button
+                  aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                  className="password-visibility-toggle"
+                  type="button"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </span>
             </label>
             <button className="primary-action wide-action" disabled={saving} type="submit">

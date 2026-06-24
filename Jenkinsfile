@@ -8,8 +8,8 @@ pipeline {
 
         POSTGRES_DB = 'plannings'
         POSTGRES_USER = 'postgres'
-        POSTGRES_HOST_PORT = '5433'
-        SPRING_DATASOURCE_URL = 'jdbc:postgresql://localhost:5433/plannings'
+        POSTGRES_HOST_PORT = '5432'
+        SPRING_DATASOURCE_URL = 'jdbc:postgresql://localhost:5432/plannings'
         SERVER_PORT = '3001'
         VITE_API_BASE_URL = '/api'
         SPRING_MAIL_HOST = 'smtp.gmail.com'

@@ -9,6 +9,8 @@ Migration de l'application Access `PlanningSage.accdb` vers une application web:
 Le cahier des charges de reference est resume dans `docs/cahier-des-charges-ecr.md`.
 La cible fonctionnelle complete reste: Spring Boot + React.js + PostgreSQL + Spring Security JWT.
 
+Guide local/deploiement autonome: `README_DEPLOIEMENT.md`.
+
 ## Concept metier
 
 L'application suit des demandes de modification ECR (`Engineering Change Request`).
@@ -50,7 +52,7 @@ Variables disponibles si votre base n'utilise pas les valeurs par defaut:
 ```powershell
 $env:SERVER_PORT="3001"
 $env:APP_FRONTEND_URL="http://localhost:3000"
-$env:SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:5433/plannings"
+$env:SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:5432/plannings"
 $env:SPRING_DATASOURCE_USERNAME="postgres"
 $env:SPRING_DATASOURCE_PASSWORD="supersecret"
 ```
@@ -108,10 +110,10 @@ Valeurs importantes a adapter dans `.env`:
 
 ```env
 POSTGRES_PASSWORD=votre_mot_de_passe_fort
-POSTGRES_HOST_PORT=5433
+POSTGRES_HOST_PORT=5432
 APP_FRONTEND_URL=http://localhost:3000
-VITE_API_BASE_URL=http://localhost:3001/api
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5433/plannings
+VITE_API_BASE_URL=/api
+SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/plannings
 CLOUDINARY_CLOUD_NAME=votre_cloud_name
 CLOUDINARY_API_KEY=votre_api_key
 CLOUDINARY_API_SECRET=votre_api_secret
@@ -141,7 +143,7 @@ Ouvrir les ports sur la VM:
 ```bash
 sudo ufw allow 3000
 sudo ufw allow 3001
-sudo ufw allow 5433
+sudo ufw allow 5432
 ```
 
 Interface web: `http://localhost:3000`
@@ -154,6 +156,8 @@ Pour mettre a jour apres un push GitHub:
 git pull
 docker compose up -d --build
 ```
+
+Pour la procedure complete avec logs, sauvegarde base et depannage, voir `README_DEPLOIEMENT.md`.
 
 ## Prochaines etapes
 

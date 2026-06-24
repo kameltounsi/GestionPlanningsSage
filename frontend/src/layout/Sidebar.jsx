@@ -25,26 +25,28 @@ export function Sidebar({ canAdmin, collapsed, currentUser, page, pageHref, onCo
             <h1>Sage Plannings</h1>
             <span>Application ECR</span>
           </div>
-
-          <button
-              aria-label={collapsed ? "Agrandir le menu" : "Reduire le menu"}
-              className="nav-toggle"
-              onClick={onCollapseToggle}
-              title={collapsed ? "Agrandir le menu" : "Reduire le menu"}
-              type="button"
-          >
-            {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
-          </button>
         </div>
 
         <nav className="main-menu">
           <div className="nav-user-card">
-            <div className="nav-user-avatar">
-              {currentUser?.profilePhotoUrl ? (
-                  <img src={currentUser.profilePhotoUrl} alt={currentUser.fullName || "Utilisateur"}/>
-              ) : (
-                  <UserCircle size={28}/>
-              )}
+            <div className="nav-user-controls">
+              <div className="nav-user-avatar">
+                {currentUser?.profilePhotoUrl ? (
+                    <img src={currentUser.profilePhotoUrl} alt={currentUser.fullName || "Utilisateur"}/>
+                ) : (
+                    <UserCircle size={28}/>
+                )}
+              </div>
+
+              <button
+                  aria-label={collapsed ? "Agrandir le menu" : "Reduire le menu"}
+                  className="nav-toggle"
+                  onClick={onCollapseToggle}
+                  title={collapsed ? "Agrandir le menu" : "Reduire le menu"}
+                  type="button"
+              >
+                {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+              </button>
             </div>
 
             <div className="nav-user-info">

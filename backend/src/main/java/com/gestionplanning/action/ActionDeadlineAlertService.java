@@ -140,8 +140,8 @@ public class ActionDeadlineAlertService {
         alert.setMailAttemptedAt(now);
         try {
             List<AppUser> escalationCc = escalationCcFor(alert.getAction(), alert.getAlertType(), recipient);
-            boolean lateAlert = isLateAlert(alert.getAlertType());
-            mailService.sendActionDeadlineEmail(alert.getAction().getRequest(), alert.getAction(), recipient, escalationCc, timingLabel(alert.getAlertType()), timingMessage(alert.getAlertType()), lateAlert, lateAlert && !escalationCc.isEmpty());
+            boolean escalationAlert = isEscalationAlert(alert.getAlertType());
+            mailService.sendActionDeadlineEmail(alert.getAction().getRequest(), alert.getAction(), recipient, escalationCc, timingLabel(alert.getAlertType()), timingMessage(alert.getAlertType()), escalationAlert);
             alert.setMailSentAt(now);
             alert.setMailError(null);
             alertRepository.save(alert);
@@ -169,7 +169,7 @@ public class ActionDeadlineAlertService {
             return Collections.emptyList();
         }
         Map<String, AppUser> cc = new LinkedHashMap<>();
-        if (alertType == ActionDeadlineAlertType.DUE_TODAY || alertType == ActionDeadlineAlertType.J_PLUS_1 || alertType == ActionDeadlineAlertType.J_PLUS_2) {
+        if (alertType == ActionDeadlineAlertType.J_PLUS_1 || alertType == ActionDeadlineAlertType.J_PLUS_2) {
             findUser(actionPilot.get().getChef1()).ifPresent(user -> cc.put(normalizeEmail(user.getEmail()), user));
         }
         if (alertType == ActionDeadlineAlertType.J_PLUS_2) {
@@ -255,7 +255,7 @@ public class ActionDeadlineAlertService {
         return action.isChecked() || action.getStatus() == ActionStatus.DONE || action.getStatus() == ActionStatus.DONE_LATE;
     }
 
-    private boolean isLateAlert(ActionDeadlineAlertType type) {
+    private boolean isEscalationAlert(ActionDeadlineAlertType type) {
         return type == ActionDeadlineAlertType.J_PLUS_1 || type == ActionDeadlineAlertType.J_PLUS_2;
     }
 

@@ -119,9 +119,45 @@ public class ActionPlanningRuleController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @PostMapping("/{id}/proof-document-link")
+    public ResponseEntity<ActionPlanningRule> addProofDocumentLink(@PathVariable Long id, @RequestBody LinkPayload payload) {
+        String url = normalizeSharedLink(payload == null ? null : payload.getUrl());
+        if (url == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        return ruleRepository.findById(id)
+                .map(rule -> {
+                    String label = normalizeText(payload.getName());
+                    ActionPlanningRuleProofDocument proofDocument = new ActionPlanningRuleProofDocument();
+                    proofDocument.setRule(rule);
+                    proofDocument.setFileName(label == null ? url : label);
+                    proofDocument.setContentType("text/uri-list");
+                    proofDocument.setFileSize(null);
+                    proofDocument.setFileUrl(url);
+                    proofDocument.setPublicId(null);
+                    proofDocument.setResourceType("link");
+                    proofDocumentRepository.save(proofDocument);
+                    rule.setProofDocument(proofDocument.getFileName());
+                    rule.setProofDocumentFileName(proofDocument.getFileName());
+                    rule.setProofDocumentContentType(proofDocument.getContentType());
+                    rule.setProofDocumentFileSize(null);
+                    rule.setProofDocumentFileUrl(url);
+                    rule.setProofDocumentPublicId(null);
+                    rule.setProofDocumentResourceType("link");
+                    rule.setEvidenceRequired(true);
+                    ActionPlanningRule savedRule = ruleRepository.save(rule);
+                    recalculateAllRequests();
+                    return ResponseEntity.ok(savedRule);
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @GetMapping("/proof-documents/{proofDocumentId}/download")
     public ResponseEntity<?> downloadProofDocumentItem(@PathVariable Long proofDocumentId) {
         return proofDocumentRepository.findById(proofDocumentId).<ResponseEntity<?>>map(proofDocument -> {
+            if (isExternalLink(proofDocument.getFileUrl(), proofDocument.getPublicId(), proofDocument.getResourceType())) {
+                return ResponseEntity.status(302).location(URI.create(proofDocument.getFileUrl())).build();
+            }
             try {
                 DownloadedAsset asset = storageService.download(proofDocument.getPublicId(), proofDocument.getResourceType(), proofDocument.getFileUrl(), proofDocument.getContentType());
                 return ResponseEntity.ok()
@@ -141,6 +177,9 @@ public class ActionPlanningRuleController {
         return ruleRepository.findById(id).<ResponseEntity<?>>map(rule -> {
             if (rule.getProofDocumentFileUrl() == null || rule.getProofDocumentFileUrl().trim().isEmpty()) {
                 return ResponseEntity.notFound().build();
+            }
+            if (isExternalLink(rule.getProofDocumentFileUrl(), rule.getProofDocumentPublicId(), rule.getProofDocumentResourceType())) {
+                return ResponseEntity.status(302).location(URI.create(rule.getProofDocumentFileUrl())).build();
             }
             try {
                 DownloadedAsset asset = storageService.download(rule.getProofDocumentPublicId(), rule.getProofDocumentResourceType(), rule.getProofDocumentFileUrl(), rule.getProofDocumentContentType());
@@ -315,5 +354,53 @@ public class ActionPlanningRuleController {
                 ? "inline"
                 : "attachment";
         return disposition + "; filename=\"" + safeFileName(fileName) + "\"";
+    }
+
+    private String normalizeSharedLink(String value) {
+        String url = normalizeText(value);
+        if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) {
+            return null;
+        }
+        try {
+            URI.create(url);
+            return url;
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
+    }
+
+    private String normalizeText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String text = value.trim();
+        return text.isEmpty() ? null : text;
+    }
+
+    private boolean isExternalLink(String fileUrl, String publicId, String resourceType) {
+        return normalizeSharedLink(fileUrl) != null
+                && (publicId == null || publicId.trim().isEmpty())
+                && "link".equalsIgnoreCase(String.valueOf(resourceType));
+    }
+
+    public static class LinkPayload {
+        private String name;
+        private String url;
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getUrl() {
+            return url;
+        }
+
+        public void setUrl(String url) {
+            this.url = url;
+        }
     }
 }

@@ -57,12 +57,9 @@ public class AccessControlService {
         if (isRequestPilot(user, request)) {
             return true;
         }
-        if (projectTeamTokens(request).stream().anyMatch(token -> matchesUser(user, token))) {
-            return true;
-        }
         return request.getId() != null
                 && actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId()).stream()
-                .anyMatch(action -> isActionParticipant(user, action));
+                .anyMatch(action -> isNamedActionParticipant(user, action));
     }
 
     public boolean canValidateRequest(AppUser user, EcrRequest request) {
@@ -100,7 +97,7 @@ public class AccessControlService {
             return false;
         }
         String pilot = normalize(request.getPilot());
-        return !pilot.isEmpty() && matchesActionAssignment(user, pilot);
+        return !pilot.isEmpty() && matchesUser(user, pilot);
     }
 
     public boolean canSeeAllActions(AppUser user, EcrRequest request) {
@@ -161,6 +158,16 @@ public class AccessControlService {
                 || matchesActionAssignment(user, action.getValidator())
                 || matchesActionAssignment(user, action.getValidatorRole())
                 || matchesActionAssignment(user, action.getValidatorDisplayName());
+    }
+
+    private boolean isNamedActionParticipant(AppUser user, EcrAction action) {
+        if (user == null || action == null) {
+            return false;
+        }
+        return matchesUser(user, normalize(action.getResponsible()))
+                || matchesUser(user, normalize(action.getValidator()))
+                || matchesUser(user, normalize(action.getValidatorRole()))
+                || matchesUser(user, normalize(action.getValidatorDisplayName()));
     }
 
     public List<AppUser> validatorsAndManagersFor(EcrRequest request) {

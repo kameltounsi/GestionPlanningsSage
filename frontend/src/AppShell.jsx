@@ -747,7 +747,6 @@ function actionTimelineEnd(action, startDate) {
 
 function actionGanttStatusClass(action) {
   if (action?.status === "CANCELLED") return "cancelled";
-  if (isCriticalActionValue(action)) return "critical";
   if (isActionDone(action)) return "closed";
   const end = parseDateOnly(action.endDate) || parseDateOnly(action.deadline);
   return end && end < new Date() ? "late" : "planned";
@@ -759,14 +758,12 @@ function isCriticalActionValue(action) {
 
 function actionGanttStatusLabel(action) {
   if (action?.status === "CANCELLED") return "Annulée";
-  if (isCriticalActionValue(action)) return "Critique";
   if (isActionDone(action)) return "Done";
   return actionGanttStatusClass(action) === "late" ? "En retard" : "Planifié / à faire";
 }
 
 function actionGanttColor(action) {
   const status = actionGanttStatusClass(action);
-  if (status === "critical") return "#c98a2c";
   if (status === "cancelled") return "#6b7280";
   if (status === "closed") return "#25D366";
   if (status === "late") return "#b42318";
@@ -987,7 +984,7 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
   const doneCount = actionRows.filter(({ action }) => isActionDone(action)).length;
   const completionRate = modificationCompletionRate(request, actionRows.map(({ action }) => action));
   const lateCount = actionRows.filter(({ action }) => actionGanttStatusClass(action) === "late").length;
-  const criticalCount = actionRows.filter(({ action }) => actionGanttStatusClass(action) === "critical").length;
+  const criticalCount = actionRows.filter(({ action }) => isCriticalActionValue(action)).length;
   const stagePages = [];
   let currentPageRows = [];
   const maxRowsPerPage = 12;
@@ -1019,11 +1016,14 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
     const actionRowHtml = stageRows.map(({ action, start, end }) => {
         const assignee = action.responsible || "Responsable";
         const actionColor = actionGanttColor(action);
+        const critical = isCriticalActionValue(action);
+        const criticalText = critical ? " | Criticité: Critique" : "";
+        const barClass = `${actionGanttStatusClass(action)}${critical ? " critical-action" : ""}`;
         return `<div class="gantt-row">
-          <div class="left activity"><strong>${escapeHtml(action.title || `Action ${action.id || ""}`)}</strong><span>${escapeHtml(actionGanttStatusLabel(action))} | Pilote: ${escapeHtml(assignee)} | Validateur: ${escapeHtml(action.validatorDisplayName || action.validator || "Validateur")}</span></div>
+          <div class="left activity"><strong>${escapeHtml(action.title || `Action ${action.id || ""}`)}</strong><span>Statut: ${escapeHtml(actionGanttStatusLabel(action))}${escapeHtml(criticalText)} | Pilote: ${escapeHtml(assignee)} | Validateur: ${escapeHtml(action.validatorDisplayName || action.validator || "Validateur")}</span></div>
           <div class="left date">${escapeHtml(formatDateOnly(start))}</div>
           <div class="left date">${escapeHtml(formatDateOnly(end))}</div>
-          <div class="timeline"><span class="bar ${actionGanttStatusClass(action)}" style="${ganttBarStyle(start, end, timelineStart, totalDays)};${ganttColorBarStyle(actionColor)}"></span></div>
+          <div class="timeline"><span class="bar ${barClass}" style="${ganttBarStyle(start, end, timelineStart, totalDays)};${ganttColorBarStyle(actionColor)}"></span></div>
         </div>`;
       });
     if (actionRowHtml.length === 0) {
@@ -1049,7 +1049,7 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
   }
   const tickColumns = `repeat(${Math.max(1, ticks.length)}, 1fr)`;
   const tableHeadHtml = `<div class="gantt-row gantt-head"><div class="left">Activites</div><div class="left">Deb</div><div class="left">Fin</div><div class="timeline">${ticks.map((tick) => `<span class="tick">${escapeHtml(tick.label)}</span>`).join("")}</div></div>`;
-  const legendHtml = `<div class="legend"><span><i style="${ganttColorBarStyle("#8a9275")}"></i>Planifié / à faire</span><span><i style="${ganttColorBarStyle("#25D366")}"></i>Done</span><span><i style="${ganttColorBarStyle("#b42318")}"></i>En retard</span><span><i style="${ganttColorBarStyle("#c98a2c")}"></i>Critique</span></div>`;
+  const legendHtml = `<div class="legend"><span><i style="${ganttColorBarStyle("#8a9275")}"></i>Planifié / à faire</span><span><i style="${ganttColorBarStyle("#25D366")}"></i>Done</span><span><i style="${ganttColorBarStyle("#b42318")}"></i>En retard</span><span><i style="${ganttColorBarStyle("#6b7280")}"></i>Annulée</span><span><i class="critical-legend" style="${ganttColorBarStyle("#8a9275")}"></i>Critique: orange + statut</span></div>`;
   const pageHtml = stagePages.map((pageRows, pageIndex) => `<main class="pdf-export-page gantt-export-page">
     <header>
       <div class="brand-block"><img class="gantt-logo" src="/sage_logo1.png" alt="SAGE Automotive Interiors" /><div><h1>DIAGRAMME <span>DE GANTT</span></h1><div class="meta">${escapeHtml(requestDisplayName(request))} | Projet: ${escapeHtml(request.modificationProject || "-")} | Client: ${escapeHtml(request.client || "-")} | Produit: ${escapeHtml(request.product || "-")} | Pilote: ${escapeHtml(request.pilot || "-")}<br>Extraction: ${escapeHtml(new Date().toLocaleString("fr-FR"))} | Periode: ${escapeHtml(formatDateOnly(timelineStart))} - ${escapeHtml(formatDateOnly(timelineEnd))} | Avancement global actuel: ${completionRate}%</div></div></div>
@@ -1098,13 +1098,14 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
     .phase-row .left{background:#edf3df;font-weight:700}
     .phase-row .timeline{background:#f1f6e8}
     .phase-bar{position:absolute;top:14px;height:0;border-top:12px solid #5f7f13;background:#5f7f13;border-radius:2px;opacity:.95}
-    .bar{position:absolute;top:13px;height:0;border-top:16px solid;border-radius:1px;min-width:4px}
-    .bar.late{outline:2px solid #7f1d1d}
-    .bar.critical{outline:2px solid #8a5a12}
+    .bar{position:absolute;top:13px;height:16px;border:1px solid;border-radius:1px;min-width:4px}
+    .bar.late{box-shadow:0 0 0 2px #7f1d1d}
+    .bar.critical-action::after{background:#c98a2c;bottom:0;content:"";position:absolute;right:0;top:0;width:38%}
     .gantt-footer{margin-top:auto}
-    .legend{display:grid;grid-template-columns:repeat(4,1fr);gap:8px 28px;margin-top:10px;padding:8px;background:#fff;border-top:1px solid #5f7f13;font-size:11px}
+    .legend{display:grid;grid-template-columns:repeat(5,1fr);gap:8px 18px;margin-top:10px;padding:8px;background:#fff;border-top:1px solid #5f7f13;font-size:11px}
     .legend span{display:flex;align-items:center;gap:8px;font-weight:700}
-    .legend i{display:inline-block;width:34px;height:0;border-top:14px solid}
+    .legend i{display:inline-block;width:34px;height:14px;border:1px solid}
+    .legend i.critical-legend{background:linear-gradient(to right,#8a9275 0 62%,#c98a2c 62% 100%) !important}
     .page-number{color:#586148;display:block;font-size:11px;font-weight:700;margin-top:6px;text-align:right}
     .empty{padding:24px;text-align:center;color:#586148;background:#fff}
   </style></head><body>${pageHtml}</body></html>`;
@@ -1164,6 +1165,10 @@ function canManageActionForUser(user, action, phaseValidations = [], request = a
   if (isTerminalRequest(request)) return false;
   if (request?.currentStage === "CANCELLED" && action?.stage !== "CANCELLED") return false;
   if (isActionPhaseApproved(action, phaseValidations)) return false;
+  return canManageActionAssignmentForUser(user, action);
+}
+
+function canManageActionAssignmentForUser(user, action) {
   if (isAdminUser(user)) return true;
   const responsible = normalizeRoleToken(action?.responsible);
   if (!responsible) return false;
@@ -1216,12 +1221,17 @@ function isActionPhaseApproved(action, phaseValidations = []) {
   return phaseValidations.find((validation) => validation.stage === action?.stage)?.status === "APPROVED";
 }
 
+function canDeleteActionInPhase(action, phaseValidations = []) {
+  if (!isActionPhaseApproved(action, phaseValidations)) return true;
+  return !isActionDone(action) && action?.validationStatus !== "APPROVED";
+}
+
 function canDeleteActionForUser(user, action, request, phaseValidations = []) {
   if (isTerminalRequest(request)) return false;
   if (request?.currentStage === "CANCELLED" && action?.stage !== "CANCELLED") return false;
-  if (isActionPhaseApproved(action, phaseValidations)) return false;
+  if (!canDeleteActionInPhase(action, phaseValidations)) return false;
   if (isAdminUser(user)) return true;
-  return isRequestPilot(user, request);
+  return isRequestPilot(user, request) || canManageActionAssignmentForUser(user, action);
 }
 
 function canEditActionDurationForUser(user, action, request, phaseValidations = []) {
@@ -1391,12 +1401,15 @@ function App() {
   }, [filteredRequests, query]);
 
   const projectOptions = useMemo(() => {
-    const names = [
-      ...projects.map((project) => project.name),
-      ...requests.map((request) => request.modificationProject)
-    ].filter(Boolean);
+    const requestProjectNames = requests.map((request) => request.modificationProject);
+    const names = isAdminUser(currentUser)
+      ? [
+        ...projects.map((project) => project.name),
+        ...requestProjectNames
+      ]
+      : requestProjectNames;
     return [...new Set(names)].sort((a, b) => a.localeCompare(b));
-  }, [projects, requests]);
+  }, [currentUser, projects, requests]);
   const clientOptions = useMemo(
     () => uniqueSorted(clientReferences.map((client) => client.name)),
     [clientReferences]
@@ -1412,6 +1425,20 @@ function App() {
     ]),
     [roleReferences]
   );
+
+  useEffect(() => {
+    if (!projectFilter || projectOptions.includes(projectFilter)) {
+      return;
+    }
+    setProjectFilter("");
+  }, [projectFilter, projectOptions]);
+
+  useEffect(() => {
+    if (isAdminUser(currentUser) || requestArchiveView !== "archived") {
+      return;
+    }
+    setRequestArchiveView("all");
+  }, [currentUser, requestArchiveView]);
 
   const dashboardStats = useMemo(() => {
     const visibleRequests = requests.filter((request) => !request.archived);
@@ -2732,8 +2759,8 @@ function App() {
       warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. Les actions sont en lecture seule.");
       return;
     }
-    if (isActionPhaseApproved(action, phaseValidations)) {
-      warningAlert("Phase validée", "Impossible de supprimer une action dans une phase déjà validée. Reouvrez la phase avant de la modifier.");
+    if (!canDeleteActionInPhase(action, phaseValidations)) {
+      warningAlert("Action validée", "Impossible de supprimer une action déjà terminée ou validée. Reouvrez la phase avant de la modifier.");
       return;
     }
     confirmDelete("Supprimer l'action ?", `L'action ${action.title || "sélectionnée"} sera supprimée. Le SOP et les dates des actions suivantes seront recalcules.`).then((result) => {
@@ -2747,8 +2774,8 @@ function App() {
         })
         .catch((error) => {
           const message = error.message?.includes("403")
-            ? "Suppression impossible: vous devez être admin ou pilote de la modification, et la phase ne doit pas être validée."
-            : "Suppression de l'action impossible. La phase est peut-être déjà validée.";
+            ? "Suppression impossible: vous devez être admin ou pilote de la modification. Les actions déjà terminées ou validées restent protégées."
+            : "Suppression de l'action impossible.";
           setError(message);
           errorAlert(message);
         })
@@ -3499,11 +3526,17 @@ function App() {
     setSaving(true);
     setError("");
     const isEdit = Boolean(editingUser);
+    const nextPassword = isEdit ? String(payload.password || "").trim() : "";
     if (isEdit) {
       delete payload.password;
     }
     const request = isEdit ? updateUser(editingUser, payload) : createUser(payload);
     request
+      .then((savedUser) => (
+        isEdit && nextPassword
+          ? changeUserPassword(savedUser.id, nextPassword).then(() => savedUser)
+          : savedUser
+      ))
       .then((savedUser) => (
         profilePhotoFile
           ? uploadUserPhoto(savedUser.id, profilePhotoFile)
@@ -5284,11 +5317,11 @@ function ModificationsPage(props) {
   const stageActionsDone = actions.length > 0 && actions.every(isActionDone);
   const isCurrentStage = selectedRequest && selectedStage === selectedRequest.currentStage;
   const requestStatusOptions = [
-    ...(canAdmin ? [["all", "Toutes"],
+    ["all", "Toutes"],
     ["active", "Actives"],
     ["closed", "Clôturées"],
     ["cancelled", "Annulées"],
-    ["archived", "Archivées"]] : [])
+    ...(canAdmin ? [["archived", "Archivées"]] : [])
   ];
 
   function selectRequest(request) {
@@ -6030,7 +6063,7 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
                     }} />
                   </label>
                   {canManageAction && (
-                    <span className="asset-link-inputs">
+                    <span className="asset-link-inputs compact-asset-link-inputs">
                       <input
                         disabled={saving}
                         placeholder="Nom du lien"
@@ -6318,20 +6351,24 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
 }
 
 function ChecklistPanel({ checklist }) {
+  const visibleChecklist = checklist.filter((item) => {
+    const topic = normalizeSearchText(item.topicRisk);
+    const evidence = normalizeSearchText(item.expectedEvidence);
+    return !(topic === "phase ecr" && evidence.startsWith("validation de la phase"));
+  });
+  if (visibleChecklist.length === 0) {
+    return null;
+  }
   return (
     <section className="checklist">
-      {checklist.length === 0 ? (
-        <EmptyState title="Aucun point de vérification" text="Les points de contrôle apparaîtront ici pour la phase sélectionnée." />
-      ) : (
-        checklist.map((item) => (
+      {visibleChecklist.map((item) => (
           <article className="check-row" key={item.id}>
             <CheckCircle2 className={item.status === "OK" ? "ok" : ""} size={20} />
             <div><h3>{item.verificationPoint}</h3><p>{item.topicRisk || "Risque non classé"} / {item.expectedEvidence || "Preuve non renseignée"}</p></div>
             <span>{item.pilot || "A définir"}</span>
             <strong className={`status ${statusClass(item.status)}`}>{readableStatus(item.status)}</strong>
           </article>
-        ))
-      )}
+        ))}
     </section>
   );
 }

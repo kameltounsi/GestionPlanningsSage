@@ -570,6 +570,7 @@ public class EcrActionController {
             storageService.deleteQuietly(action.getProofDocumentPublicId(), action.getProofDocumentResourceType());
             proofDocumentRepository.findByAction_IdOrderByUploadedAtDescIdDesc(id)
                     .forEach(proofDocument -> storageService.deleteQuietly(proofDocument.getPublicId(), proofDocument.getResourceType()));
+            clearDependenciesOnDeletedAction(id);
             assetRepository.deleteByAction_Id(id);
             proofDocumentRepository.deleteByAction_Id(id);
             deleteLocalEvidenceIfPresent(id);
@@ -580,14 +581,30 @@ public class EcrActionController {
     }
 
     private boolean canDeleteAction(AppUser user, EcrAction action) {
-        if (!canMutateAction(action)) {
+        if (!canDeleteActionState(action)) {
             return false;
         }
         if (accessControlService.isAdmin(user)) {
             return true;
         }
+        if (accessControlService.canManageAction(user, action)) {
+            return true;
+        }
         return accessControlService.isRequestPilot(user, action == null ? null : action.getRequest())
-                && canMutateAction(action);
+                && canDeleteActionState(action);
+    }
+
+    private boolean canDeleteActionState(EcrAction action) {
+        if (action == null || action.getRequest() == null || isTerminalRequest(action.getRequest())) {
+            return false;
+        }
+        if (action.getRequest().getCurrentStage() == EcrStage.CANCELLED && action.getStage() != EcrStage.CANCELLED) {
+            return false;
+        }
+        if (!isActionPhaseApproved(action)) {
+            return true;
+        }
+        return !isDone(action) && action.getValidationStatus() != ActionValidationStatus.APPROVED;
     }
 
     private boolean canMutateAction(EcrAction action) {
@@ -596,6 +613,18 @@ public class EcrActionController {
                 && !isTerminalRequest(action.getRequest())
                 && (action.getRequest().getCurrentStage() != EcrStage.CANCELLED || action.getStage() == EcrStage.CANCELLED)
                 && !isActionPhaseApproved(action);
+    }
+
+    private void clearDependenciesOnDeletedAction(Long actionId) {
+        if (actionId == null) {
+            return;
+        }
+        List<EcrAction> dependentActions = actionRepository.findByDependsOnActionId(actionId);
+        if (dependentActions.isEmpty()) {
+            return;
+        }
+        dependentActions.forEach(action -> action.setDependsOnActionId(null));
+        actionRepository.saveAll(dependentActions);
     }
 
     private boolean isTerminalRequest(com.gestionplanning.ecr.EcrRequest request) {

@@ -78,6 +78,7 @@ public class ActionPlanningService {
                 .filter(action -> !action.isRoutineAction())
                 .collect(Collectors.toList());
         updateSopDate(request, plannedActions, fallbackStart);
+        syncRoutineStagesByDate(request, actions);
         refreshActionStatuses(actions);
         actionRepository.saveAll(actions);
         requestRepository.save(request);
@@ -250,6 +251,67 @@ public class ActionPlanningService {
                 .thenComparing(EcrAction::getDeadline, Comparator.nullsLast(LocalDate::compareTo))
                 .thenComparing(action -> action.getId() == null ? Long.MAX_VALUE : action.getId());
         return comparator.compare(first, second);
+    }
+
+    private void syncRoutineStagesByDate(EcrRequest request, List<EcrAction> actions) {
+        if (request == null || actions == null || actions.isEmpty()) {
+            return;
+        }
+        List<EcrAction> baseActions = actions.stream()
+                .filter(action -> !action.isRoutineAction())
+                .filter(action -> action.getStage() != EcrStage.CANCELLED)
+                .collect(Collectors.toList());
+        List<EcrStage> allowedStages = EcrStage.allowedStages(request.isNewVersion());
+        for (EcrAction routineAction : actions) {
+            if (!routineAction.isRoutineAction() || routineAction.getStage() == EcrStage.CANCELLED) {
+                continue;
+            }
+            EcrStage stage = stageForRoutineDate(request, routineAction.getStartDate(), baseActions, allowedStages);
+            if (stage == null || routineAction.getStage() == stage) {
+                continue;
+            }
+            routineAction.setStage(stage);
+            routineAction.setValidationStatus(null);
+            routineAction.setValidationRequestedAt(null);
+            routineAction.setValidationReviewedAt(null);
+            routineAction.setValidationReviewedBy(null);
+            routineAction.setValidationRefusalReason(null);
+        }
+    }
+
+    private EcrStage stageForRoutineDate(EcrRequest request, LocalDate date, List<EcrAction> baseActions, List<EcrStage> allowedStages) {
+        if (date == null || allowedStages == null || allowedStages.isEmpty()) {
+            return null;
+        }
+        EcrStage selectedStage = allowedStages.get(0);
+        LocalDate selectedStart = phaseStartDate(request, selectedStage, baseActions);
+        for (EcrStage stage : allowedStages) {
+            if (stage == EcrStage.CANCELLED) {
+                continue;
+            }
+            LocalDate stageStart = phaseStartDate(request, stage, baseActions);
+            if (stageStart == null || stageStart.isAfter(date)) {
+                continue;
+            }
+            if (selectedStart == null || stageStart.isAfter(selectedStart)) {
+                selectedStage = stage;
+                selectedStart = stageStart;
+            }
+        }
+        return selectedStage;
+    }
+
+    private LocalDate phaseStartDate(EcrRequest request, EcrStage stage, List<EcrAction> baseActions) {
+        LocalDate phaseStart = baseActions.stream()
+                .filter(action -> action.getStage() == stage)
+                .map(EcrAction::getStartDate)
+                .filter(Objects::nonNull)
+                .min(LocalDate::compareTo)
+                .orElse(null);
+        if (phaseStart != null) {
+            return phaseStart;
+        }
+        return request.getReceptionDate() == null ? LocalDate.now() : request.getReceptionDate();
     }
 
     private String ruleKey(ActionPlanningRule rule) {

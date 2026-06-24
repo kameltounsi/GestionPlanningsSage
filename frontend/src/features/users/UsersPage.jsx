@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Camera, Pencil, Plus, Save, Trash2, UserCircle, X } from "lucide-react";
+import { Camera, ChevronLeft, ChevronRight, Pencil, Plus, Save, Search, Trash2, UserCircle, X } from "lucide-react";
 import { EmptyState } from "../../components/common/EmptyState";
 import { PageHeader } from "../../components/common/PageHeader";
 import { emptyUserForm } from "../../constants/forms";
@@ -8,8 +8,52 @@ import { userRoleLabel } from "../../utils/users";
 
 export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, saving, userForm, users, onCancelEdit, onDelete, onEdit, onSubmit, setUserForm }) {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [page, setPage] = useState(1);
   const currentRole = String(currentUser?.role || "").trim().toLowerCase().replaceAll("_", " ");
   const canAdmin = currentUser?.username === "fchelbi" || currentRole === "admin";
+  const pageSize = 10;
+  const roleFilterOptions = useMemo(() => {
+    const baseOptions = userRoleOptions.map(([value, label]) => ({ value, label }));
+    const extraRoles = [...new Set([
+      ...actionRoleOptions,
+      ...users.map((user) => user.role)
+    ].filter(Boolean))]
+      .filter((role) => !baseOptions.some((option) => option.value === role))
+      .map((role) => ({ value: role, label: userRoleLabel(role) }));
+    return [...baseOptions, ...extraRoles].sort((a, b) => a.label.localeCompare(b.label));
+  }, [actionRoleOptions, users]);
+  const filteredUsers = useMemo(() => {
+    const normalizedQuery = normalizeUserSearch(query);
+    return users.filter((user) => {
+      const matchesRole = !roleFilter || user.role === roleFilter;
+      const matchesSearch = !normalizedQuery || [
+        user.fullName,
+        user.username,
+        user.email,
+        user.jobTitle,
+        user.phone,
+        userRoleLabel(user.role)
+      ].filter(Boolean).some((value) => normalizeUserSearch(value).includes(normalizedQuery));
+      return matchesRole && matchesSearch;
+    });
+  }, [query, roleFilter, users]);
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  const pagedUsers = useMemo(() => {
+    const safePage = Math.min(page, totalPages);
+    return filteredUsers.slice((safePage - 1) * pageSize, safePage * pageSize);
+  }, [filteredUsers, page, totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, roleFilter]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   function openCreateDialog() {
     setUserForm(emptyUserForm);
@@ -40,18 +84,38 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
           <div className="section-title">
             <h2>Liste des utilisateurs</h2>
             <div className="row-actions">
-              <span>{users.length} comptes</span>
+              <span>{filteredUsers.length}/{users.length} comptes</span>
               <button className="primary-action compact-action" disabled={!canAdmin} type="button" onClick={openCreateDialog}>
                 <Plus size={16} />
                 Ajouter un utilisateur
               </button>
             </div>
           </div>
+          <div className="users-toolbar">
+            <div className="search users-search">
+              <Search size={16} />
+              <input
+                aria-label="Rechercher un utilisateur"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Rechercher nom, email, username"
+              />
+            </div>
+            <label className="project-filter users-role-filter">
+              <UserCircle size={16} />
+              <select aria-label="Filtrer par rôle" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
+                <option value="">Tous les rôles</option>
+                {roleFilterOptions.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
           <div className="user-table">
-            {users.length === 0 ? (
-              <EmptyState title="Aucun utilisateur" text="Ajoutez un premier compte pour démarrer l'administration." />
+            {filteredUsers.length === 0 ? (
+              <EmptyState title="Aucun utilisateur" text="Aucun compte ne correspond aux filtres." />
             ) : (
-              users.map((user) => (
+              pagedUsers.map((user) => (
                 <article className="user-row" key={user.id}>
                   <div className="avatar-cell">
                     {user.profilePhotoUrl ? <img alt="" src={user.profilePhotoUrl} /> : <UserCircle size={24} />}
@@ -72,6 +136,19 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
               ))
             )}
           </div>
+          {filteredUsers.length > pageSize && (
+            <nav className="pagination users-pagination" aria-label="Pagination utilisateurs">
+              <span>Page {Math.min(page, totalPages)} / {totalPages}</span>
+              <div className="pagination-actions">
+                <button className="ghost-icon" disabled={page <= 1} type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} title="Page précédente">
+                  <ChevronLeft size={16} />
+                </button>
+                <button className="ghost-icon" disabled={page >= totalPages} type="button" onClick={() => setPage((current) => Math.min(totalPages, current + 1))} title="Page suivante">
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </nav>
+          )}
         </section>
       </div>
       {dialogOpen && (
@@ -137,7 +214,7 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
         <div className="form-intro">
           <div>
             <h2 id="user-dialog-title">{editingUser ? "Modifier l'utilisateur" : "Ajouter un utilisateur"}</h2>
-            <p>Le username et l'email doivent rester uniques. Le mot de passe initial est defini seulement a la creation.</p>
+            <p>Le username et l'email doivent rester uniques. En édition, renseignez le mot de passe seulement pour le remplacer.</p>
           </div>
           <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
             <X size={18} />
@@ -174,12 +251,18 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
             Email
             <input autoComplete="email" required disabled={!canAdmin} type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
           </label>
-          {!editingUser && (
-            <label>
-              Mot de passe
-              <input required disabled={!canAdmin} type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} />
-            </label>
-          )}
+          <label>
+            Mot de passe
+            <input
+              autoComplete="new-password"
+              required={!editingUser}
+              disabled={!canAdmin}
+              type="password"
+              value={form.password}
+              onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+              placeholder={editingUser ? "Nouveau mot de passe optionnel" : ""}
+            />
+          </label>
           <label>
             Telephone
             <input autoComplete="tel" disabled={!canAdmin} inputMode="tel" pattern="\\+?[0-9\\s().-]{8,20}" value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
@@ -253,4 +336,12 @@ function userLabelForValue(users, value) {
 
 function normalizeUserKey(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function normalizeUserSearch(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
 }

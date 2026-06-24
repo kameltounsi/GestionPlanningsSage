@@ -5333,6 +5333,27 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   width: 100%;
 }
 
+.compact-asset-link-inputs {
+  gap: 3px;
+  margin-top: 4px;
+  max-width: 210px;
+  min-width: 0;
+  width: 210px;
+}
+
+.compact-asset-link-inputs input {
+  border-radius: 7px;
+  font-size: 11px;
+  min-height: 28px;
+  padding: 4px 8px;
+}
+
+.compact-asset-link-inputs .compact-action {
+  font-size: 11px;
+  min-height: 28px;
+  padding: 5px 8px;
+}
+
 .proof-document-link-inputs,
 .action-evidence-link-inputs {
   grid-column: span 2;
@@ -5745,6 +5766,29 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 .users-layout {
   display: grid;
   gap: 18px;
+}
+
+.users-toolbar {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(240px, 1fr) minmax(190px, 260px);
+  margin-bottom: 12px;
+}
+
+.users-search,
+.users-role-filter {
+  min-height: 44px;
+}
+
+.users-pagination {
+  margin-top: 12px;
+}
+
+@media (max-width: 760px) {
+  .users-toolbar {
+    grid-template-columns: 1fr;
+  }
 }
 
 .user-dialog {

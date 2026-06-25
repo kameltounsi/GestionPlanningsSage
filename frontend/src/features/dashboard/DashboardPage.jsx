@@ -1,4 +1,4 @@
-import React, {Fragment, useEffect, useMemo, useRef, useState} from "react";
+import React, {useEffect, useMemo, useRef, useState} from "react";
 import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, ClipboardList, FileText, FolderKanban, Gauge, Plus, X, XCircle } from "lucide-react";
 import { getActions } from "../../api";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -241,15 +241,6 @@ export function DashboardPage({
     const count = dashboardRequests.filter((request) => request.currentStage === stage).length;
     return { stage, label, count };
   }).filter((entry) => entry.count > 0);
-  const stageStatusMatrix = stageEntries.map((entry) => {
-    const phaseRequests = dashboardRequests.filter((request) => request.currentStage === entry.stage);
-    const phaseLate = phaseRequests.filter((request) => {
-      const sopDate = parseDateOnly(request.sopDate);
-      return sopDate && sopDate < new Date() && request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED";
-    }).length;
-    const phaseClosed = phaseRequests.filter((request) => request.currentStage === "CLOSED" || request.currentStage === "CANCELLED").length;
-    return { ...entry, active: Math.max(0, phaseRequests.length - phaseLate - phaseClosed), late: phaseLate, closed: phaseClosed };
-  });
   const maxStageCount = Math.max(1, ...stageEntries.map((entry) => entry.count));
   const projectLoad = Array.from(dashboardRequests.reduce((map, request) => {
     const projectName = request.modificationProject || "Projet non renseigne";
@@ -582,15 +573,6 @@ export function DashboardPage({
             )}
           </div>
         </article>
-      </section>
-      <section className="panel dashboard-matrix-panel">
-        <div className="section-title">
-          <div>
-            <h2>Matrice phase / statut</h2>
-            <span>Lecture croisée du portefeuille</span>
-          </div>
-        </div>
-        <DashboardStatusMatrix entries={stageStatusMatrix} />
       </section>
       <section className="dashboard-entity-grid">
         <DashboardImpactCard title="Clients impactés" subtitle={`${clients.length} client${clients.length > 1 ? "s" : ""} référencé${clients.length > 1 ? "s" : ""}`} items={clientImpact} tone="client" />
@@ -1149,28 +1131,6 @@ function DashboardRankingCard({ title, subtitle, items = [] }) {
         ))}
       </div>
     </article>
-  );
-}
-
-function DashboardStatusMatrix({ entries = [] }) {
-  const maxCount = Math.max(1, ...entries.flatMap((entry) => [entry.active, entry.late, entry.closed]));
-  return (
-    <div className="dashboard-status-matrix">
-      <span className="matrix-head">Phase</span>
-      <span className="matrix-head">Actif</span>
-      <span className="matrix-head">Retard</span>
-      <span className="matrix-head">Clos</span>
-      {entries.length === 0 ? (
-        <span className="matrix-empty">Aucune donnée de phase.</span>
-      ) : entries.map((entry) => (
-        <Fragment key={entry.stage}>
-          <strong>{entry.label}</strong>
-          <i className="matrix-cell active" style={{ opacity: 0.25 + (entry.active / maxCount) * 0.75 }}>{entry.active}</i>
-          <i className="matrix-cell late" style={{ opacity: 0.25 + (entry.late / maxCount) * 0.75 }}>{entry.late}</i>
-          <i className="matrix-cell closed" style={{ opacity: 0.25 + (entry.closed / maxCount) * 0.75 }}>{entry.closed}</i>
-        </Fragment>
-      ))}
-    </div>
   );
 }
 

@@ -417,6 +417,10 @@ function isClosedRequest(request) {
   return request?.currentStage === "CLOSED" || Boolean(request?.closureStatus);
 }
 
+function isCancelledRequest(request) {
+  return request?.currentStage === "CANCELLED" || Boolean(request?.cancelledStatus);
+}
+
 function isActiveRequest(request) {
   return Boolean(request) && !request.archived && request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED";
 }
@@ -545,6 +549,22 @@ function actionProofLabel(action) {
     action?.evidenceFileName,
     ...(action?.assets || []).map((asset) => asset?.fileName || asset?.name)
   ].filter(Boolean).join(" / ");
+}
+
+function actionProofBulletList(action) {
+  const items = [
+    action?.proofDocument,
+    action?.proofDocumentFileName,
+    ...(action?.proofDocuments || []).map((document) => document?.fileName || document?.name),
+    action?.expectedEvidence,
+    action?.evidence,
+    action?.evidenceFileName,
+    ...(action?.assets || []).map((asset) => asset?.fileName || asset?.name)
+  ]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .filter((item, index, list) => list.findIndex((candidate) => candidate.toLowerCase() === item.toLowerCase()) === index);
+  return items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : "-";
 }
 
 function findChecklistAction(actions, topic, document) {
@@ -676,6 +696,600 @@ function modificationDossierExportExcel(request, actions = []) {
     <tr class="header"><th>N°</th><th colspan="2">Action</th><th>Phase</th><th>Responsable</th><th>Validateur</th><th>Criticité</th><th>Statut</th><th>Échéance</th><th>Commentaire</th></tr>
     ${actionRows || `<tr class="info-row"><td colspan="10" class="center muted">Aucune action renseignée.</td></tr>`}
   </table></body></html>`;
+}
+
+function requestStatusLabel(request) {
+  if (isCancelledRequest(request)) return "Annulee";
+  if (isClosedRequest(request)) return "Cloturee";
+  if (request?.closureRequested) return "Cloture demandee";
+  return "Active";
+}
+
+function sageModificationDossierExportExcel(request, actions = []) {
+  const stageOrder = new Map(getStages(Boolean(request.newVersion)).map(([stage], index) => [stage, index]));
+  const sortedActions = [...actions].sort((first, second) =>
+    (stageOrder.get(first.stage) ?? 99) - (stageOrder.get(second.stage) ?? 99)
+      || (Number(first.id) || 0) - (Number(second.id) || 0)
+  );
+  const generatedAt = new Date().toLocaleString("fr-FR");
+  const statusLabel = requestStatusLabel(request);
+  const doneCount = sortedActions.filter(isActionDone).length;
+  const cancelledCount = sortedActions.filter((action) => action.status === "CANCELLED").length;
+  const lateCount = sortedActions.filter((action) => actionGanttStatusClass(action) === "late").length;
+  const proofCount = sortedActions.filter((action) => actionProofLabel(action)).length;
+  const completionRate = modificationCompletionRate(request, sortedActions);
+  const actionRows = sortedActions.map((action, index) => `<tr class="action-row">
+    <td class="center">${index + 1}</td>
+    <td>${escapeExcelHtml(stageLabel(action.stage, Boolean(request.newVersion)))}</td>
+    <td class="topic">${escapeExcelHtml(action.title || "-")}</td>
+    <td>${escapeExcelHtml(action.responsible || "-")}</td>
+    <td>${escapeExcelHtml(action.validatorDisplayName || action.validator || "-")}</td>
+    <td>${escapeExcelHtml(action.criticality || "-")}</td>
+    <td>${escapeExcelHtml(actionGanttStatusLabel(action))}</td>
+    <td class="center">${action.status === "CANCELLED" ? "X" : ""}</td>
+    <td class="center">${action.status === "CANCELLED" ? "" : "X"}</td>
+    <td class="center">${escapeHtml(dossierDate(action.startDate || action.date1))}</td>
+    <td class="center">${escapeHtml(dossierDate(action.deadline || action.endDate || action.date2))}</td>
+    <td class="center">${escapeHtml(dossierDate(action.closedDate || action.finalizationDate))}</td>
+    <td>${escapeExcelHtml(actionProofLabel(action) || "-")}</td>
+    <td>${escapeExcelHtml(action.comment || action.dossierReview || "")}</td>
+  </tr>`).join("");
+  const stageSummaryRows = getStages(Boolean(request.newVersion))
+    .filter(([stage]) => sortedActions.some((action) => action.stage === stage))
+    .map(([stage, label]) => {
+      const stageActions = sortedActions.filter((action) => action.stage === stage);
+      const stageDone = stageActions.filter(isActionDone).length;
+      const stageLate = stageActions.filter((action) => actionGanttStatusClass(action) === "late").length;
+      return `<tr class="info-row">
+        <td colspan="3">${escapeExcelHtml(label)}</td>
+        <td class="center">${stageActions.length}</td>
+        <td class="center">${stageDone}</td>
+        <td class="center">${stageLate}</td>
+        <td colspan="8">${escapeExcelHtml(stageActions.map((action) => action.title).filter(Boolean).join(" | ") || "-")}</td>
+      </tr>`;
+    }).join("");
+  const infoRows = [
+    ["Numero interne Access", request.accessInternalNumber],
+    ["Numero modification", request.modificationNumber],
+    ["Client", request.client],
+    ["Projet", request.modificationProject],
+    ["Produit", request.product],
+    ["Produits finis", request.finishedProducts],
+    ["Pilote", request.pilot],
+    ["Phase courante", stageLabel(request.currentStage, Boolean(request.newVersion))],
+    ["Statut", statusLabel],
+    ["Type de modification", modificationTypesLabel(request)],
+    ["Nouvelle version", dossierBoolean(request.newVersion)],
+    ["Changement digit", dossierBoolean(request.digitChange)],
+    ["Changement composant", dossierBoolean(request.componentChange)],
+    ["Changement process", dossierBoolean(request.processChange)],
+    ["Changement fournisseur", dossierBoolean(request.supplierChange)],
+    ["Mixabilite", mixabilityLabel(request.mixability)],
+    ["Raison de modification", request.modificationReason],
+    ["Detail de modification", request.modificationDetail],
+    ["Revue dossier", request.dossierReview],
+    ["Photo etat actuel", request.beforePhotoUrl || request.beforePhoto],
+    ["Photo devient", request.afterPhotoUrl || request.afterPhoto],
+    ["Dossier technique", request.technicalFile],
+    ["Planning client", request.clientPlanning],
+    ["Planning interne", request.internalPlanning],
+    ["OIL list", request.oilList],
+    ["Rapport", request.report],
+    ["Extraction generee le", generatedAt]
+  ].map(([label, value]) => `<tr class="info-row"><td colspan="3">${escapeExcelHtml(label)}</td><td colspan="11">${escapeExcelHtml(value || "-")}</td></tr>`).join("");
+
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Dossier SAGE - ${escapeHtml(requestDisplayName(request))}</title><style>
+    body{font-family:Calibri,Arial,sans-serif;color:#172008;margin:0;background:#fff}
+    table{border-collapse:collapse;table-layout:fixed;width:1900px}
+    col.c1{width:48px} col.c2{width:190px} col.c3{width:360px} col.c4{width:180px} col.c5{width:180px}
+    col.c6{width:120px} col.c7{width:140px} col.c8{width:70px} col.c9{width:95px} col.c10{width:120px}
+    col.c11{width:120px} col.c12{width:120px} col.c13{width:350px} col.c14{width:320px}
+    td,th{border:1px solid #26340f;padding:6px 8px;vertical-align:top;font-size:11px;white-space:normal;line-height:1.25;mso-number-format:"\\@";}
+    .brand{background:#172008;color:#fff;font-size:18px;font-weight:700;text-align:center}
+    .brand-sub{background:#5f7f13;color:#fff;font-size:13px;font-weight:700;text-align:center}
+    .title{font-size:22px;font-weight:700;text-align:center;background:#e7f0dc;color:#172008;height:46px}
+    .doc{font-weight:700;text-align:center;background:#dce8ce;color:#172008}
+    .field{font-size:14px;font-weight:700;height:30px;background:#fff}
+    .section{font-weight:700;text-align:center;background:#dce8ce;color:#172008}
+    .header th{background:#5f7f13;color:#fff;font-weight:700;text-align:center;height:32px}
+    .action-row td{height:34px}
+    .topic{font-weight:600}
+    .center{text-align:center}
+    .metric{background:#f7f9f1;text-align:center}
+    .metric strong{display:block;font-size:20px;color:#172008}
+    .metric span{display:block;color:#5f7f13;font-size:10px;font-weight:700;text-transform:uppercase}
+    .sign{height:34px}
+    .info-title td{background:#dce8ce;color:#172008;font-weight:700;text-align:center;font-size:14px}
+    .info-row td{height:28px}
+    .muted{color:#404040}
+  </style></head><body><table>
+    <colgroup><col class="c1"><col class="c2"><col class="c3"><col class="c4"><col class="c5"><col class="c6"><col class="c7"><col class="c8"><col class="c9"><col class="c10"><col class="c11"><col class="c12"><col class="c13"><col class="c14"></colgroup>
+    <tr><td class="brand" colspan="14">SAGE Automotive Interiors</td></tr>
+    <tr><td class="brand-sub" colspan="14">Dossier ECR personnalise SAGE - extraction conforme aux actions de la modification</td></tr>
+    <tr><td class="title" colspan="10" rowspan="3">Dossier de Modification / Nouveau Produit / Process</td><td class="doc" colspan="4">SAGE-INS-ENG-32</td></tr>
+    <tr><td class="doc" colspan="4">Revision : 05</td></tr>
+    <tr><td class="doc" colspan="4">Date : 13/05/2026</td></tr>
+    <tr><td class="field" colspan="14">Client / Projet : ${escapeHtml([request.client, request.modificationProject].filter(Boolean).join(" / ") || "-")}</td></tr>
+    <tr><td class="field" colspan="14">Produit / Produits finis : ${escapeHtml([request.product, request.finishedProducts].filter(Boolean).join(" / ") || "-")}</td></tr>
+    <tr><td class="field" colspan="14">Modification : ${escapeHtml([request.modificationReason, request.modificationDetail].filter(Boolean).join(" - ") || "-")}</td></tr>
+    <tr><td class="field" colspan="14">Numero modification : ${escapeHtml(request.modificationNumber || "-")} &nbsp;&nbsp; Date de reception : ${escapeHtml(dossierDate(request.receptionDate) || "-")} &nbsp;&nbsp; SOP : ${escapeHtml(dossierDate(request.sopDate) || "-")}</td></tr>
+    <tr>
+      <td class="metric" colspan="3"><span>Statut</span><strong>${escapeHtml(statusLabel)}</strong></td>
+      <td class="metric" colspan="3"><span>Avancement</span><strong>${completionRate}%</strong></td>
+      <td class="metric" colspan="2"><span>Actions</span><strong>${sortedActions.length}</strong></td>
+      <td class="metric" colspan="2"><span>Done</span><strong>${doneCount}</strong></td>
+      <td class="metric" colspan="2"><span>Retard</span><strong>${lateCount}</strong></td>
+      <td class="metric" colspan="2"><span>Preuves</span><strong>${proofCount}</strong></td>
+    </tr>
+    <tr><td class="section" colspan="4">Phase courante</td><td class="section" colspan="3">Cloture le</td><td class="section" colspan="3">Annule le</td><td class="section" colspan="4">Actions annulees</td></tr>
+    <tr><td class="center" colspan="4">${escapeHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</td><td class="center" colspan="3">${escapeHtml(dossierDate(request.closureDate) || (request.closureStatus ? "Oui" : "-"))}</td><td class="center" colspan="3">${escapeHtml(dossierDate(request.cancelledDate) || (request.cancelledStatus ? "Oui" : "-"))}</td><td class="center" colspan="4">${cancelledCount}</td></tr>
+    <tr class="info-title"><td colspan="14">Informations modification SAGE</td></tr>
+    ${infoRows}
+    <tr class="info-title"><td colspan="14">Synthese par phase</td></tr>
+    <tr class="header"><th colspan="3">Phase</th><th>Total</th><th>Done</th><th>Retard</th><th colspan="8">Actions de la phase</th></tr>
+    ${stageSummaryRows || `<tr class="info-row"><td colspan="14" class="center muted">Aucune action rattachee aux phases.</td></tr>`}
+    <tr class="info-title"><td colspan="14">Plan d'actions ECR - memes actions que la modification selectionnee</td></tr>
+    <tr class="header"><th>N</th><th>Phase</th><th>Action</th><th>Responsable</th><th>Validateur</th><th>Criticite</th><th>Statut</th><th>NA</th><th>Applicable</th><th>Debut</th><th>Echeance</th><th>Cloture</th><th>Preuves / documents</th><th>Commentaire</th></tr>
+    ${actionRows || `<tr class="info-row"><td colspan="14" class="center muted">Aucune action renseignee pour cette modification.</td></tr>`}
+    <tr><td colspan="14"></td></tr>
+    <tr><td></td><td class="section" colspan="3">Validation Pilote Processus</td><td class="section" colspan="2">Engineering</td><td class="section" colspan="2">Quality</td><td class="section" colspan="2">Logistique</td><td class="section" colspan="2">Finance</td><td class="section" colspan="2">Production</td></tr>
+    <tr class="sign"><td></td><td colspan="3">Date</td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td></tr>
+    <tr class="sign"><td></td><td colspan="3">Nom</td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td></tr>
+    <tr class="sign"><td></td><td colspan="3">Signature</td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td></tr>
+  </table></body></html>`;
+}
+
+function projectPlanStyleDossierExportExcel(request, actions = []) {
+  const stages = getStages(Boolean(request.newVersion));
+  const stageOrder = new Map(stages.map(([stage], index) => [stage, index]));
+  const generatedAt = new Date().toLocaleString("fr-FR");
+  const sortedActions = [...actions].sort((first, second) =>
+    (stageOrder.get(first.stage) ?? 99) - (stageOrder.get(second.stage) ?? 99)
+      || (Number(first.id) || 0) - (Number(second.id) || 0)
+  );
+  const clientParts = String(request.client || "")
+    .split(/&|\/|;|,/)
+    .map((client) => client.trim())
+    .filter(Boolean);
+  const firstClient = clientParts[0] || request.client || "Client 1";
+  const secondClient = clientParts[1] || "Client 2";
+  const statusLegend = [
+    ["all item", sortedActions.length],
+    ["open item", Math.max(0, sortedActions.length - sortedActions.filter(isActionDone).length)],
+    ["plan", "0.25"],
+    ["do", "0.5"],
+    ["check", "0.75"],
+    ["closed item", "1"],
+    ["overdue Item", "0"]
+  ];
+  const phasePalette = ["phase-yellow", "phase-orange", "phase-green", "phase-blue", "phase-red"];
+  const actionRows = sortedActions.map((action, index) => {
+    const stageIndex = stageOrder.get(action.stage) ?? 0;
+    const isFirstInStage = index === 0 || sortedActions[index - 1]?.stage !== action.stage;
+    const startDate = dossierDate(action.startDate || action.date1 || action.createdAt);
+    const endDate = dossierDate(action.deadline || action.endDate || action.date2);
+    const completionDate = dossierDate(action.closedDate || action.finalizationDate);
+    const clientValue = action.status === "CANCELLED" ? 0 : isActionDone(action) ? 1 : actionGanttStatusClass(action) === "late" ? 0 : 0.5;
+    const priority = criticalityClass(action.criticality) === "critical" ? "Elevee" : criticalityClass(action.criticality) === "medium" ? "Moyenne" : "Faible";
+    return `<tr class="plan-row">
+      <td class="phase ${phasePalette[stageIndex % phasePalette.length]}">${isFirstInStage ? escapeExcelHtml(stageLabel(action.stage, Boolean(request.newVersion))) : ""}</td>
+      <td class="action">${escapeExcelHtml(action.title || "-")}</td>
+      <td>${escapeExcelHtml(action.responsible || "-")}</td>
+      <td class="center date-cell">${escapeHtml(startDate)}</td>
+      <td class="center date-cell">${escapeHtml(endDate)}</td>
+      <td class="center">${startDate && endDate ? `=E${index + 11}-D${index + 11}` : ""}</td>
+      <td class="center date-cell">${escapeHtml(completionDate)}</td>
+      <td class="center progress">${clientValue}</td>
+      <td class="center progress">${clientValue}</td>
+      <td class="center progress">=AVERAGE(H${index + 11}:I${index + 11})</td>
+      <td>${escapeExcelHtml(priority)}</td>
+      <td>${escapeExcelHtml([action.comment, action.dossierReview, actionProofLabel(action)].filter(Boolean).join(" | "))}</td>
+    </tr>`;
+  }).join("");
+  const phaseRows = stages
+    .filter(([stage]) => sortedActions.some((action) => action.stage === stage))
+    .map(([stage, label], index) => {
+      const stageActions = sortedActions.filter((action) => action.stage === stage);
+      const firstRowIndex = sortedActions.findIndex((action) => action.stage === stage) + 11;
+      const lastRowIndex = firstRowIndex + stageActions.length - 1;
+      return `<tr class="phase-summary">
+        <td class="${phasePalette[index % phasePalette.length]}">${escapeExcelHtml(label)}</td>
+        <td colspan="8">${escapeExcelHtml(stageActions.map((action) => action.title).filter(Boolean).join(" | "))}</td>
+        <td class="center">=AVERAGE(J${firstRowIndex}:J${lastRowIndex})</td>
+        <td colspan="2">${stageActions.length} action${stageActions.length > 1 ? "s" : ""}</td>
+      </tr>`;
+    }).join("");
+  const legendRows = statusLegend.map(([label, value], index) => `<tr>
+    <td colspan="10"></td>
+    <td class="legend-label">${escapeExcelHtml(label)}</td>
+    <td class="legend-value">${escapeExcelHtml(value)}</td>
+  </tr>`).join("");
+
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Project plan - ${escapeHtml(requestDisplayName(request))}</title><style>
+    body{font-family:"Century Gothic",Calibri,Arial,sans-serif;color:#000;margin:0;background:#fff}
+    table{border-collapse:collapse;table-layout:fixed;width:1450px}
+    col.c1{width:92px} col.c2{width:520px} col.c3{width:230px} col.c4{width:95px} col.c5{width:95px} col.c6{width:85px}
+    col.c7{width:105px} col.c8{width:70px} col.c9{width:70px} col.c10{width:80px} col.c11{width:105px} col.c12{width:380px}
+    td,th{border:1px solid #000;padding:5px 7px;vertical-align:middle;font-size:10pt;line-height:1.2;white-space:normal;mso-number-format:"\\@";}
+    .title-row td{border:none;height:63px}
+    .project-title{font-size:22pt;font-weight:700;text-align:right;vertical-align:middle}
+    .meta-label{font-size:12pt;font-weight:700;text-align:right;background:#f2f2f2}
+    .meta-value{font-size:12pt;text-align:left}
+    .legend-label,.legend-value{font-size:10pt}
+    .header th{background:#c00000;color:#fff;font-weight:700;text-align:center;height:25px}
+    .header th.action-head,.header th.resp-head,.header th.comment-head{text-align:left}
+    .plan-row td{height:20px}
+    .phase{font-weight:700;text-align:center}
+    .phase-yellow{background:#ffff00}
+    .phase-orange{background:#ffc000}
+    .phase-green{background:#92d050}
+    .phase-blue{background:#94effb}
+    .phase-red{background:#ff0000;color:#fff}
+    .action{text-align:left}
+    .center{text-align:center}
+    .date-cell{mso-number-format:"dd/mm/yyyy"}
+    .progress{background:#ff0000;mso-number-format:"0%"}
+    .phase-summary td{height:24px;font-weight:700}
+    .footer-title{background:#f2f2f2;font-weight:700;text-align:center}
+    .signature{height:34px}
+  </style></head><body><table>
+    <colgroup><col class="c1"><col class="c2"><col class="c3"><col class="c4"><col class="c5"><col class="c6"><col class="c7"><col class="c8"><col class="c9"><col class="c10"><col class="c11"><col class="c12"></colgroup>
+    <tr class="title-row"><td colspan="2"></td><td class="project-title" colspan="4">PLANNING DE PROJET</td><td colspan="6"></td></tr>
+    <tr><td></td><td class="meta-label">NOM DU PROJET</td><td class="meta-value">${escapeExcelHtml(request.modificationProject || "-")}</td><td colspan="7"></td><td class="legend-label">all item</td><td class="legend-value">${sortedActions.length}</td></tr>
+    <tr><td></td><td class="meta-label">CLIENT</td><td class="meta-value">${escapeExcelHtml(request.client || "-")}</td><td colspan="7"></td><td class="legend-label">open item</td><td class="legend-value">${Math.max(0, sortedActions.length - sortedActions.filter(isActionDone).length)}</td></tr>
+    <tr><td></td><td class="meta-label">SOP DATE</td><td class="meta-value">${escapeExcelHtml(dossierDate(request.sopDate) || "-")}</td><td colspan="7"></td><td class="legend-label">plan</td><td class="legend-value">0.25</td></tr>
+    <tr><td></td><td class="meta-label">TYPE</td><td class="meta-value">${escapeExcelHtml(modificationTypesLabel(request))}</td><td colspan="7"></td><td class="legend-label">do</td><td class="legend-value">0.5</td></tr>
+    <tr><td></td><td class="meta-label">CHEF DE PROJETS</td><td class="meta-value">${escapeExcelHtml(request.pilot || "-")}</td><td colspan="7"></td><td class="legend-label">check</td><td class="legend-value">0.75</td></tr>
+    <tr><td></td><td class="meta-label">DATE DE CREATION</td><td class="meta-value">${escapeExcelHtml(dossierDate(request.receptionDate) || "-")}</td><td colspan="7"></td><td class="legend-label">closed item</td><td class="legend-value">1</td></tr>
+    <tr><td></td><td class="meta-label">DATE DE MISE A JOUR</td><td class="meta-value">${escapeExcelHtml(generatedAt)}</td><td colspan="7"></td><td class="legend-label">overdue Item</td><td class="legend-value">0</td></tr>
+    <tr><td colspan="12"></td></tr>
+    <tr class="header"><th>Phase</th><th class="action-head">Action</th><th class="resp-head">Responsable</th><th>Début</th><th>Fin</th><th># Jours</th><th>Date de comp</th><th>${escapeExcelHtml(firstClient)}</th><th>${escapeExcelHtml(secondClient)}</th><th>% Comp</th><th>PRIORITÉ</th><th class="comment-head">COMMENTAIRES</th></tr>
+    ${actionRows || `<tr class="plan-row"><td colspan="12" class="center">Aucune action renseignee pour cette modification.</td></tr>`}
+    <tr><td colspan="12"></td></tr>
+    ${phaseRows}
+    <tr><td colspan="12"></td></tr>
+    <tr><td class="footer-title" colspan="12">Synthese SAGE ECR - ${escapeExcelHtml(requestDisplayName(request))}</td></tr>
+    <tr><td colspan="2">Statut</td><td colspan="2">${escapeExcelHtml(requestStatusLabel(request))}</td><td colspan="2">Avancement</td><td colspan="2">${modificationCompletionRate(request, sortedActions)}%</td><td colspan="2">Preuves</td><td colspan="2">${sortedActions.filter((action) => actionProofLabel(action)).length}</td></tr>
+    <tr><td colspan="2">Raison</td><td colspan="10">${escapeExcelHtml(request.modificationReason || "-")}</td></tr>
+    <tr><td colspan="2">Detail</td><td colspan="10">${escapeExcelHtml(request.modificationDetail || "-")}</td></tr>
+    <tr><td colspan="2">Revue dossier</td><td colspan="10">${escapeExcelHtml(request.dossierReview || "-")}</td></tr>
+    <tr><td colspan="12"></td></tr>
+    <tr><td class="footer-title" colspan="2">Validation</td><td class="footer-title" colspan="2">Program</td><td class="footer-title" colspan="2">Quality</td><td class="footer-title" colspan="2">Operation</td><td class="footer-title" colspan="2">Logistic</td><td class="footer-title" colspan="2">Customer Unit</td></tr>
+    <tr class="signature"><td colspan="2">Date</td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td></tr>
+    <tr class="signature"><td colspan="2">Nom</td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td></tr>
+    <tr class="signature"><td colspan="2">Signature</td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td><td colspan="2"></td></tr>
+  </table></body></html>`;
+}
+
+function completePhaseDossierExportExcel(request, actions = []) {
+  const stages = getStages(Boolean(request.newVersion));
+  const stageOrder = new Map(stages.map(([stage], index) => [stage, index]));
+  const sortedActions = [...actions].sort((first, second) =>
+    (stageOrder.get(first.stage || request.currentStage) ?? 99) - (stageOrder.get(second.stage || request.currentStage) ?? 99)
+      || (Number(first.id) || 0) - (Number(second.id) || 0)
+  );
+  const generatedAt = new Date().toLocaleString("fr-FR");
+  const doneCount = sortedActions.filter(isActionDone).length;
+  const lateCount = sortedActions.filter((action) => actionGanttStatusClass(action) === "late").length;
+  const proofCount = sortedActions.filter((action) => actionProofLabel(action)).length;
+  const completionRate = modificationCompletionRate(request, sortedActions);
+  const phaseClasses = ["phase-sage"];
+  let excelRow = 13;
+  const phaseSections = stages
+    .filter(([stage]) => sortedActions.some((action) => (action.stage || request.currentStage) === stage))
+    .map(([stage, label], phaseIndex) => {
+      const phaseActions = sortedActions.filter((action) => (action.stage || request.currentStage) === stage);
+      const phaseDone = phaseActions.filter(isActionDone).length;
+      const phaseLate = phaseActions.filter((action) => actionGanttStatusClass(action) === "late").length;
+      const phaseClass = phaseClasses[phaseIndex % phaseClasses.length];
+      const rows = phaseActions.map((action, index) => {
+        excelRow += 1;
+        const startDate = dossierDate(action.startDate || action.date1 || action.createdAt);
+        const endDate = dossierDate(action.deadline || action.endDate || action.date2);
+        const completionDate = dossierDate(action.closedDate || action.finalizationDate);
+        const plannedDays = Number(action.workDurationDays) || (startDate && endDate ? `=F${excelRow}-E${excelRow}` : "");
+        const statusClassName = action.status === "CANCELLED"
+          ? "status-cancelled"
+          : isActionDone(action) ? "status-done" : actionGanttStatusClass(action) === "late" ? "status-late" : "status-open";
+        const priority = criticalityClass(action.criticality) === "critical"
+          ? "Elevee"
+          : criticalityClass(action.criticality) === "medium" ? "Moyenne" : "Faible";
+        return `<tr class="action-row">
+          <td class="center">${index + 1}</td>
+          <td class="action">${escapeExcelHtml(action.title || "-")}</td>
+          <td>${escapeExcelHtml(action.responsible || "-")}</td>
+          <td>${escapeExcelHtml(action.validatorDisplayName || action.validator || "-")}</td>
+          <td class="center date-cell">${escapeHtml(startDate)}</td>
+          <td class="center date-cell">${escapeHtml(endDate)}</td>
+          <td class="center">${escapeHtml(plannedDays)}</td>
+          <td class="center date-cell">${escapeHtml(completionDate)}</td>
+          <td class="${statusClassName}">${escapeExcelHtml(actionGanttStatusLabel(action))}</td>
+          <td>${escapeExcelHtml(priority)}</td>
+          <td class="proof-list">${escapeExcelHtml(actionProofBulletList(action))}</td>
+          <td>${escapeExcelHtml(action.comment || action.dossierReview || "")}</td>
+        </tr>`;
+      }).join("");
+      excelRow += 2;
+      return `<tr class="phase-title">
+        <td class="${phaseClass}" colspan="12">${escapeExcelHtml(label)} | Actions: ${phaseActions.length} | Done: ${phaseDone} | Retard: ${phaseLate}</td>
+      </tr>
+      <tr class="header">
+        <th>N</th><th>Action</th><th>Pilote / Responsable</th><th>Validateur</th><th>Date debut</th><th>Date fin</th><th># Jours</th><th>Date cloture</th><th>Statut</th><th>Priorite</th><th>Preuves / documents</th><th>Commentaires</th>
+      </tr>
+      ${rows}`;
+    }).join("");
+
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Dossier Excel - ${escapeHtml(requestDisplayName(request))}</title><style>
+    body{font-family:Calibri,Arial,sans-serif;color:#172008;margin:0;background:#fff}
+    table{border-collapse:collapse;table-layout:fixed;width:1780px}
+    col.c1{width:54px} col.c2{width:430px} col.c3{width:190px} col.c4{width:190px} col.c5{width:120px} col.c6{width:120px}
+    col.c7{width:80px} col.c8{width:120px} col.c9{width:135px} col.c10{width:105px} col.c11{width:300px} col.c12{width:340px}
+    td,th{border:1px solid #172008;padding:6px 8px;vertical-align:middle;font-size:10pt;line-height:1.25;white-space:normal;mso-number-format:"\\@";}
+    .title{background:#172008;color:#fff;font-size:20pt;font-weight:700;text-align:center;height:42px}
+    .subtitle{background:#5f7f13;color:#fff;font-size:12pt;font-weight:700;text-align:center}
+    .meta-label{background:#e7f0dc;font-weight:700}
+    .meta-value{background:#fbfcf8}
+    .metric{background:#f7f9f1;text-align:center}
+    .metric strong{display:block;font-size:18pt;color:#172008}
+    .metric span{display:block;color:#5f7f13;font-size:9pt;font-weight:700;text-transform:uppercase}
+    .phase-title td,.phase-title{color:#000;font-size:13pt;font-weight:700;height:28px;text-align:left}
+    .phase-sage{background:#5f7f13;color:#fff}
+    .header th{background:#c0b600;color:#fff;font-weight:700;text-align:center;height:28px}
+    .action{text-align:left}.center{text-align:center}.date-cell{mso-number-format:"dd/mm/yyyy"}
+    .action-row td{height:30px}
+    .status-done{background:#5f7f13;color:#fff;text-align:center;font-weight:700}
+    .status-late{background:#ff0202;color:#fff;text-align:center;font-weight:700}
+    .status-open{background:#676267;color:#fff;text-align:center;font-weight:700}
+    .status-cancelled{background:#ff0202;color:#fff;text-align:center;font-weight:700}
+    .footer-title{background:#dce8ce;font-weight:700;text-align:center}
+    .signature{height:34px}
+  </style></head><body><table>
+    <colgroup><col class="c1"><col class="c2"><col class="c3"><col class="c4"><col class="c5"><col class="c6"><col class="c7"><col class="c8"><col class="c9"><col class="c10"><col class="c11"><col class="c12"></colgroup>
+    <tr><td class="title" colspan="12">DOSSIER EXCEL COMPLET - SAGE Automotive Interiors</td></tr>
+    <tr><td class="subtitle" colspan="12">Tableau phase par phase des actions de la modification</td></tr>
+    <tr><td class="meta-label" colspan="2">Modification</td><td class="meta-value" colspan="4">${escapeExcelHtml(requestDisplayName(request))}</td><td class="meta-label" colspan="2">Statut</td><td class="meta-value" colspan="4">${escapeExcelHtml(requestStatusLabel(request))}</td></tr>
+    <tr><td class="meta-label" colspan="2">Client</td><td class="meta-value" colspan="4">${escapeExcelHtml(request.client || "-")}</td><td class="meta-label" colspan="2">Projet</td><td class="meta-value" colspan="4">${escapeExcelHtml(request.modificationProject || "-")}</td></tr>
+    <tr><td class="meta-label" colspan="2">Produit</td><td class="meta-value" colspan="4">${escapeExcelHtml(request.product || "-")}</td><td class="meta-label" colspan="2">Produits finis</td><td class="meta-value" colspan="4">${escapeExcelHtml(request.finishedProducts || "-")}</td></tr>
+    <tr><td class="meta-label" colspan="2">Pilote modification</td><td class="meta-value" colspan="4">${escapeExcelHtml(request.pilot || "-")}</td><td class="meta-label" colspan="2">SOP</td><td class="meta-value" colspan="4">${escapeExcelHtml(dossierDate(request.sopDate) || "-")}</td></tr>
+    <tr><td class="meta-label" colspan="2">Date reception</td><td class="meta-value" colspan="4">${escapeExcelHtml(dossierDate(request.receptionDate) || "-")}</td><td class="meta-label" colspan="2">Extraction</td><td class="meta-value" colspan="4">${escapeExcelHtml(generatedAt)}</td></tr>
+    <tr>
+      <td class="metric" colspan="3"><span>Actions</span><strong>${sortedActions.length}</strong></td>
+      <td class="metric" colspan="3"><span>Done</span><strong>${doneCount}</strong></td>
+      <td class="metric" colspan="2"><span>Retard</span><strong>${lateCount}</strong></td>
+      <td class="metric" colspan="2"><span>Preuves</span><strong>${proofCount}</strong></td>
+      <td class="metric" colspan="2"><span>Avancement</span><strong>${completionRate}%</strong></td>
+    </tr>
+    <tr><td class="meta-label" colspan="2">Raison</td><td class="meta-value" colspan="10">${escapeExcelHtml(request.modificationReason || "-")}</td></tr>
+    <tr><td class="meta-label" colspan="2">Detail</td><td class="meta-value" colspan="10">${escapeExcelHtml(request.modificationDetail || "-")}</td></tr>
+    <tr><td colspan="12"></td></tr>
+    ${phaseSections || `<tr><td colspan="12" class="center">Aucune action renseignee pour cette modification.</td></tr>`}
+    <tr><td colspan="12"></td></tr>
+    <tr><td class="footer-title" colspan="12">Synthese SAGE ECR - ${escapeExcelHtml(requestDisplayName(request))}</td></tr>
+    <tr><td colspan="2">Revue dossier</td><td colspan="10">${escapeExcelHtml(request.dossierReview || "-")}</td></tr>
+    <tr><td colspan="12"></td></tr>
+  </table></body></html>`;
+}
+
+function auditLogBelongsToRequest(log, request) {
+  if (!log || !request) return false;
+  const candidates = [
+    requestDisplayName(request),
+    request.modificationNumber,
+    request.accessInternalNumber,
+    request.client,
+    request.modificationProject
+  ].filter(Boolean).map((value) => String(value).toLowerCase());
+  const haystack = [
+    log.targetType,
+    log.targetId,
+    log.details,
+    log.path,
+    auditTargetSummary(log)
+  ].filter(Boolean).join(" ").toLowerCase();
+  return candidates.some((value) => value && haystack.includes(value));
+}
+
+function timelineAuditDetail(detail) {
+  const value = String(detail || "").trim();
+  if (!value || value.includes("/api/") || value.includes("HTTP ")) return "";
+  const allowedFragments = [
+    "modification",
+    "phase",
+    "action",
+    "cloture",
+    "annul",
+    "archive"
+  ];
+  const normalized = normalizeSearchText(value);
+  return allowedFragments.some((fragment) => normalized.includes(fragment)) ? value : "";
+}
+
+function requestHistoryTimeline(request, auditLogs = []) {
+  const items = [];
+  const addItem = (date, title, text, tone = "neutral") => {
+    if (!date && !title) return;
+    items.push({
+      date: date || "",
+      title,
+      text: text || "",
+      tone
+    });
+  };
+
+  addItem(request?.receptionDate, "Creation / reception", `Dossier ${requestDisplayName(request)} recu.`, "created");
+  if (request?.currentStage) {
+    addItem(null, "Phase actuelle", stageLabel(request.currentStage, Boolean(request.newVersion)), "phase");
+  }
+  if (request?.closureRequestedDate) {
+    addItem(request.closureRequestedDate, "Demande de cloture", request.closureRequestedBy ? `Demandee par ${request.closureRequestedBy}.` : "Cloture demandee.", "warning");
+  }
+  if (request?.closureDate || isClosedRequest(request)) {
+    addItem(request.closureDate, "Modification cloturee", "Consultation uniquement.", "closed");
+  }
+  if (request?.cancelledDate || isCancelledRequest(request)) {
+    addItem(request.cancelledDate, "Modification annulee", request.cancelledFromStage ? `Annulee depuis ${stageLabel(request.cancelledFromStage, Boolean(request.newVersion))}.` : "Modification annulee.", "cancelled");
+  }
+  if (request?.archived) {
+    addItem(null, "Modification archivee", "Le dossier est classe dans les archives.", "archived");
+  }
+
+  auditLogs
+    .map(normalizeAuditLog)
+    .filter(Boolean)
+    .filter((log) => auditLogBelongsToRequest(log, request))
+    .slice(0, 12)
+    .forEach((log) => {
+      addItem(log.occurredAt, auditActionSentence(log), timelineAuditDetail(log.details) || auditTargetSummary(log), auditSucceeded(log) ? "audit" : "warning");
+    });
+
+  return items
+    .filter((item, index, allItems) => allItems.findIndex((candidate) =>
+      candidate.title === item.title && candidate.text === item.text && candidate.date === item.date
+    ) === index)
+    .sort((first, second) => {
+      const firstTime = first.date ? new Date(first.date).getTime() : Number.MAX_SAFE_INTEGER;
+      const secondTime = second.date ? new Date(second.date).getTime() : Number.MAX_SAFE_INTEGER;
+      return firstTime - secondTime;
+    });
+}
+
+function professionalDossierPdfHtml(request, actions = [], timeline = [], phaseValidations = []) {
+  const sortedActions = [...actions].sort((first, second) =>
+    (String(first.stage || "").localeCompare(String(second.stage || ""), "fr", { sensitivity: "base" }))
+      || (Number(first.id) || 0) - (Number(second.id) || 0)
+  );
+  const doneActions = sortedActions.filter(isActionDone).length;
+  const lateActionsCount = sortedActions.filter((action) => actionGanttStatusClass(action) === "late").length;
+  const proofCount = sortedActions.filter((action) => actionProofLabel(action)).length;
+  const completionRate = modificationCompletionRate(request, sortedActions);
+  const generatedAt = new Date().toLocaleString("fr-FR");
+  const infoRows = [
+    ["Numero modification", request.modificationNumber || requestDisplayName(request)],
+    ["Client", request.client],
+    ["Projet", request.modificationProject],
+    ["Produit", request.product],
+    ["Produits finis", request.finishedProducts],
+    ["Pilote", request.pilot],
+    ["Statut", requestStatusLabel(request)],
+    ["Phase actuelle", stageLabel(request.currentStage, Boolean(request.newVersion))],
+    ["Reception", formatDateOnly(request.receptionDate)],
+    ["SOP", formatDateOnly(request.sopDate)],
+    ["Cloture", formatDateOnly(request.closureDate)],
+    ["Annulation", formatDateOnly(request.cancelledDate)],
+    ["Type", modificationTypesLabel(request)],
+    ["Mixabilite", mixabilityLabel(request.mixability)]
+  ];
+  const actionRows = sortedActions.map((action, index) => `<tr>
+    <td>${index + 1}</td>
+    <td><strong>${escapeHtml(action.title || "-")}</strong><span>${escapeHtml(action.comment || action.dossierReview || "")}</span></td>
+    <td>${escapeHtml(stageLabel(action.stage, Boolean(request.newVersion)))}</td>
+    <td>${escapeHtml(action.responsible || "-")}</td>
+    <td>${escapeHtml(action.validatorDisplayName || action.validator || "-")}</td>
+    <td>${escapeHtml(actionGanttStatusLabel(action))}</td>
+    <td>${escapeHtml(formatDateOnly(action.deadline || action.endDate))}</td>
+    <td>${escapeHtml(actionProofLabel(action) || "-")}</td>
+  </tr>`).join("");
+  const validationRows = phaseValidations.map((validation) => `<tr>
+    <td>${escapeHtml(stageLabel(validation.stage, Boolean(request.newVersion)))}</td>
+    <td>${escapeHtml(validation.status || "-")}</td>
+    <td>${escapeHtml(validation.requestedBy || validation.validatorName || "-")}</td>
+    <td>${escapeHtml(formatDateOnly(validation.requestedAt || validation.updatedAt || validation.createdAt))}</td>
+    <td>${escapeHtml(validation.rejectionReason || validation.comment || "-")}</td>
+  </tr>`).join("");
+  const timelineHtml = timeline.map((item) => `<div class="timeline-item ${escapeHtml(item.tone || "neutral")}">
+    <span>${escapeHtml(item.date ? formatDateOnly(item.date) : "-")}</span>
+    <strong>${escapeHtml(item.title)}</strong>
+    <p>${escapeHtml(item.text)}</p>
+  </div>`).join("");
+  const infoHtml = infoRows.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "-")}</strong></div>`).join("");
+  const signatureDepartments = ["Pilote", "Engineering", "Qualite", "Logistique", "Finance", "Production"];
+  const signatureHtml = signatureDepartments.map((department) => `<div class="signature-box"><strong>${escapeHtml(department)}</strong><span>Nom / Date</span><i>Signature</i></div>`).join("");
+
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Dossier ECR - ${escapeHtml(requestDisplayName(request))}</title><style>
+    @page{size:A4 portrait;margin:12mm}
+    *{box-sizing:border-box}
+    html,body,.pdf-export-page,.cover,.metric,.info-grid div,.timeline-item,.signature-box,th{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    body{margin:0;background:#eef2e8;color:#172008;font-family:Arial,sans-serif}
+    .pdf-export-page{background:#fff;min-height:1120px;padding:30px;width:794px}
+    .cover{display:grid;align-content:space-between;background:linear-gradient(135deg,#f7f9f1 0%,#ffffff 55%,#e7f0dc 100%);border:1px solid #cdd9bd}
+    .brand{display:flex;align-items:center;gap:16px;border-bottom:4px solid #5f7f13;padding-bottom:18px}
+    .brand img{height:58px;width:132px;object-fit:contain;background:#fff;border:1px solid #bfd0a3;border-radius:4px;padding:6px}
+    .brand h1{font-family:Georgia,serif;font-size:36px;line-height:1.05;margin:0;text-transform:uppercase}
+    .brand span{color:#5f7f13;font-weight:800;text-transform:uppercase}
+    .cover-main{display:grid;gap:20px}
+    .cover-title h2{font-size:28px;margin:0 0 8px}
+    .cover-title p{color:#4b5563;font-size:14px;line-height:1.5;margin:0}
+    .metrics{display:grid;gap:10px;grid-template-columns:repeat(4,1fr)}
+    .metric{background:#172008;color:#fff;border-radius:6px;padding:12px}
+    .metric span{display:block;color:#dce8ce;font-size:10px;font-weight:800;text-transform:uppercase}
+    .metric strong{display:block;font-size:24px;margin-top:6px}
+    .info-grid{display:grid;gap:8px;grid-template-columns:repeat(2,1fr)}
+    .info-grid div{border:1px solid #d9e3c8;border-radius:6px;padding:10px;background:#fbfcf8}
+    .info-grid span{display:block;color:#60704e;font-size:10px;font-weight:800;text-transform:uppercase}
+    .info-grid strong{display:block;font-size:13px;margin-top:4px}
+    h3{border-bottom:2px solid #5f7f13;font-size:18px;margin:0 0 12px;padding-bottom:8px}
+    .section{display:grid;gap:14px}
+    .text-block{border:1px solid #d9e3c8;border-radius:6px;padding:12px;min-height:80px}
+    .text-block span{color:#60704e;display:block;font-size:10px;font-weight:800;text-transform:uppercase}
+    .text-block p{font-size:13px;line-height:1.5;margin:6px 0 0;white-space:pre-wrap}
+    table{border-collapse:collapse;width:100%;table-layout:fixed}
+    th,td{border:1px solid #cbd5bd;font-size:10px;line-height:1.3;padding:6px;vertical-align:top;word-break:break-word}
+    th{background:#5f7f13;color:#fff;text-align:left}
+    td span{color:#60704e;display:block;font-size:9px;margin-top:3px}
+    .timeline-list{display:grid;gap:8px}
+    .timeline-item{border-left:4px solid #8a9275;background:#fbfcf8;border-radius:0 6px 6px 0;padding:9px 12px}
+    .timeline-item.closed{border-left-color:#16a34a}.timeline-item.cancelled{border-left-color:#64748b}.timeline-item.warning{border-left-color:#dc2626}.timeline-item.audit{border-left-color:#2563eb}
+    .timeline-item span{color:#60704e;font-size:10px;font-weight:800}.timeline-item strong{display:block;font-size:13px;margin-top:2px}.timeline-item p{font-size:11px;margin:3px 0 0;color:#4b5563}
+    .signature-grid{display:grid;gap:10px;grid-template-columns:repeat(3,1fr)}
+    .signature-box{border:1px solid #172008;border-radius:4px;min-height:96px;padding:10px}
+    .signature-box span,.signature-box i{display:block;color:#60704e;font-size:11px;margin-top:14px}
+    .footer{align-items:center;border-top:1px solid #d9e3c8;color:#60704e;display:flex;font-size:10px;justify-content:space-between;margin-top:auto;padding-top:10px}
+  </style></head><body>
+    <main class="pdf-export-page cover">
+      <div class="brand"><img src="/sage_logo1.png" alt="SAGE Automotive Interiors"><div><span>Dossier ECR professionnel</span><h1>Dossier de modification</h1></div></div>
+      <section class="cover-main">
+        <div class="cover-title">
+          <h2>${escapeHtml(requestDisplayName(request))}</h2>
+          <p>${escapeHtml([request.client, request.modificationProject, request.product].filter(Boolean).join(" | ") || "Synthese dossier ECR")}</p>
+        </div>
+        <div class="metrics">
+          <div class="metric"><span>Avancement</span><strong>${completionRate}%</strong></div>
+          <div class="metric"><span>Actions</span><strong>${sortedActions.length}</strong></div>
+          <div class="metric"><span>Done</span><strong>${doneActions}</strong></div>
+          <div class="metric"><span>Retard</span><strong>${lateActionsCount}</strong></div>
+        </div>
+        <div class="info-grid">${infoHtml}</div>
+      </section>
+      <div class="footer"><span>Genere le ${escapeHtml(generatedAt)}</span><span>${escapeHtml(requestStatusLabel(request))}</span></div>
+    </main>
+    <main class="pdf-export-page section">
+      <h3>Synthese modification</h3>
+      <div class="text-block"><span>Raison de modification</span><p>${escapeHtml(request.modificationReason || "-")}</p></div>
+      <div class="text-block"><span>Detail de modification</span><p>${escapeHtml(request.modificationDetail || "-")}</p></div>
+      <div class="text-block"><span>Revue dossier</span><p>${escapeHtml(request.dossierReview || "-")}</p></div>
+      <h3>Validations de phases</h3>
+      <table><thead><tr><th>Phase</th><th>Statut</th><th>Responsable</th><th>Date</th><th>Commentaire</th></tr></thead><tbody>${validationRows || `<tr><td colspan="5">Aucune validation renseignee.</td></tr>`}</tbody></table>
+      <div class="footer"><span>${escapeHtml(requestDisplayName(request))}</span><span>Synthese</span></div>
+    </main>
+    <main class="pdf-export-page section">
+      <h3>Plan d'actions et preuves</h3>
+      <table><thead><tr><th>N</th><th>Action</th><th>Phase</th><th>Resp.</th><th>Valid.</th><th>Statut</th><th>Echeance</th><th>Preuve</th></tr></thead><tbody>${actionRows || `<tr><td colspan="8">Aucune action renseignee.</td></tr>`}</tbody></table>
+      <div class="metrics">
+        <div class="metric"><span>Preuves</span><strong>${proofCount}</strong></div>
+        <div class="metric"><span>Actions done</span><strong>${doneActions}</strong></div>
+        <div class="metric"><span>Actions retard</span><strong>${lateActionsCount}</strong></div>
+        <div class="metric"><span>Total</span><strong>${sortedActions.length}</strong></div>
+      </div>
+      <div class="footer"><span>${escapeHtml(requestDisplayName(request))}</span><span>Actions</span></div>
+    </main>
+    <main class="pdf-export-page section">
+      <h3>Historique de la modification</h3>
+      <div class="timeline-list">${timelineHtml || `<div class="timeline-item"><strong>Aucun historique disponible</strong><p>Les evenements apparaitront apres les prochains changements.</p></div>`}</div>
+      <h3>Signatures</h3>
+      <div class="signature-grid">${signatureHtml}</div>
+      <div class="footer"><span>${escapeHtml(requestDisplayName(request))}</span><span>Historique et signatures</span></div>
+    </main>
+  </body></html>`;
 }
 
 function parseDateOnly(value) {
@@ -1345,6 +1959,7 @@ function App() {
   const [editingUser, setEditingUser] = useState(null);
   const [query, setQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
+  const [requestTypeFilter, setRequestTypeFilter] = useState("");
   const [requestArchiveView, setRequestArchiveView] = useState("all");
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -1379,12 +1994,14 @@ function App() {
     return requests.filter((request) => {
       if (!requestMatchesView(request, requestArchiveView, canAdmin)) return false;
       const matchesProject = !projectFilter || request.modificationProject === projectFilter;
+      const matchesType = !requestTypeFilter
+        || (requestTypeFilter === "new-project" ? Boolean(request.newVersion) : !request.newVersion);
       const matchesSearch = !normalized || [request.client, request.product, request.modificationProject, request.modificationNumber, request.modificationReason, request.modificationDetail, request.dossierReview, request.pilot]
         .filter(Boolean)
         .some((value) => normalizeSearchText(value).includes(normalized));
-      return matchesProject && matchesSearch;
+      return matchesProject && matchesType && matchesSearch;
     });
-  }, [currentUser, requests, query, projectFilter, requestArchiveView]);
+  }, [currentUser, requests, query, projectFilter, requestArchiveView, requestTypeFilter]);
 
   const requestSearchSuggestions = useMemo(() => {
     const normalized = normalizeSearchText(query);
@@ -1493,7 +2110,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (page !== "traceability" || !isAdminUser(currentUser)) return;
+    if (!["traceability", "modifications"].includes(page) || !isAdminUser(currentUser)) return;
     getAuditLogs()
       .then(setAuditLogs)
       .catch(() => {
@@ -4066,6 +4683,7 @@ function App() {
             actionForm={actionForm}
             actionRoleOptions={actionRoleOptions}
             actions={actions}
+            auditLogs={auditLogs}
             checklist={checklist}
             completion={completion}
             doneCount={doneCount}
@@ -4080,8 +4698,10 @@ function App() {
             projectFilter={projectFilter}
             projectOptions={projectOptions}
             query={query}
+            requests={requests}
             requestSearchSuggestions={requestSearchSuggestions}
             requestArchiveView={requestArchiveView}
+            requestTypeFilter={requestTypeFilter}
             saving={saving}
             selectedId={selectedId}
             selectedRequest={selectedRequest}
@@ -4093,6 +4713,7 @@ function App() {
             setSelectedId={setSelectedId}
             setSelectedStage={setSelectedStage}
             setShowCreateForm={setShowCreateForm}
+            setRequestTypeFilter={setRequestTypeFilter}
             onRequestArchiveViewChange={handleRequestArchiveViewChange}
             handleCreateAction={handleCreateAction}
             handleArchiveEcr={handleArchiveEcr}
@@ -5251,8 +5872,38 @@ function RequestDocumentCard({ contentType, onPreview, sourceUrl, title, url }) 
   );
 }
 
+function ModificationHistoryTimeline({ items = [] }) {
+  const visibleItems = items.slice(0, 8);
+  return (
+    <section className="modification-history-panel">
+      <div className="section-title">
+        <div>
+          <h2>Historique de la modification</h2>
+          <span>{visibleItems.length} evenement{visibleItems.length > 1 ? "s" : ""} visible{visibleItems.length > 1 ? "s" : ""}</span>
+        </div>
+      </div>
+      {visibleItems.length === 0 ? (
+        <EmptyState title="Aucun historique" text="Les changements de la modification apparaitront ici." compact />
+      ) : (
+        <div className="modification-history-list">
+          {visibleItems.map((item, index) => (
+            <article className={`modification-history-item ${item.tone || "neutral"}`} key={`${item.title}-${item.date}-${index}`}>
+              <span>{item.date ? formatDateOnly(item.date) : "-"}</span>
+              <div>
+                <strong>{item.title}</strong>
+                {item.text && <p>{item.text}</p>}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ModificationsPage(props) {
   const [listOpen, setListOpen] = useState(false);
+  const [userSidebarOpen, setUserSidebarOpen] = useState(true);
   const [previewImage, setPreviewImage] = useState(null);
   const [dossierDialogOpen, setDossierDialogOpen] = useState(false);
   const [detailsCollapsed, setDetailsCollapsed] = useState(false);
@@ -5260,6 +5911,7 @@ function ModificationsPage(props) {
     actionForm,
     actionRoleOptions,
     actions,
+    auditLogs = [],
     checklist,
     completion,
     currentUser,
@@ -5291,8 +5943,10 @@ function ModificationsPage(props) {
     projectFilter,
     projectOptions,
     query,
+    requests = [],
     requestSearchSuggestions,
     requestArchiveView,
+    requestTypeFilter,
     onEditRequest,
     onRequestArchiveViewChange,
     onUpdateDossierReview,
@@ -5306,6 +5960,7 @@ function ModificationsPage(props) {
     setSelectedId,
     setSelectedStage,
     setShowCreateForm,
+    setRequestTypeFilter,
     requiresEvidence,
     updateActionForm
   } = props;
@@ -5324,6 +5979,15 @@ function ModificationsPage(props) {
   const latestStageValidation = phaseValidations.find((validation) => validation.stage === selectedStage);
   const stageActionsDone = actions.length > 0 && actions.every(isActionDone);
   const isCurrentStage = selectedRequest && selectedStage === selectedRequest.currentStage;
+  const selectedRequestTimeline = useMemo(() => requestHistoryTimeline(selectedRequest, auditLogs), [auditLogs, selectedRequest]);
+  const authenticatedUserRequests = useMemo(() => {
+    const userRequests = requests.filter((request) => !request.archived && isRequestPilot(currentUser, request));
+    return userRequests.sort((first, second) => {
+      const firstDate = parseDateOnly(first.receptionDate)?.getTime() || 0;
+      const secondDate = parseDateOnly(second.receptionDate)?.getTime() || 0;
+      return secondDate - firstDate || String(requestDisplayName(first)).localeCompare(String(requestDisplayName(second)), "fr", { sensitivity: "base" });
+    });
+  }, [currentUser, requests]);
   const requestStatusOptions = [
     ["all", "Toutes"],
     ["active", "Actives"],
@@ -5364,13 +6028,29 @@ function ModificationsPage(props) {
       .then((requestActions) => {
         downloadBlobFile(
           `dossier-modification-${fileNameToken(requestDisplayName(selectedRequest))}.xls`,
-          modificationDossierExportExcel(selectedRequest, requestActions),
+          completePhaseDossierExportExcel(selectedRequest, requestActions),
           "application/vnd.ms-excel;charset=utf-8"
         );
         successToast("Dossier de modification Excel généré");
       })
       .catch(() => {
         errorAlert("Extraction du dossier de modification impossible.");
+      });
+  }
+
+  function exportProfessionalDossierPdf() {
+    if (!selectedRequest) return;
+    getActions(selectedRequest.id)
+      .then(async (requestActions) => {
+        await downloadHtmlAsPdf(
+          `dossier-ecr-${fileNameToken(requestDisplayName(selectedRequest))}.pdf`,
+          professionalDossierPdfHtml(selectedRequest, requestActions, selectedRequestTimeline, phaseValidations),
+          { orientation: "portrait", width: "820px", backgroundColor: "#eef2e8" }
+        );
+        successToast("Dossier ECR PDF genere");
+      })
+      .catch(() => {
+        errorAlert("Generation du dossier ECR PDF impossible.");
       });
   }
 
@@ -5385,7 +6065,7 @@ function ModificationsPage(props) {
             autoComplete="off"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Rechercher une modification"
+            placeholder="Rechercher"
           />
           {requestSearchSuggestions.length > 0 && (
             <div className="request-search-suggestions" role="listbox">
@@ -5409,12 +6089,24 @@ function ModificationsPage(props) {
           )}
         </div>
         <label className="project-filter">
-          <FolderKanban size={16} />
+          <FolderKanban size={12} />
           <select value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}>
             <option value="">Tous les projets</option>
             {projectOptions.map((projectName) => (
               <option key={projectName} value={projectName}>{projectName}</option>
             ))}
+          </select>
+        </label>
+        <label className="project-filter request-type-filter">
+          <ClipboardList size={16} />
+          <select
+            aria-label="Filtrer par type de modification"
+            value={requestTypeFilter}
+            onChange={(event) => setRequestTypeFilter(event.target.value)}
+          >
+            <option value="">Tous les types</option>
+            <option value="normal">Modifications normales</option>
+            <option value="new-project">Nouveaux projets</option>
           </select>
         </label>
         <button className="secondary-action request-list-action" type="button" onClick={() => setListOpen(true)}>
@@ -5438,10 +6130,10 @@ function ModificationsPage(props) {
           setShowCreateForm(true);
         }} disabled={!canAdmin}>
           <Plus size={16} />
-          Nouvelle modification
+          Nouvelle ECR
         </button>
       </div>
-      <div className="work-layout">
+      <div className={userSidebarOpen ? "work-layout with-user-sidebar" : "work-layout"}>
         <section className="detail-panel">
           {selectedRequest ? (
             <>
@@ -5514,6 +6206,15 @@ function ModificationsPage(props) {
                   {detailsCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
                 </button>
               </div>
+              {requestTerminal && (
+                <div className={`readonly-banner ${isCancelledRequest(selectedRequest) ? "cancelled" : "closed"}`}>
+                  <CircleAlert size={20} />
+                  <div>
+                    <strong>{isCancelledRequest(selectedRequest) ? "Modification annulee - consultation uniquement" : "Modification cloturee - consultation uniquement"}</strong>
+                    <span>Ce dossier est en lecture seule. Les informations, actions, preuves et phases ne peuvent plus etre modifiees.</span>
+                  </div>
+                </div>
+              )}
               {!detailsCollapsed && (
               <header className="details-header">
                 <div>
@@ -5542,6 +6243,10 @@ function ModificationsPage(props) {
                     <button className="dossier-review-card" type="button" onClick={exportModificationDossierExcel} title="Extraire le dossier de modification Excel">
                       <FileSpreadsheet size={24} />
                       <span>Dossier Excel</span>
+                    </button>
+                    <button className="dossier-review-card" type="button" onClick={exportProfessionalDossierPdf} title="Generer le dossier ECR PDF professionnel">
+                      <FileText size={24} />
+                      <span>Dossier PDF</span>
                     </button>
                     <button className="dossier-review-card" type="button" onClick={exportModificationGanttPdf} title="Extraire le diagramme de Gantt">
                       <CalendarDays size={24} />
@@ -5572,6 +6277,9 @@ function ModificationsPage(props) {
                   </div>
                 )}
               </header>
+              )}
+              {!detailsCollapsed && (
+                <ModificationHistoryTimeline items={selectedRequestTimeline} />
               )}
               <section className="request-workspace">
                 <nav className="stage-tabs">
@@ -5647,7 +6355,43 @@ function ModificationsPage(props) {
             <EmptyState title="Aucune demande sélectionnée" text="Sélectionnez une demande dans la liste ou créez une nouvelle modification." />
           )}
         </section>
+        {userSidebarOpen && (
+          <aside className="user-modifications-sidebar" aria-label="Mes modifications">
+            <header>
+              <div>
+                <p className="eyebrow">Utilisateur</p>
+                <h2>Mes modifications</h2>
+                <span>{authenticatedUserRequests.length} dossier{authenticatedUserRequests.length > 1 ? "s" : ""}</span>
+              </div>
+              <button className="ghost-icon" type="button" onClick={() => setUserSidebarOpen(false)} title="Fermer le panneau">
+                <X size={18} />
+              </button>
+            </header>
+            <div className="user-modifications-list">
+              {authenticatedUserRequests.length === 0 ? (
+                <EmptyState title="Aucun dossier" text="Aucune modification n'est affectee a votre nom." compact />
+              ) : authenticatedUserRequests.map((request) => (
+                <button
+                  className={request.id === selectedId ? "user-modification-item active" : "user-modification-item"}
+                  key={request.id}
+                  type="button"
+                  onClick={() => selectRequest(request)}
+                >
+                  <strong>{requestDisplayName(request)}</strong>
+                  <span>{request.modificationProject || request.client || "-"}</span>
+                  <small className={`stage-pill ${stageColorClass(request.currentStage, Boolean(request.newVersion))}`}>{stageLabel(request.currentStage, Boolean(request.newVersion))}</small>
+                </button>
+              ))}
+            </div>
+          </aside>
+        )}
       </div>
+      {!userSidebarOpen && (
+        <button className="user-sidebar-open-tab" type="button" onClick={() => setUserSidebarOpen(true)}>
+          <ClipboardList size={16} />
+          Mes modifications
+        </button>
+      )}
       {listOpen && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={() => setListOpen(false)}>
           <section

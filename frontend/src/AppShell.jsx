@@ -413,6 +413,10 @@ function isTerminalRequest(request) {
   return request?.currentStage === "CLOSED" || Boolean(request?.closureStatus);
 }
 
+function isClosedRequest(request) {
+  return request?.currentStage === "CLOSED" || Boolean(request?.closureStatus);
+}
+
 function isActiveRequest(request) {
   return Boolean(request) && !request.archived && request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED";
 }
@@ -2341,6 +2345,9 @@ function App() {
   }
 
   function openRequest(request, stageOverride) {
+    if (isClosedRequest(request)) {
+      warningAlert("Modification cloturee", "C'est une modification cloturee et vous ne pouvez plus la modifier.");
+    }
     setSelectedId(request.id);
     setSelectedStage(safeStage(stageOverride || request.currentStage, Boolean(request.newVersion)));
     setShowCreateForm(false);
@@ -2854,7 +2861,7 @@ function App() {
     setSaving(true);
     closeEcrRequest(selectedRequest.id)
       .then((updatedRequest) => {
-        successToast("Modification cloturee");
+        successToast("Modification cloturée");
         return refreshSelectedData(updatedRequest.id, safeStage(updatedRequest.currentStage, Boolean(updatedRequest.newVersion)));
       })
       .catch((exception) => errorAlert(exception?.message || "Cloture de la modification impossible."))
@@ -3664,7 +3671,8 @@ function App() {
         setCurrentUser(session.user);
         setProfileForm(userToForm(session.user));
         setLoginForm({ email: "", password: "" });
-        successToast("Connexion reussie");
+        const authenticatedUserName = session.user?.fullName || session.user?.username || session.user?.email || "";
+        successToast(`Welcome Back${authenticatedUserName ? ` : ${authenticatedUserName}` : ""}`);
       })
       .catch(() => {
         const message = "Email ou mot de passe incorrect.";
@@ -5325,6 +5333,9 @@ function ModificationsPage(props) {
   ];
 
   function selectRequest(request) {
+    if (isClosedRequest(request)) {
+      warningAlert("Modification cloturée", "C'est une modification cloturée et vous ne pouvez plus la modifier.");
+    }
     setShowCreateForm(false);
     setSelectedId(request.id);
     setSelectedStage(safeStage(request.currentStage, Boolean(request.newVersion)));
@@ -5487,7 +5498,7 @@ function ModificationsPage(props) {
                     disabled={saving}
                     type="button"
                     onClick={handleCloseRequest}
-                    title="Marquer terminee ou cloturee"
+                    title="Marquer terminée ou cloturée"
                   >
                     <CheckCircle2 size={18} />
                     <span>Marquer cloturée</span>

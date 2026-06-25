@@ -59,7 +59,7 @@ public class AccessControlService {
         }
         return request.getId() != null
                 && actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId()).stream()
-                .anyMatch(action -> isNamedActionParticipant(user, action));
+                .anyMatch(action -> isActionParticipant(user, action));
     }
 
     public boolean canValidateRequest(AppUser user, EcrRequest request) {
@@ -70,16 +70,12 @@ public class AccessControlService {
         if (user == null || action == null || action.getRequest() == null) {
             return false;
         }
-        String validator = normalize(action.getValidator());
-        String validatorRole = normalize(action.getValidatorRole());
-        String validatorDisplayName = normalize(action.getValidatorDisplayName());
-        if (isUndefinedValidator(validator) || isUndefinedValidator(validatorRole) || isUndefinedValidator(validatorDisplayName)) {
-            return isAdmin(user);
-        }
-        if (!validator.isEmpty() || !validatorRole.isEmpty() || !validatorDisplayName.isEmpty()) {
-            return matchesActionAssignment(user, action.getValidator())
-                    || matchesActionAssignment(user, action.getValidatorRole())
-                    || matchesActionAssignment(user, action.getValidatorDisplayName());
+        List<String> validators = Arrays.asList(action.getValidator(), action.getValidatorRole(), action.getValidatorDisplayName()).stream()
+                .map(this::normalize)
+                .filter(value -> !value.isEmpty() && !isUndefinedValidator(value))
+                .collect(Collectors.toList());
+        if (!validators.isEmpty()) {
+            return validators.stream().anyMatch(value -> matchesActionAssignment(user, value));
         }
         return isAdmin(user);
     }
@@ -158,16 +154,6 @@ public class AccessControlService {
                 || matchesActionAssignment(user, action.getValidator())
                 || matchesActionAssignment(user, action.getValidatorRole())
                 || matchesActionAssignment(user, action.getValidatorDisplayName());
-    }
-
-    private boolean isNamedActionParticipant(AppUser user, EcrAction action) {
-        if (user == null || action == null) {
-            return false;
-        }
-        return matchesUser(user, normalize(action.getResponsible()))
-                || matchesUser(user, normalize(action.getValidator()))
-                || matchesUser(user, normalize(action.getValidatorRole()))
-                || matchesUser(user, normalize(action.getValidatorDisplayName()));
     }
 
     public List<AppUser> validatorsAndManagersFor(EcrRequest request) {
@@ -296,7 +282,8 @@ public class AccessControlService {
     private boolean matchesUser(AppUser user, String token) {
         return normalize(user.getFullName()).equals(token)
                 || normalize(user.getUsername()).equals(token)
-                || normalize(user.getEmail()).equals(token);
+                || normalize(user.getEmail()).equals(token)
+                || matchesPersonalIdentity(user, token);
     }
 
     private boolean matchesActionAssignment(AppUser user, String assignment) {
@@ -307,6 +294,19 @@ public class AccessControlService {
         return matchesUser(user, token)
                 || normalize(user.getJobTitle()).equals(token)
                 || normalize(user.getRole()).equals(token);
+    }
+
+    private boolean matchesPersonalIdentity(AppUser user, String token) {
+        if (user == null || token == null || token.length() < 3) {
+            return false;
+        }
+        return Arrays.asList(
+                        normalize(user.getFullName()),
+                        normalize(user.getUsername()),
+                        normalize(user.getEmail()).split("@", 2)[0]
+                ).stream()
+                .filter(value -> !value.isEmpty())
+                .anyMatch(value -> Arrays.asList(value.split("\\s+")).contains(token));
     }
 
     private boolean isProjectTeamMember(AppUser user, EcrRequest request) {

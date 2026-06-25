@@ -33,6 +33,36 @@ function isAdminUser(user) {
     || normalizeRoleToken(user?.email) === "f.chalbi@sagetunisia.com";
 }
 
+function userMatchesAssignment(user, assignment) {
+  const token = normalizeRoleToken(assignment);
+  if (!token || !user) return false;
+  const exactMatch = [user.jobTitle, user.fullName, user.username, user.email, user.role]
+    .filter(Boolean)
+    .some((value) => normalizeRoleToken(value) === token);
+  if (exactMatch) return true;
+  if (token.length < 3) return false;
+  return [user.fullName, user.username, String(user.email || "").split("@")[0]]
+    .filter(Boolean)
+    .some((value) => normalizeRoleToken(value).split(/\s+/).includes(token));
+}
+
+function isRequestPilot(user, request) {
+  return userMatchesAssignment(user, request?.pilot);
+}
+
+function isActionParticipantForUser(user, action) {
+  if (isAdminUser(user)) return true;
+  return userMatchesAssignment(user, action?.responsible)
+    || userMatchesAssignment(user, action?.validator)
+    || userMatchesAssignment(user, action?.validatorRole)
+    || userMatchesAssignment(user, action?.validatorDisplayName);
+}
+
+function isRequestParticipantForUser(user, request, actions = []) {
+  if (isAdminUser(user)) return true;
+  return isRequestPilot(user, request) || actions.some((action) => isActionParticipantForUser(user, action));
+}
+
 function isActionDone(action) {
   return Boolean(action?.checked) || action?.status === "DONE" || action?.status === "DONE_LATE";
 }
@@ -155,9 +185,12 @@ export function DashboardPage({
   const [dashboardActionsByRequestId, setDashboardActionsByRequestId] = useState({});
   const [dashboardDialog, setDashboardDialog] = useState(null);
   const adminView = isAdminUser(currentUser);
-  const dashboardRequests = requests.filter((request) => !request.archived);
-  const dashboardRequestIds = dashboardRequests.map((request) => request.id).filter(Boolean).sort((first, second) => Number(first) - Number(second));
+  const dashboardCandidateRequests = requests.filter((request) => !request.archived);
+  const dashboardRequestIds = dashboardCandidateRequests.map((request) => request.id).filter(Boolean).sort((first, second) => Number(first) - Number(second));
   const dashboardRequestIdsKey = dashboardRequestIds.join("|");
+  const dashboardRequests = adminView
+    ? dashboardCandidateRequests
+    : dashboardCandidateRequests.filter((request) => isRequestParticipantForUser(currentUser, request, dashboardActionsByRequestId[request.id] || []));
   const activeRequests = dashboardRequests.filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED");
   const closedRequests = dashboardRequests.filter((request) => request.currentStage === "CLOSED");
   const cancelledRequests = dashboardRequests.filter((request) => request.currentStage === "CANCELLED");

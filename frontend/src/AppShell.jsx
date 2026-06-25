@@ -1070,90 +1070,7 @@ function completePhaseDossierExportExcel(request, actions = []) {
   </table></body></html>`;
 }
 
-function auditLogBelongsToRequest(log, request) {
-  if (!log || !request) return false;
-  const candidates = [
-    requestDisplayName(request),
-    request.modificationNumber,
-    request.accessInternalNumber,
-    request.client,
-    request.modificationProject
-  ].filter(Boolean).map((value) => String(value).toLowerCase());
-  const haystack = [
-    log.targetType,
-    log.targetId,
-    log.details,
-    log.path,
-    auditTargetSummary(log)
-  ].filter(Boolean).join(" ").toLowerCase();
-  return candidates.some((value) => value && haystack.includes(value));
-}
-
-function timelineAuditDetail(detail) {
-  const value = String(detail || "").trim();
-  if (!value || value.includes("/api/") || value.includes("HTTP ")) return "";
-  const allowedFragments = [
-    "modification",
-    "phase",
-    "action",
-    "cloture",
-    "annul",
-    "archive"
-  ];
-  const normalized = normalizeSearchText(value);
-  return allowedFragments.some((fragment) => normalized.includes(fragment)) ? value : "";
-}
-
-function requestHistoryTimeline(request, auditLogs = []) {
-  const items = [];
-  const addItem = (date, title, text, tone = "neutral") => {
-    if (!date && !title) return;
-    items.push({
-      date: date || "",
-      title,
-      text: text || "",
-      tone
-    });
-  };
-
-  addItem(request?.receptionDate, "Creation / reception", `Dossier ${requestDisplayName(request)} recu.`, "created");
-  if (request?.currentStage) {
-    addItem(null, "Phase actuelle", stageLabel(request.currentStage, Boolean(request.newVersion)), "phase");
-  }
-  if (request?.closureRequestedDate) {
-    addItem(request.closureRequestedDate, "Demande de cloture", request.closureRequestedBy ? `Demandee par ${request.closureRequestedBy}.` : "Cloture demandee.", "warning");
-  }
-  if (request?.closureDate || isClosedRequest(request)) {
-    addItem(request.closureDate, "Modification cloturee", "Consultation uniquement.", "closed");
-  }
-  if (request?.cancelledDate || isCancelledRequest(request)) {
-    addItem(request.cancelledDate, "Modification annulee", request.cancelledFromStage ? `Annulee depuis ${stageLabel(request.cancelledFromStage, Boolean(request.newVersion))}.` : "Modification annulee.", "cancelled");
-  }
-  if (request?.archived) {
-    addItem(null, "Modification archivee", "Le dossier est classe dans les archives.", "archived");
-  }
-
-  auditLogs
-    .map(normalizeAuditLog)
-    .filter(Boolean)
-    .filter((log) => auditLogBelongsToRequest(log, request))
-    .slice(0, 12)
-    .forEach((log) => {
-      addItem(log.occurredAt, auditActionSentence(log), timelineAuditDetail(log.details) || auditTargetSummary(log), auditSucceeded(log) ? "audit" : "warning");
-    });
-
-  return items
-    .filter((item, index, allItems) => allItems.findIndex((candidate) =>
-      candidate.title === item.title && candidate.text === item.text && candidate.date === item.date
-    ) === index)
-    .sort((first, second) => {
-      const firstTime = first.date ? new Date(first.date).getTime() : Number.MAX_SAFE_INTEGER;
-      const secondTime = second.date ? new Date(second.date).getTime() : Number.MAX_SAFE_INTEGER;
-      return firstTime - secondTime;
-    });
-}
-
-function professionalDossierPdfHtml(request, actions = [], timeline = [], phaseValidations = []) {
+function professionalDossierPdfHtml(request, actions = [], phaseValidations = []) {
   const sortedActions = [...actions].sort((first, second) =>
     (String(first.stage || "").localeCompare(String(second.stage || ""), "fr", { sensitivity: "base" }))
       || (Number(first.id) || 0) - (Number(second.id) || 0)
@@ -1196,11 +1113,6 @@ function professionalDossierPdfHtml(request, actions = [], timeline = [], phaseV
     <td>${escapeHtml(formatDateOnly(validation.requestedAt || validation.updatedAt || validation.createdAt))}</td>
     <td>${escapeHtml(validation.rejectionReason || validation.comment || "-")}</td>
   </tr>`).join("");
-  const timelineHtml = timeline.map((item) => `<div class="timeline-item ${escapeHtml(item.tone || "neutral")}">
-    <span>${escapeHtml(item.date ? formatDateOnly(item.date) : "-")}</span>
-    <strong>${escapeHtml(item.title)}</strong>
-    <p>${escapeHtml(item.text)}</p>
-  </div>`).join("");
   const infoHtml = infoRows.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "-")}</strong></div>`).join("");
   const signatureDepartments = ["Pilote", "Engineering", "Qualite", "Logistique", "Finance", "Production"];
   const signatureHtml = signatureDepartments.map((department) => `<div class="signature-box"><strong>${escapeHtml(department)}</strong><span>Nom / Date</span><i>Signature</i></div>`).join("");
@@ -1208,7 +1120,7 @@ function professionalDossierPdfHtml(request, actions = [], timeline = [], phaseV
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Dossier ECR - ${escapeHtml(requestDisplayName(request))}</title><style>
     @page{size:A4 portrait;margin:12mm}
     *{box-sizing:border-box}
-    html,body,.pdf-export-page,.cover,.metric,.info-grid div,.timeline-item,.signature-box,th{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    html,body,.pdf-export-page,.cover,.metric,.info-grid div,.signature-box,th{-webkit-print-color-adjust:exact;print-color-adjust:exact}
     body{margin:0;background:#eef2e8;color:#172008;font-family:Arial,sans-serif}
     .pdf-export-page{background:#fff;min-height:1120px;padding:30px;width:794px}
     .cover{display:grid;align-content:space-between;background:linear-gradient(135deg,#f7f9f1 0%,#ffffff 55%,#e7f0dc 100%);border:1px solid #cdd9bd}
@@ -1236,10 +1148,6 @@ function professionalDossierPdfHtml(request, actions = [], timeline = [], phaseV
     th,td{border:1px solid #cbd5bd;font-size:10px;line-height:1.3;padding:6px;vertical-align:top;word-break:break-word}
     th{background:#5f7f13;color:#fff;text-align:left}
     td span{color:#60704e;display:block;font-size:9px;margin-top:3px}
-    .timeline-list{display:grid;gap:8px}
-    .timeline-item{border-left:4px solid #8a9275;background:#fbfcf8;border-radius:0 6px 6px 0;padding:9px 12px}
-    .timeline-item.closed{border-left-color:#16a34a}.timeline-item.cancelled{border-left-color:#64748b}.timeline-item.warning{border-left-color:#dc2626}.timeline-item.audit{border-left-color:#2563eb}
-    .timeline-item span{color:#60704e;font-size:10px;font-weight:800}.timeline-item strong{display:block;font-size:13px;margin-top:2px}.timeline-item p{font-size:11px;margin:3px 0 0;color:#4b5563}
     .signature-grid{display:grid;gap:10px;grid-template-columns:repeat(3,1fr)}
     .signature-box{border:1px solid #172008;border-radius:4px;min-height:96px;padding:10px}
     .signature-box span,.signature-box i{display:block;color:#60704e;font-size:11px;margin-top:14px}
@@ -1283,11 +1191,9 @@ function professionalDossierPdfHtml(request, actions = [], timeline = [], phaseV
       <div class="footer"><span>${escapeHtml(requestDisplayName(request))}</span><span>Actions</span></div>
     </main>
     <main class="pdf-export-page section">
-      <h3>Historique de la modification</h3>
-      <div class="timeline-list">${timelineHtml || `<div class="timeline-item"><strong>Aucun historique disponible</strong><p>Les evenements apparaitront apres les prochains changements.</p></div>`}</div>
       <h3>Signatures</h3>
       <div class="signature-grid">${signatureHtml}</div>
-      <div class="footer"><span>${escapeHtml(requestDisplayName(request))}</span><span>Historique et signatures</span></div>
+      <div class="footer"><span>${escapeHtml(requestDisplayName(request))}</span><span>Signatures</span></div>
     </main>
   </body></html>`;
 }
@@ -1805,11 +1711,11 @@ function isActionPilotForUser(user, action) {
 
 function canValidateActionForUser(user, action) {
   if (!user || !action) return false;
-  const validator = normalizeRoleToken(action.validatorDisplayName || action.validator || action.validatorRole);
-  if (!validator || isUndefinedValidatorToken(validator)) return isAdminUser(user);
-  return [user.jobTitle, user.fullName, user.username, user.email, user.role]
-    .filter(Boolean)
-    .some((value) => normalizeRoleToken(value) === validator);
+  const validators = [action.validator, action.validatorRole, action.validatorDisplayName]
+    .map(normalizeRoleToken)
+    .filter((value) => value && !isUndefinedValidatorToken(value));
+  if (validators.length === 0) return isAdminUser(user);
+  return validators.some((validator) => userMatchesAssignment(user, validator));
 }
 
 function isUndefinedValidatorToken(value) {
@@ -1878,6 +1784,36 @@ function isRequestPilot(user, request) {
     .some((value) => normalizeRoleToken(value) === pilot);
 }
 
+function userMatchesAssignment(user, assignment) {
+  const token = normalizeRoleToken(assignment);
+  if (!token || !user) return false;
+  const exactMatch = [user.jobTitle, user.fullName, user.username, user.email, user.role]
+    .filter(Boolean)
+    .some((value) => normalizeRoleToken(value) === token);
+  if (exactMatch) return true;
+  if (token.length < 3) return false;
+  return [user.fullName, user.username, String(user.email || "").split("@")[0]]
+    .filter(Boolean)
+    .some((value) => normalizeRoleToken(value).split(/\s+/).includes(token));
+}
+
+function isActionParticipantForUser(user, action) {
+  if (isAdminUser(user)) return true;
+  return userMatchesAssignment(user, action?.responsible)
+    || userMatchesAssignment(user, action?.validator)
+    || userMatchesAssignment(user, action?.validatorRole)
+    || userMatchesAssignment(user, action?.validatorDisplayName);
+}
+
+function isRequestParticipantForUser(user, request, actions = []) {
+  if (isAdminUser(user)) return true;
+  return isRequestPilot(user, request) || actions.some((action) => isActionParticipantForUser(user, action));
+}
+
+function firstActionParticipantStage(user, actions = []) {
+  return actions.find((action) => isActionParticipantForUser(user, action))?.stage || null;
+}
+
 function isImageAsset(contentType, url) {
   const type = String(contentType || "").toLowerCase();
   if (type) return type.startsWith("image/");
@@ -1934,6 +1870,7 @@ function App() {
   const [selectedStage, setSelectedStage] = useState("FEASIBILITY_VALIDATION");
   const [checklist, setChecklist] = useState([]);
   const [actions, setActions] = useState([]);
+  const [actionsByRequestId, setActionsByRequestId] = useState({});
   const [phaseValidations, setPhaseValidations] = useState([]);
   const [ecrForm, setEcrForm] = useState(emptyEcrForm);
   const [ecrEditForm, setEcrEditForm] = useState(emptyEcrForm);
@@ -1979,11 +1916,28 @@ function App() {
   }, [selectedRequest]);
   const visibleStages = useMemo(() => {
     if (!selectedRequest || isAdminUser(currentUser)) return selectedStages;
+    const participantStages = new Set((actionsByRequestId[selectedRequest.id] || [])
+      .filter((action) => isActionParticipantForUser(currentUser, action))
+      .map((action) => action.stage)
+      .filter(Boolean));
+    if (isClosedRequest(selectedRequest)) {
+      const stagesWithUserActions = selectedStages.filter(([key]) => participantStages.has(key));
+      return stagesWithUserActions.length > 0 ? stagesWithUserActions : selectedStages;
+    }
     const currentIndex = selectedStages.findIndex(([key]) => key === selectedRequest.currentStage);
-    return selectedStages.filter((_, index) => currentIndex < 0 || index <= currentIndex);
-  }, [currentUser, selectedRequest, selectedStages]);
-  const canLoadSelectedStage = visibleStages.some(([key]) => key === selectedStage);
+    return selectedStages.filter(([key], index) => participantStages.has(key) || currentIndex < 0 || index <= currentIndex);
+  }, [actionsByRequestId, currentUser, selectedRequest, selectedStages]);
+  const waitingForClosedParticipantActions = Boolean(
+    selectedRequest &&
+    !isAdminUser(currentUser) &&
+    isClosedRequest(selectedRequest) &&
+    !Object.prototype.hasOwnProperty.call(actionsByRequestId, selectedRequest.id)
+  );
+  const canLoadSelectedStage = !waitingForClosedParticipantActions && visibleStages.some(([key]) => key === selectedStage);
   const activeRequests = useMemo(() => requests.filter(isActiveRequest), [requests]);
+  const visibleActions = useMemo(() => (
+    isAdminUser(currentUser) ? actions : actions.filter((action) => isActionParticipantForUser(currentUser, action))
+  ), [actions, currentUser]);
   const doneCount = actions.filter(isActionDone).length;
   const completion = modificationCompletionRate(selectedRequest, actions);
   const lateActions = actions.filter((action) => action.late).length;
@@ -1993,6 +1947,7 @@ function App() {
     const canAdmin = isAdminUser(currentUser);
     return requests.filter((request) => {
       if (!requestMatchesView(request, requestArchiveView, canAdmin)) return false;
+      if (!canAdmin && !isRequestParticipantForUser(currentUser, request, actionsByRequestId[request.id] || [])) return false;
       const matchesProject = !projectFilter || request.modificationProject === projectFilter;
       const matchesType = !requestTypeFilter
         || (requestTypeFilter === "new-project" ? Boolean(request.newVersion) : !request.newVersion);
@@ -2001,7 +1956,7 @@ function App() {
         .some((value) => normalizeSearchText(value).includes(normalized));
       return matchesProject && matchesType && matchesSearch;
     });
-  }, [currentUser, requests, query, projectFilter, requestArchiveView, requestTypeFilter]);
+  }, [actionsByRequestId, currentUser, requests, query, projectFilter, requestArchiveView, requestTypeFilter]);
 
   const requestSearchSuggestions = useMemo(() => {
     const normalized = normalizeSearchText(query);
@@ -2020,6 +1975,15 @@ function App() {
     }
     return [...exactOrPrefix, ...contains].slice(0, 8);
   }, [filteredRequests, query]);
+
+  useEffect(() => {
+    if (!currentUser || filteredRequests.length === 0) return;
+    if (selectedId && filteredRequests.some((request) => request.id === selectedId)) return;
+    const nextRequest = filteredRequests[0];
+    const participantStage = firstActionParticipantStage(currentUser, actionsByRequestId[nextRequest.id] || []);
+    setSelectedId(nextRequest.id);
+    setSelectedStage(safeStage(participantStage || nextRequest.currentStage, Boolean(nextRequest.newVersion)));
+  }, [actionsByRequestId, currentUser, filteredRequests, selectedId]);
 
   const projectOptions = useMemo(() => {
     const requestProjectNames = requests.map((request) => request.modificationProject);
@@ -2053,6 +2017,33 @@ function App() {
     }
     setProjectFilter("");
   }, [projectFilter, projectOptions]);
+
+  useEffect(() => {
+    if (!currentUser || isAdminUser(currentUser)) {
+      setActionsByRequestId({});
+      return undefined;
+    }
+    const requestIds = requests
+      .filter((request) => !request.archived && request.id)
+      .map((request) => request.id)
+      .sort((first, second) => Number(first) - Number(second));
+    if (requestIds.length === 0) {
+      setActionsByRequestId({});
+      return undefined;
+    }
+    let active = true;
+    Promise.all(requestIds.map((requestId) =>
+      getActions(requestId)
+        .then((items) => [requestId, Array.isArray(items) ? items : []])
+        .catch(() => [requestId, []])
+    )).then((entries) => {
+      if (!active) return;
+      setActionsByRequestId(Object.fromEntries(entries));
+    });
+    return () => {
+      active = false;
+    };
+  }, [currentUser, requests]);
 
   useEffect(() => {
     if (isAdminUser(currentUser) || requestArchiveView !== "archived") {
@@ -2437,8 +2428,9 @@ function App() {
       getEcrRequests(requestLoadOptions(requestArchiveView, currentUser)),
       getChecklist(requestId, stage),
       getActions(requestId, stage),
-      getPhaseValidations(requestId)
-    ]).then(([requestData, checklistData, actionData, validationData]) => {
+      getPhaseValidations(requestId),
+      getActions(requestId)
+    ]).then(([requestData, checklistData, actionData, validationData, requestActionData]) => {
       if (requestSequence !== selectedDetailsRequestId.current) {
         return actionData;
       }
@@ -2446,6 +2438,10 @@ function App() {
       setChecklist(checklistData);
       setActions(actionData);
       setPhaseValidations(validationData);
+      setActionsByRequestId((current) => ({
+        ...current,
+        [requestId]: Array.isArray(requestActionData) ? requestActionData : []
+      }));
       return actionData;
     });
   }
@@ -2458,11 +2454,15 @@ function App() {
       return requestData;
     });
     const currentDetails = requestId
-      ? Promise.all([getChecklist(requestId, stage), getActions(requestId, stage), getPhaseValidations(requestId)])
-          .then(([checklistData, actionData, validationData]) => {
+      ? Promise.all([getChecklist(requestId, stage), getActions(requestId, stage), getPhaseValidations(requestId), getActions(requestId)])
+          .then(([checklistData, actionData, validationData, requestActionData]) => {
             setChecklist(checklistData);
             setActions(actionData);
             setPhaseValidations(validationData);
+            setActionsByRequestId((current) => ({
+              ...current,
+              [requestId]: Array.isArray(requestActionData) ? requestActionData : []
+            }));
           })
       : Promise.resolve();
     const adminData = isAdminUser(currentUser)
@@ -2665,6 +2665,7 @@ function App() {
 
   useEffect(() => {
     if (!selectedRequest) return;
+    if (waitingForClosedParticipantActions) return;
     if (!visibleStages.some(([key]) => key === selectedStage)) {
       setSelectedStage(visibleStages[0]?.[0] || (selectedRequest.currentStage === "CANCELLED" ? "CANCELLED" : safeStage(selectedRequest.currentStage, Boolean(selectedRequest.newVersion))));
       return;
@@ -2673,7 +2674,7 @@ function App() {
     if (nextStage !== selectedStage && visibleStages.some(([key]) => key === nextStage)) {
       setSelectedStage(nextStage);
     }
-  }, [selectedRequest, selectedStage, visibleStages]);
+  }, [selectedRequest, selectedStage, visibleStages, waitingForClosedParticipantActions]);
 
   useEffect(() => {
     if (!showCreateForm && !showEditForm) return undefined;
@@ -2966,7 +2967,8 @@ function App() {
       warningAlert("Modification cloturee", "C'est une modification cloturee et vous ne pouvez plus la modifier.");
     }
     setSelectedId(request.id);
-    setSelectedStage(safeStage(stageOverride || request.currentStage, Boolean(request.newVersion)));
+    const participantStage = firstActionParticipantStage(currentUser, actionsByRequestId[request.id] || []);
+    setSelectedStage(safeStage(stageOverride || participantStage || request.currentStage, Boolean(request.newVersion)));
     setShowCreateForm(false);
     setShowEditForm(false);
     navigateToPage("modifications");
@@ -2985,8 +2987,9 @@ function App() {
           const selectedStillVisible = requestData.some((item) => item.id === selectedId && requestMatchesView(item, view, canAdmin));
           if (!selectedStillVisible) {
             const nextRequest = requestData.find((item) => requestMatchesView(item, view, canAdmin)) || null;
+            const participantStage = nextRequest ? firstActionParticipantStage(currentUser, actionsByRequestId[nextRequest.id] || []) : null;
             setSelectedId(nextRequest?.id ?? null);
-            setSelectedStage(nextRequest ? safeStage(nextRequest.currentStage, Boolean(nextRequest.newVersion)) : "FEASIBILITY_VALIDATION");
+            setSelectedStage(nextRequest ? safeStage(participantStage || nextRequest.currentStage, Boolean(nextRequest.newVersion)) : "FEASIBILITY_VALIDATION");
           }
         }
       })
@@ -3014,8 +3017,9 @@ function App() {
           setRequests(requestData);
           if (selectedId === request.id && archived && requestArchiveView !== "archived" && requestArchiveView !== "all") {
             const nextRequest = requestData.find((item) => requestMatchesView(item, requestArchiveView, isAdminUser(currentUser))) || null;
+            const participantStage = nextRequest ? firstActionParticipantStage(currentUser, actionsByRequestId[nextRequest.id] || []) : null;
             setSelectedId(nextRequest?.id ?? null);
-            setSelectedStage(nextRequest ? safeStage(nextRequest.currentStage, Boolean(nextRequest.newVersion)) : "FEASIBILITY_VALIDATION");
+            setSelectedStage(nextRequest ? safeStage(participantStage || nextRequest.currentStage, Boolean(nextRequest.newVersion)) : "FEASIBILITY_VALIDATION");
           }
           successToast(archived ? "Modification archivée" : "Modification désarchivée");
         })
@@ -4683,6 +4687,7 @@ function App() {
             actionForm={actionForm}
             actionRoleOptions={actionRoleOptions}
             actions={actions}
+            actionsByRequestId={actionsByRequestId}
             auditLogs={auditLogs}
             checklist={checklist}
             completion={completion}
@@ -5872,35 +5877,6 @@ function RequestDocumentCard({ contentType, onPreview, sourceUrl, title, url }) 
   );
 }
 
-function ModificationHistoryTimeline({ items = [] }) {
-  const visibleItems = items.slice(0, 8);
-  return (
-    <section className="modification-history-panel">
-      <div className="section-title">
-        <div>
-          <h2>Historique de la modification</h2>
-          <span>{visibleItems.length} evenement{visibleItems.length > 1 ? "s" : ""} visible{visibleItems.length > 1 ? "s" : ""}</span>
-        </div>
-      </div>
-      {visibleItems.length === 0 ? (
-        <EmptyState title="Aucun historique" text="Les changements de la modification apparaitront ici." compact />
-      ) : (
-        <div className="modification-history-list">
-          {visibleItems.map((item, index) => (
-            <article className={`modification-history-item ${item.tone || "neutral"}`} key={`${item.title}-${item.date}-${index}`}>
-              <span>{item.date ? formatDateOnly(item.date) : "-"}</span>
-              <div>
-                <strong>{item.title}</strong>
-                {item.text && <p>{item.text}</p>}
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
 function ModificationsPage(props) {
   const [listOpen, setListOpen] = useState(false);
   const [userSidebarOpen, setUserSidebarOpen] = useState(true);
@@ -5911,7 +5887,7 @@ function ModificationsPage(props) {
     actionForm,
     actionRoleOptions,
     actions,
-    auditLogs = [],
+    actionsByRequestId = {},
     checklist,
     completion,
     currentUser,
@@ -5977,17 +5953,19 @@ function ModificationsPage(props) {
   const canCloseRequest = !requestTerminal && canAdmin && workflowApproved && selectedRequest?.closureRequested;
   const currentValidation = phaseValidations.find((validation) => validation.stage === selectedStage && validation.status === "PENDING");
   const latestStageValidation = phaseValidations.find((validation) => validation.stage === selectedStage);
+  const visibleActions = canAdmin ? actions : actions.filter((action) => isActionParticipantForUser(currentUser, action));
   const stageActionsDone = actions.length > 0 && actions.every(isActionDone);
   const isCurrentStage = selectedRequest && selectedStage === selectedRequest.currentStage;
-  const selectedRequestTimeline = useMemo(() => requestHistoryTimeline(selectedRequest, auditLogs), [auditLogs, selectedRequest]);
   const authenticatedUserRequests = useMemo(() => {
-    const userRequests = requests.filter((request) => !request.archived && isRequestPilot(currentUser, request));
+    const userRequests = canAdmin
+      ? [...requests]
+      : requests.filter((request) => !request.archived && isRequestParticipantForUser(currentUser, request, actionsByRequestId[request.id] || []));
     return userRequests.sort((first, second) => {
       const firstDate = parseDateOnly(first.receptionDate)?.getTime() || 0;
       const secondDate = parseDateOnly(second.receptionDate)?.getTime() || 0;
       return secondDate - firstDate || String(requestDisplayName(first)).localeCompare(String(requestDisplayName(second)), "fr", { sensitivity: "base" });
     });
-  }, [currentUser, requests]);
+  }, [actionsByRequestId, canAdmin, currentUser, requests]);
   const requestStatusOptions = [
     ["all", "Toutes"],
     ["active", "Actives"],
@@ -6002,7 +5980,8 @@ function ModificationsPage(props) {
     }
     setShowCreateForm(false);
     setSelectedId(request.id);
-    setSelectedStage(safeStage(request.currentStage, Boolean(request.newVersion)));
+    const participantStage = firstActionParticipantStage(currentUser, actionsByRequestId[request.id] || []);
+    setSelectedStage(safeStage(participantStage || request.currentStage, Boolean(request.newVersion)));
     setDetailsCollapsed(false);
     setListOpen(false);
   }
@@ -6044,7 +6023,7 @@ function ModificationsPage(props) {
       .then(async (requestActions) => {
         await downloadHtmlAsPdf(
           `dossier-ecr-${fileNameToken(requestDisplayName(selectedRequest))}.pdf`,
-          professionalDossierPdfHtml(selectedRequest, requestActions, selectedRequestTimeline, phaseValidations),
+          professionalDossierPdfHtml(selectedRequest, requestActions, phaseValidations),
           { orientation: "portrait", width: "820px", backgroundColor: "#eef2e8" }
         );
         successToast("Dossier ECR PDF genere");
@@ -6278,9 +6257,6 @@ function ModificationsPage(props) {
                 )}
               </header>
               )}
-              {!detailsCollapsed && (
-                <ModificationHistoryTimeline items={selectedRequestTimeline} />
-              )}
               <section className="request-workspace">
                 <nav className="stage-tabs">
                   {selectedStages.map(([key, label]) => {
@@ -6319,9 +6295,9 @@ function ModificationsPage(props) {
                 <ActionsPanel
                   actionForm={actionForm}
                   actionRoleOptions={actionRoleOptions}
-                  actions={actions}
+                  actions={visibleActions}
                   currentUser={currentUser}
-                  doneCount={doneCount}
+                  doneCount={visibleActions.filter(isActionDone).length}
                   handleCreateAction={handleCreateAction}
                   handleDeleteAction={handleDeleteAction}
                   handleToggleAction={handleToggleAction}
@@ -6335,7 +6311,7 @@ function ModificationsPage(props) {
                   handleAddEvidenceLink={handleAddEvidenceLink}
                   isCriticalAction={isCriticalAction}
                   canAdmin={canAdmin}
-                  lateActions={lateActions}
+                  lateActions={visibleActions.filter((action) => action.late).length}
                   requiresEvidence={requiresEvidence}
                   saving={saving}
                   selectedRequest={selectedRequest}
@@ -6389,7 +6365,6 @@ function ModificationsPage(props) {
       {!userSidebarOpen && (
         <button className="user-sidebar-open-tab" type="button" onClick={() => setUserSidebarOpen(true)}>
           <ClipboardList size={16} />
-          Mes modifications
         </button>
       )}
       {listOpen && (

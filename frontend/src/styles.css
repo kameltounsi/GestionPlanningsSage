@@ -780,74 +780,6 @@ textarea {
   margin-top: 2px;
 }
 
-.modification-history-panel {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-}
-
-.modification-history-list {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.modification-history-item {
-  background: #fbfcf8;
-  border: 1px solid #d9e3c8;
-  border-left: 4px solid #8a9275;
-  border-radius: 6px;
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 10px;
-}
-
-.modification-history-item.created {
-  border-left-color: #5f7f13;
-}
-
-.modification-history-item.phase,
-.modification-history-item.audit {
-  border-left-color: #2563eb;
-}
-
-.modification-history-item.warning {
-  border-left-color: #dc2626;
-}
-
-.modification-history-item.closed {
-  border-left-color: #16a34a;
-}
-
-.modification-history-item.cancelled,
-.modification-history-item.archived {
-  border-left-color: #64748b;
-}
-
-.modification-history-item > span {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.modification-history-item strong {
-  color: var(--ink);
-  font-size: 13px;
-  line-height: 1.25;
-}
-
-.modification-history-item p {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.35;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 .dashboard-drilldown-dialog {
   display: grid;
   gap: 14px;
@@ -3568,6 +3500,7 @@ textarea {
   padding: 12px;
   position: sticky;
   top: 12px;
+  z-index: 8;
 }
 
 .user-modifications-sidebar header {
@@ -4775,6 +4708,11 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   padding-right: 4px;
 }
 
+.work-layout.with-user-sidebar .details-header {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  overflow: hidden;
+}
+
 .details-toggle-row {
   align-items: center;
   display: flex;
@@ -4870,6 +4808,7 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   border-radius: 8px;
   display: grid;
   gap: 4px;
+  min-width: 0;
   padding: 10px;
 }
 
@@ -4896,6 +4835,11 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   display: grid;
   gap: 6px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.work-layout.with-user-sidebar .meta-grid {
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
 }
 
 .meta-grid div {
@@ -4918,8 +4862,13 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   gap: 10px;
   justify-content: center;
   min-height: 172px;
+  min-width: 0;
   padding: 14px;
   text-align: center;
+}
+
+.work-layout.with-user-sidebar .details-header > .dossier-review-card {
+  min-height: 132px;
 }
 
 .details-header > .dossier-review-card svg {
@@ -6272,10 +6221,6 @@ body:has(.dialog-backdrop) .modifications-toolbar {
     grid-column: auto;
   }
 
-  .modification-history-list {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .ask-ai-search-panel {
     align-items: stretch;
     grid-template-columns: 1fr;
@@ -6395,10 +6340,6 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 
   .dashboard-donut {
     justify-self: center;
-  }
-
-  .modification-history-list {
-    grid-template-columns: 1fr;
   }
 
   .user-photo-uploader {

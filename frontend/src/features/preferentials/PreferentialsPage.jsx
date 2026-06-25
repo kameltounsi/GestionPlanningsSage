@@ -39,6 +39,114 @@ function normalizeSearchText(value) {
     .toLowerCase();
 }
 
+function parseProjectTeam(projectTeam) {
+  return String(projectTeam || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function findUserByTeamName(userName, users = []) {
+  return users.find((user) => [user.fullName, user.username, user.email].filter(Boolean).includes(userName));
+}
+
+function formatUserWithRole(userName, users = []) {
+  const user = findUserByTeamName(userName, users);
+  return user ? `${userName} (${userRoleLabel(user.role)})` : userName;
+}
+
+function formatProjectTeamWithRoles(projectTeam, users = []) {
+  const members = parseProjectTeam(projectTeam);
+  if (members.length === 0) return "Equipe non renseignee";
+  return members.map((member) => formatUserWithRole(member, users)).join(", ");
+}
+
+function userDisplayRole(user) {
+  return userRoleLabel(user?.role);
+}
+
+function isProjectLead(user) {
+  return hasApplicationRole(user, "CHEF_DE_PROJET", "Chef de projet");
+}
+
+function selectedProjectLeadNames(users = []) {
+  return users
+    .filter(isProjectLead)
+    .map((user) => user.fullName || user.username || user.email)
+    .filter(Boolean);
+}
+
+function countSelectedProjectLeads(projectTeam, users = []) {
+  const selectedNames = parseProjectTeam(projectTeam);
+  return selectedProjectLeadNames(users).filter((name) => selectedNames.includes(name)).length;
+}
+
+function ProjectTeamSelector({ projectTeam, users = [], onChange }) {
+  const [teamQuery, setTeamQuery] = useState("");
+  const selectedNames = useMemo(() => parseProjectTeam(projectTeam), [projectTeam]);
+  const selectedProjectLeadCount = useMemo(() => countSelectedProjectLeads(projectTeam, users), [projectTeam, users]);
+  const normalizedQuery = normalizeSearchText(teamQuery);
+  const sortedUsers = useMemo(
+    () => [...users].sort((a, b) => String(a.fullName || "").localeCompare(String(b.fullName || ""))),
+    [users]
+  );
+  const filteredUsers = sortedUsers.filter((user) => {
+    if (!normalizedQuery) return true;
+    return [user.fullName, user.username, user.email, user.jobTitle, userRoleLabel(user.role)]
+      .filter(Boolean)
+      .some((value) => normalizeSearchText(value).includes(normalizedQuery));
+  });
+
+  function toggleUser(user, checked) {
+    const userName = user.fullName || user.username || user.email;
+    const nextNames = checked
+      ? [...selectedNames.filter((name) => !isProjectLead(user) || !selectedProjectLeadNames(users).includes(name)), userName]
+      : selectedNames.filter((name) => name !== userName);
+    onChange([...new Set(nextNames)].join(", "));
+  }
+
+  return (
+    <fieldset className="project-team-field">
+      <legend>Equipe projet</legend>
+      <div className="search project-team-search">
+        <Search size={16} />
+        <input
+          placeholder="Rechercher un utilisateur"
+          value={teamQuery}
+          onChange={(event) => setTeamQuery(event.target.value)}
+        />
+      </div>
+      <div className="project-team-list">
+        {filteredUsers.length === 0 ? (
+          <p className="form-hint">Aucun utilisateur trouve.</p>
+        ) : (
+          filteredUsers.map((user) => {
+            const userName = user.fullName || user.username || user.email;
+            const checked = selectedNames.includes(userName);
+            return (
+              <label className="project-team-option" key={user.id || userName}>
+                <input
+                  checked={checked}
+                  type="checkbox"
+                  onChange={(event) => toggleUser(user, event.target.checked)}
+                />
+                <span>
+                  <strong>{userName}</strong>
+                  <small>{userDisplayRole(user)}</small>
+                </span>
+              </label>
+            );
+          })
+        )}
+      </div>
+      <p className={selectedProjectLeadCount === 1 ? "form-hint" : "form-hint project-team-warning"}>
+        {selectedNames.length} utilisateur{selectedNames.length > 1 ? "s" : ""} selectionne{selectedNames.length > 1 ? "s" : ""}.
+        {" "}Chef de projet: {selectedProjectLeadCount}/1
+      </p>
+    </fieldset>
+  );
+}
+
 function useFilteredItems(items, searchTerm, getValues) {
   return useMemo(() => {
     const normalized = normalizeSearchText(searchTerm);

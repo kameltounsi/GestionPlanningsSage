@@ -15,19 +15,24 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
   const canAdmin = currentUser?.username === "fchelbi" || currentRole === "admin";
   const pageSize = 10;
   const roleFilterOptions = useMemo(() => {
-    const baseOptions = userRoleOptions.map(([value, label]) => ({ value, label }));
-    const extraRoles = [...new Set([
+    const options = userRoleOptions.map(([value, label]) => ({ value, label }));
+    const seen = new Set(options.map((option) => roleOptionKey(option.label)));
+    [
       ...actionRoleOptions,
       ...users.map((user) => user.role)
-    ].filter(Boolean))]
-      .filter((role) => !baseOptions.some((option) => option.value === role))
-      .map((role) => ({ value: role, label: userRoleLabel(role) }));
-    return [...baseOptions, ...extraRoles].sort((a, b) => a.label.localeCompare(b.label));
+    ].filter(Boolean).forEach((role) => {
+      const label = userRoleLabel(role);
+      const key = roleOptionKey(label);
+      if (seen.has(key)) return;
+      seen.add(key);
+      options.push({ value: role, label });
+    });
+    return options.sort((a, b) => a.label.localeCompare(b.label));
   }, [actionRoleOptions, users]);
   const filteredUsers = useMemo(() => {
     const normalizedQuery = normalizeUserSearch(query);
     return users.filter((user) => {
-      const matchesRole = !roleFilter || user.role === roleFilter;
+      const matchesRole = !roleFilter || userMatchesRoleFilter(user, roleFilter);
       const matchesSearch = !normalizedQuery || [
         user.fullName,
         user.username,
@@ -170,14 +175,11 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
 
 function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, saving, users = [], onClose, onSubmit, setForm }) {
   const [localPhotoPreviewUrl, setLocalPhotoPreviewUrl] = useState("");
-  const historicalRoleLabels = userRoleOptions.map(([, label]) => label);
-  const roleOptions = [
+  const roleOptions = dedupeRoleOptions([
     ...userRoleOptions.map(([value, label]) => ({ value, label })),
-    ...actionRoleOptions
-      .filter((role) => !historicalRoleLabels.includes(role))
-      .map((role) => ({ value: role, label: role }))
-  ];
-  const displayedRoleOptions = form.role && !roleOptions.some((role) => role.value === form.role)
+    ...actionRoleOptions.map((role) => ({ value: role, label: role }))
+  ]);
+  const displayedRoleOptions = form.role && !roleOptions.some((role) => roleOptionKey(role.value) === roleOptionKey(form.role) || roleOptionKey(role.label) === roleOptionKey(userRoleLabel(form.role)))
     ? [{ value: form.role, label: userRoleLabel(form.role) }, ...roleOptions]
     : roleOptions;
   const previewPhotoUrl = localPhotoPreviewUrl || form.profilePhotoUrl || "";
@@ -344,4 +346,28 @@ function normalizeUserSearch(value) {
     .replace(/[\u0300-\u036f]/g, "")
     .trim()
     .toLowerCase();
+}
+
+function roleOptionKey(value) {
+  return normalizeUserSearch(value).replaceAll("_", " ");
+}
+
+function dedupeRoleOptions(options = []) {
+  const seen = new Set();
+  return options.filter((option) => {
+    const key = roleOptionKey(option.label || option.value);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function userMatchesRoleFilter(user, roleFilter) {
+  const filter = roleOptionKey(roleFilter);
+  if (!filter) return true;
+  return [
+    user?.role,
+    userRoleLabel(user?.role),
+    user?.jobTitle
+  ].filter(Boolean).some((value) => roleOptionKey(value) === filter);
 }

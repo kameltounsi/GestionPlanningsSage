@@ -45,6 +45,60 @@ function normalizeReferenceValue(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function finishedProductDetailRows(product) {
+  return [
+    ["Client", product.client],
+    ["Projet", product.project],
+    ["PN produit fini", product.partNumber],
+    ["Designation", product.designation],
+    ["PN client", product.customerPn],
+    ["Produit", product.product],
+    ["Indice coiffe", product.coiffeIndex],
+    ["Indice drawing", product.drawingIndex],
+    ["Code reduit", product.reducedCode],
+    ["Prix de vente", product.salePrice],
+    ["Date integration production", product.productionIntegrationDate],
+    ["Commentaires", product.comments]
+  ];
+}
+
+function finishedProductAiSummary(product, requests = []) {
+  const requestLines = requests.length === 0
+    ? "Aucune modification ne contient actuellement ce produit fini."
+    : requests.map((request, index) => `${index + 1}. ${requestDisplayName(request)}, projet ${request.modificationProject || "-"}, client ${request.client || "-"}, phase ${stageLabel(request.currentStage, Boolean(request.newVersion))}, pilote ${request.pilot || "-"}, reception ${request.receptionDate || "-"}.`).join(" ");
+  return [
+    `Produit fini ${product.partNumber || "-"}: ${product.designation || "designation non renseignee"}.`,
+    `Il est lie au client ${product.client || "-"}, au projet ${product.project || "-"} et au produit ${product.product || "-"}.`,
+    `PN client: ${product.customerPn || "-"}, code reduit: ${product.reducedCode || "-"}, indice coiffe: ${product.coiffeIndex || "-"}, indice drawing: ${product.drawingIndex || "-"}.`,
+    `Date d'integration production: ${product.productionIntegrationDate || "-"}, prix de vente: ${product.salePrice || "-"}.`,
+    product.comments ? `Commentaires: ${product.comments}.` : "",
+    `Modifications trouvees: ${requests.length}. ${requestLines}`
+  ].filter(Boolean).join(" ");
+}
+
+function speakFinishedProductSummary(text, setSpeaking, warningAlert = () => {}) {
+  if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+    warningAlert("Lecture sonore indisponible", "La synthese vocale n'est pas disponible dans ce navigateur.");
+    return;
+  }
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "fr-FR";
+  utterance.rate = 0.95;
+  utterance.pitch = 1;
+  utterance.onend = () => setSpeaking(false);
+  utterance.onerror = () => setSpeaking(false);
+  setSpeaking(true);
+  window.speechSynthesis.speak(utterance);
+}
+
+function stopFinishedProductSpeech(setSpeaking) {
+  if ("speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
+  setSpeaking(false);
+}
+
 function isImageAsset(contentType, url) {
   const type = String(contentType || "").toLowerCase();
   const path = String(url || "").toLowerCase();

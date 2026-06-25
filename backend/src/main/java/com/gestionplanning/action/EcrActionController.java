@@ -91,16 +91,21 @@ public class EcrActionController {
             if (!accessControlService.canAccessRequest(user, request)) {
                 return ResponseEntity.status(403).<List<EcrAction>>build();
             }
-            if (!accessControlService.canSeeAllActions(user, request) && !canViewStage(request, stage)) {
-                return ResponseEntity.status(403).<List<EcrAction>>build();
-            }
             templateService.ensureActionsFor(request);
             planningService.recalculateRequest(request);
             List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(requestId);
             if (!accessControlService.canSeeAllActions(user, request)) {
                 actions = visibleActionsForUser(actions, user);
-            }
-            if (stage != null) {
+                if (stage != null) {
+                    List<EcrAction> stageActions = actions.stream()
+                            .filter(action -> action.getStage() == stage)
+                            .collect(Collectors.toList());
+                    if (stageActions.isEmpty() && !canViewStage(request, stage)) {
+                        return ResponseEntity.ok(stageActions);
+                    }
+                    actions = stageActions;
+                }
+            } else if (stage != null) {
                 actions = actions.stream()
                         .filter(action -> action.getStage() == stage)
                         .collect(Collectors.toList());

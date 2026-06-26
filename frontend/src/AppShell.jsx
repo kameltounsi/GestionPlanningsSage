@@ -1671,6 +1671,10 @@ function canValidatePhases(user) {
   return isAdminUser(user) || hasApplicationRole(user, "MANAGER", "Manager");
 }
 
+function canSeeAllActionsForUser(user, request) {
+  return isAdminUser(user) || isRequestPilot(user, request);
+}
+
 function normalizeRoleToken(value) {
   return String(value || "")
     .normalize("NFD")
@@ -1770,10 +1774,44 @@ function blockingActionFor(action, actions = []) {
   return actions.find((item) => item.id === action.dependsOnActionId) || null;
 }
 
+function actionCreatedTime(action) {
+  const time = Date.parse(action?.createdAt || "");
+  return Number.isNaN(time) ? null : time;
+}
+
+function actionPlanningTime(action) {
+  const time = Date.parse(action?.startDate || action?.endDate || action?.deadline || "");
+  return Number.isNaN(time) ? null : time;
+}
+
+function compareActionDisplayOrder(first, second) {
+  const firstPlanningTime = actionPlanningTime(first);
+  const secondPlanningTime = actionPlanningTime(second);
+  if (firstPlanningTime !== null && secondPlanningTime !== null && firstPlanningTime !== secondPlanningTime) {
+    return firstPlanningTime - secondPlanningTime;
+  }
+  if (firstPlanningTime !== null && secondPlanningTime === null) return -1;
+  if (firstPlanningTime === null && secondPlanningTime !== null) return 1;
+  const firstTime = actionCreatedTime(first);
+  const secondTime = actionCreatedTime(second);
+  if (firstTime !== null && secondTime !== null && firstTime !== secondTime) {
+    return firstTime - secondTime;
+  }
+  return (Number(first?.id) || 0) - (Number(second?.id) || 0);
+}
+
+function actionOrderNumber(action, actions = []) {
+  const orderedActions = [...actions].sort(compareActionDisplayOrder);
+  const index = orderedActions.findIndex((item) => item.id === action?.id);
+  return index >= 0 ? index + 1 : null;
+}
+
 function blockingActionLabel(action, actions = []) {
   if (!action?.dependsOnActionId) return "Aucune";
   const dependency = blockingActionFor(action, actions);
-  return dependency?.title || `Action #${action.dependsOnActionId}`;
+  const dependencyOrder = actionOrderNumber(dependency, actions);
+  const prefix = dependencyOrder ? `Action ${dependencyOrder}` : `Action #${action.dependsOnActionId}`;
+  return dependency?.title ? `${prefix}: ${dependency.title}` : prefix;
 }
 
 function isRequestPilot(user, request) {
@@ -1916,17 +1954,13 @@ function App() {
   }, [selectedRequest]);
   const visibleStages = useMemo(() => {
     if (!selectedRequest || isAdminUser(currentUser)) return selectedStages;
-    const participantStages = new Set((actionsByRequestId[selectedRequest.id] || [])
-      .filter((action) => isActionParticipantForUser(currentUser, action))
-      .map((action) => action.stage)
+    const approvedStages = new Set(phaseValidations
+      .filter((validation) => validation.status === "APPROVED")
+      .map((validation) => validation.stage)
       .filter(Boolean));
-    if (isClosedRequest(selectedRequest)) {
-      const stagesWithUserActions = selectedStages.filter(([key]) => participantStages.has(key));
-      return stagesWithUserActions.length > 0 ? stagesWithUserActions : selectedStages;
-    }
-    const currentIndex = selectedStages.findIndex(([key]) => key === selectedRequest.currentStage);
-    return selectedStages.filter(([key], index) => participantStages.has(key) || currentIndex < 0 || index <= currentIndex);
-  }, [actionsByRequestId, currentUser, selectedRequest, selectedStages]);
+    const currentStage = selectedRequest.currentStage;
+    return selectedStages.filter(([key]) => key === currentStage || approvedStages.has(key));
+  }, [currentUser, phaseValidations, selectedRequest, selectedStages]);
   const waitingForClosedParticipantActions = Boolean(
     selectedRequest &&
     !isAdminUser(currentUser) &&
@@ -1936,8 +1970,8 @@ function App() {
   const canLoadSelectedStage = !waitingForClosedParticipantActions && visibleStages.some(([key]) => key === selectedStage);
   const activeRequests = useMemo(() => requests.filter(isActiveRequest), [requests]);
   const visibleActions = useMemo(() => (
-    isAdminUser(currentUser) ? actions : actions.filter((action) => isActionParticipantForUser(currentUser, action))
-  ), [actions, currentUser]);
+    canSeeAllActionsForUser(currentUser, selectedRequest) ? actions : actions.filter((action) => isActionParticipantForUser(currentUser, action))
+  ), [actions, currentUser, selectedRequest]);
   const doneCount = actions.filter(isActionDone).length;
   const completion = modificationCompletionRate(selectedRequest, actions);
   const lateActions = actions.filter((action) => action.late).length;
@@ -5953,7 +5987,7 @@ function ModificationsPage(props) {
   const canCloseRequest = !requestTerminal && canAdmin && workflowApproved && selectedRequest?.closureRequested;
   const currentValidation = phaseValidations.find((validation) => validation.stage === selectedStage && validation.status === "PENDING");
   const latestStageValidation = phaseValidations.find((validation) => validation.stage === selectedStage);
-  const visibleActions = canAdmin ? actions : actions.filter((action) => isActionParticipantForUser(currentUser, action));
+  const visibleActions = canSeeAllActionsForUser(currentUser, selectedRequest) ? actions : actions.filter((action) => isActionParticipantForUser(currentUser, action));
   const stageActionsDone = actions.length > 0 && actions.every(isActionDone);
   const isCurrentStage = selectedRequest && selectedStage === selectedRequest.currentStage;
   const authenticatedUserRequests = useMemo(() => {
@@ -6662,7 +6696,7 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
     setDurationValues((current) => {
       const nextValues = {};
       actions.forEach((action) => {
-        nextValues[action.id] = current[action.id] ?? String(action.workDurationDays ?? 1);
+        nextValues[action.id] = String(action.workDurationDays ?? 1);
       });
       return nextValues;
     });
@@ -6694,7 +6728,7 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
         {actions.length === 0 ? (
           <EmptyState title="Aucune action pour cette phase" text="Ajoutez une action ou utilisez les actions générées lors de la création ECR." />
         ) : (
-          actions.map((action) => {
+          [...actions].sort(compareActionDisplayOrder).map((action, index) => {
             const blockingAction = blockingActionFor(action, actions);
             const isBlocked = Boolean(action.dependsOnActionId && (!blockingAction || !isActionDone(blockingAction)));
             const canDeleteAction = !readOnly && canDeleteActionForUser(currentUser, action, selectedRequest, phaseValidations);
@@ -6717,6 +6751,7 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
                 )}
               </div>
               <div className="action-meta">
+                <span><em>Ordre</em><strong>Action {index + 1}</strong></span>
                 <span><em>Pilote</em><strong>{action.responsible || "À définir"}</strong></span>
                 <span><em>Validateur</em><strong>{action.validatorDisplayName || action.validator || "à définir"}</strong></span>
                 <span><em>Criticité</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>
@@ -6938,7 +6973,7 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
   const dependencyOptions = actions
     .filter((action) => action.stage === selectedActionStage)
     .filter((action) => action.id)
-    .sort((first, second) => String(first.title || "").localeCompare(String(second.title || "")));
+    .sort(compareActionDisplayOrder);
 
   function addProofDocumentFiles(event) {
     const selectedFiles = Array.from(event.currentTarget.files || []);
@@ -7005,8 +7040,8 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
             Bloquee par
             <select value={actionForm.dependsOnActionId || ""} onChange={(event) => updateActionForm("dependsOnActionId", event.target.value)}>
               <option value="">Aucune action</option>
-              {dependencyOptions.map((action) => (
-                <option key={action.id} value={action.id}>{action.title}</option>
+              {dependencyOptions.map((action, index) => (
+                <option key={action.id} value={action.id}>Action {index + 1} - {action.title}</option>
               ))}
             </select>
           </label>

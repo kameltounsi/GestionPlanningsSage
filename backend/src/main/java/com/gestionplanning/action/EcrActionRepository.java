@@ -11,6 +11,8 @@ public interface EcrActionRepository extends JpaRepository<EcrAction, Long> {
 
     List<EcrAction> findByRequest_IdOrderByCreatedAtAscIdAsc(Long requestId);
 
+    List<EcrAction> findByRequest_IdOrderByStartDateAscEndDateAscDeadlineAscCreatedAtAscIdAsc(Long requestId);
+
     List<EcrAction> findByRequest_IdAndStageOrderByDeadlineAscIdAsc(Long requestId, EcrStage stage);
 
     List<EcrAction> findByRequest_IdAndStageOrderByCreatedAtAscIdAsc(Long requestId, EcrStage stage);

@@ -394,7 +394,9 @@ public class EcrTemplateService {
     }
 
     private void applyRulePlanning(EcrAction action, ActionPlanningRule rule) {
-        action.setWorkDurationDays(rule.getDurationDays());
+        if (!action.isDurationOverridden()) {
+            action.setWorkDurationDays(rule.getDurationDays());
+        }
         action.setDependencyAnchor(rule.getDependencyAnchor());
     }
 

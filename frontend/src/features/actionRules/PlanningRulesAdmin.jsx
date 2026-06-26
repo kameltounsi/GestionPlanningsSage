@@ -174,10 +174,15 @@ function PhaseActionGrid({ label, newProject = false, rules, selectedStage, type
       </div>
       <div className="admin-phase-grid">
         {stages.map((stage) => {
+          const actionCount = rules
+            .filter((rule) => rule.stage === stage.key)
+            .filter((rule) => (newProject ? rule.appliesToNewProject : rule.appliesToModification))
+            .length;
           return (
             <article className={`admin-phase-card ${stageColorClass(stage.key, newProject)} ${selectedStage === stage.key ? "selected" : ""}`} key={`${type}-${stage.key}`}>
               <button className="phase-select-action" type="button" onClick={() => onSelect(stage.key)}>
                 <strong>{newProject ? stage.newProjectLabel : stage.modificationLabel}</strong>
+                <span className="phase-action-count">{actionCount} action{actionCount > 1 ? "s" : ""} déjà créée{actionCount > 1 ? "s" : ""}</span>
               </button>
               <button className="phase-add-action" type="button" onClick={(event) => {
                 event.stopPropagation();

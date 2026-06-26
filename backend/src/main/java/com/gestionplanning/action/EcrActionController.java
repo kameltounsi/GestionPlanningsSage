@@ -87,31 +87,33 @@ public class EcrActionController {
     @GetMapping("/ecr-requests/{requestId}/actions")
     public ResponseEntity<List<EcrAction>> listByRequest(@PathVariable Long requestId, @RequestParam(required = false) EcrStage stage,
                                                          @RequestAttribute("authenticatedUser") AppUser user) {
-        return requestRepository.findById(requestId).map(request -> {
-            if (!accessControlService.canAccessRequest(user, request)) {
-                return ResponseEntity.status(403).<List<EcrAction>>build();
-            }
-            templateService.ensureActionsFor(request);
-            planningService.recalculateRequest(request);
-            List<EcrAction> actions = actionRepository.findByRequest_IdOrderByCreatedAtAscIdAsc(requestId);
-            if (!accessControlService.canSeeAllActions(user, request)) {
-                actions = visibleActionsForUser(actions, user);
-                if (stage != null) {
-                    List<EcrAction> stageActions = actions.stream()
-                            .filter(action -> action.getStage() == stage)
-                            .collect(Collectors.toList());
-                    if (stageActions.isEmpty() && !canViewStage(request, stage)) {
-                        return ResponseEntity.ok(stageActions);
-                    }
-                    actions = stageActions;
+        Optional<com.gestionplanning.ecr.EcrRequest> optionalRequest = requestRepository.findById(requestId);
+        if (!optionalRequest.isPresent()) {
+            return ResponseEntity.notFound().build();
+        }
+        com.gestionplanning.ecr.EcrRequest request = optionalRequest.get();
+        if (!accessControlService.canAccessRequest(user, request)) {
+            return ResponseEntity.status(403).build();
+        }
+        templateService.ensureActionsFor(request);
+        planningService.recalculateRequest(request);
+        List<EcrAction> actions = actionRepository.findByRequest_IdOrderByStartDateAscEndDateAscDeadlineAscCreatedAtAscIdAsc(requestId);
+        if (!accessControlService.canSeeAllActions(user, request)) {
+            actions = visibleActionsForUser(actions, user);
+            if (stage != null) {
+                if (!canViewStage(request, stage)) {
+                    return ResponseEntity.ok(java.util.Collections.<EcrAction>emptyList());
                 }
-            } else if (stage != null) {
                 actions = actions.stream()
                         .filter(action -> action.getStage() == stage)
                         .collect(Collectors.toList());
             }
-            return ResponseEntity.ok(enrichActions(actions));
-        }).orElse(ResponseEntity.notFound().build());
+        } else if (stage != null) {
+            actions = actions.stream()
+                    .filter(action -> action.getStage() == stage)
+                    .collect(Collectors.toList());
+        }
+        return ResponseEntity.ok(enrichActions(actions));
     }
 
     @PostMapping("/ecr-requests/{requestId}/actions")
@@ -148,8 +150,12 @@ public class EcrActionController {
                     }
                     action.setRequest(request);
                     action.setStage(actionStage);
-                    if (!isValidPreviousDependency(action, action.getDependsOnActionId())) {
+                    action.setDurationOverridden(true);
+                    if (!isValidPreviousDependency(action, action.getDependsOnActionId(), actionStage)) {
                         return ResponseEntity.status(422).<EcrAction>build();
+                    }
+                    if (isDone(action) && !isDependencyCompleted(action)) {
+                        return ResponseEntity.badRequest().<EcrAction>build();
                     }
                     action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
                     if (isDone(action) && !accessControlService.canCompleteAction(user, action)) {
@@ -220,12 +226,14 @@ public class EcrActionController {
                     action.setStartDate(updatedAction.getStartDate());
                     action.setEndDate(updatedAction.getEndDate());
                     action.setWorkDurationDays(updatedAction.getWorkDurationDays());
-                    action.setStage(updatedAction.getStage());
-                    if (!isValidPreviousDependency(action, updatedAction.getDependsOnActionId())) {
+                    action.setDurationOverridden(action.isDurationOverridden() || !Objects.equals(defaultDuration(previousDuration), defaultDuration(updatedAction.getWorkDurationDays())));
+                    EcrStage updatedStage = updatedAction.getStage() == null ? action.getStage() : updatedAction.getStage();
+                    if (!isValidPreviousDependency(action, updatedAction.getDependsOnActionId(), updatedStage)) {
                         return ResponseEntity.status(422).<EcrAction>build();
                     }
                     action.setDependsOnActionId(updatedAction.getDependsOnActionId());
                     action.setDependencyAnchor(updatedAction.getDependencyAnchor());
+                    action.setStage(updatedStage);
                     if (isDone(updatedAction) && !isDependencyCompleted(action)) {
                         return ResponseEntity.badRequest().<EcrAction>build();
                     }
@@ -266,6 +274,7 @@ public class EcrActionController {
         action.setComment(updatedAction.getComment());
         if (canUpdateDuration(user, action)) {
             action.setWorkDurationDays(defaultDuration(updatedAction.getWorkDurationDays()));
+            action.setDurationOverridden(action.isDurationOverridden() || !Objects.equals(defaultDuration(previousDuration), defaultDuration(updatedAction.getWorkDurationDays())));
         }
         syncFinalizationDate(action, updatedAction);
         syncValidationAfterProgressChange(action);
@@ -284,6 +293,7 @@ public class EcrActionController {
         Integer previousDuration = action.getWorkDurationDays();
         LocalDate previousEndDate = action.getEndDate();
         action.setWorkDurationDays(defaultDuration(updatedAction.getWorkDurationDays()));
+        action.setDurationOverridden(true);
         EcrAction saved = actionRepository.save(action);
         planningService.recalculateAfterDurationChange(saved, previousDuration, previousEndDate);
         return ResponseEntity.ok(enrichAction(saved));
@@ -662,22 +672,7 @@ public class EcrActionController {
         if (stage == null) {
             return true;
         }
-        if (stage == EcrStage.CANCELLED && request.getCurrentStage() != EcrStage.CANCELLED) {
-            return false;
-        }
-        if (request.getCurrentStage() == EcrStage.CANCELLED) {
-            if (stage == EcrStage.CANCELLED) {
-                return true;
-            }
-            List<EcrStage> stages = EcrStage.allowedStages(request.isNewVersion());
-            int stageIndex = stages.indexOf(stage);
-            int cancelledFromIndex = stages.indexOf(request.getCancelledFromStage());
-            return stageIndex >= 0 && cancelledFromIndex >= 0 && stageIndex <= cancelledFromIndex;
-        }
-        List<EcrStage> stages = EcrStage.allowedStages(request.isNewVersion());
-        int stageIndex = stages.indexOf(stage);
-        int currentIndex = stages.indexOf(request.getCurrentStage());
-        return stageIndex >= 0 && currentIndex >= 0 && stageIndex <= currentIndex;
+        return stage == request.getCurrentStage() || isPhaseApproved(request.getId(), stage);
     }
 
     private boolean canUpdateDuration(AppUser user, EcrAction action) {
@@ -792,7 +787,7 @@ public class EcrActionController {
         return !isDone(currentAction) && isDone(updatedAction);
     }
 
-    private boolean isValidPreviousDependency(EcrAction action, Long dependencyId) {
+    private boolean isValidPreviousDependency(EcrAction action, Long dependencyId, EcrStage proposedStage) {
         if (dependencyId == null) {
             return true;
         }
@@ -805,7 +800,7 @@ public class EcrActionController {
         return actionRepository.findById(dependencyId)
                 .filter(dependency -> dependency.getRequest() != null)
                 .filter(dependency -> Objects.equals(dependency.getRequest().getId(), action.getRequest().getId()))
-                .filter(dependency -> dependency.getStage() == action.getStage())
+                .filter(dependency -> dependency.getStage() == proposedStage)
                 .map(dependency -> isDependencyBeforeAction(dependency, action))
                 .orElse(false);
     }
@@ -813,6 +808,14 @@ public class EcrActionController {
     private boolean isDependencyBeforeAction(EcrAction dependency, EcrAction action) {
         if (action.getId() == null) {
             return true;
+        }
+        LocalDate dependencyOrderDate = actionOrderDate(dependency);
+        LocalDate actionOrderDate = actionOrderDate(action);
+        if (dependencyOrderDate != null && actionOrderDate != null) {
+            int dateComparison = dependencyOrderDate.compareTo(actionOrderDate);
+            if (dateComparison != 0) {
+                return dateComparison < 0;
+            }
         }
         if (dependency.getCreatedAt() != null && action.getCreatedAt() != null) {
             int dateComparison = dependency.getCreatedAt().compareTo(action.getCreatedAt());
@@ -824,6 +827,19 @@ public class EcrActionController {
             return false;
         }
         return dependency.getId() < action.getId();
+    }
+
+    private LocalDate actionOrderDate(EcrAction action) {
+        if (action == null) {
+            return null;
+        }
+        if (action.getStartDate() != null) {
+            return action.getStartDate();
+        }
+        if (action.getEndDate() != null) {
+            return action.getEndDate();
+        }
+        return action.getDeadline();
     }
 
     private boolean isActionStartBeforeNextPhase(com.gestionplanning.ecr.EcrRequest request, EcrAction action, Long excludedActionId) {

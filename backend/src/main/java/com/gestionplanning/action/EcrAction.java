@@ -88,6 +88,8 @@ public class EcrAction {
     private LocalDate startDate;
     private LocalDate endDate;
     private Integer workDurationDays;
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean durationOverridden;
     private Long dependsOnActionId;
     private String dependencyAnchor;
     @Column(nullable = false, columnDefinition = "boolean default false")
@@ -105,7 +107,7 @@ public class EcrAction {
 
     private LocalDate closedDate;
     private LocalDateTime finalizationDate;
-    @Column(nullable = false, updatable = false)
+    @Column(updatable = false)
     private LocalDateTime createdAt;
 
     @Enumerated(EnumType.STRING)
@@ -409,6 +411,14 @@ public class EcrAction {
 
     public void setWorkDurationDays(Integer workDurationDays) {
         this.workDurationDays = workDurationDays;
+    }
+
+    public boolean isDurationOverridden() {
+        return durationOverridden;
+    }
+
+    public void setDurationOverridden(boolean durationOverridden) {
+        this.durationOverridden = durationOverridden;
     }
 
     public Long getDependsOnActionId() {

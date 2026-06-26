@@ -1,6 +1,9 @@
 package com.gestionplanning.ecr;
 
 import com.gestionplanning.action.ActionPlanningService;
+import com.gestionplanning.action.ActionStatus;
+import com.gestionplanning.action.EcrAction;
+import com.gestionplanning.action.EcrActionRepository;
 import com.gestionplanning.audit.AuditLogService;
 import com.gestionplanning.auth.AccessControlService;
 import com.gestionplanning.preferential.FinishedProductReference;
@@ -34,6 +37,7 @@ public class EcrRequestController {
     private final CloudinaryStorageService storageService;
     private final EcrTemplateService templateService;
     private final ActionPlanningService planningService;
+    private final EcrActionRepository actionRepository;
     private final AccessControlService accessControlService;
     private final PhaseValidationRequestRepository validationRepository;
     private final AuditLogService auditLogService;
@@ -42,7 +46,7 @@ public class EcrRequestController {
 
     public EcrRequestController(EcrRequestRepository requestRepository, ChecklistItemRepository checklistItemRepository,
                                 CloudinaryStorageService storageService, EcrTemplateService templateService,
-                                ActionPlanningService planningService, AccessControlService accessControlService,
+                                ActionPlanningService planningService, EcrActionRepository actionRepository, AccessControlService accessControlService,
                                 PhaseValidationRequestRepository validationRepository, AuditLogService auditLogService,
                                 AccountMailService accountMailService,
                                 FinishedProductReferenceRepository finishedProductRepository) {
@@ -51,6 +55,7 @@ public class EcrRequestController {
         this.storageService = storageService;
         this.templateService = templateService;
         this.planningService = planningService;
+        this.actionRepository = actionRepository;
         this.accessControlService = accessControlService;
         this.validationRepository = validationRepository;
         this.auditLogService = auditLogService;
@@ -82,6 +87,26 @@ public class EcrRequestController {
                 .filter(request -> accessControlService.canAccessRequest(user, request))
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.status(403).build());
+    }
+
+    @GetMapping("/{id}/progress")
+    public ResponseEntity<RequestProgress> progress(@PathVariable Long id, @RequestAttribute("authenticatedUser") AppUser user) {
+        java.util.Optional<EcrRequest> requestOptional = requestRepository.findById(id)
+                .filter(request -> accessControlService.canAccessRequest(user, request));
+        if (!requestOptional.isPresent()) {
+            return ResponseEntity.status(403).<RequestProgress>build();
+        }
+        EcrRequest request = requestOptional.get();
+        List<EcrAction> actions = actionRepository.findByRequest_IdOrderByStartDateAscEndDateAscDeadlineAscCreatedAtAscIdAsc(id);
+        planningService.refreshActionStatuses(actions);
+        long doneActions = actions.stream().filter(this::isDone).count();
+        int totalActions = actions.size();
+        int progress = totalActions == 0 ? 0 : Math.round((doneActions * 100f) / totalActions);
+        if (request.getCurrentStage() == EcrStage.CLOSED || request.isClosureStatus()) {
+            progress = 100;
+            doneActions = totalActions;
+        }
+        return ResponseEntity.ok(new RequestProgress(totalActions, (int) doneActions, progress));
     }
 
     @PostMapping
@@ -600,6 +625,10 @@ public class EcrRequestController {
         return request != null && (request.getCurrentStage() == EcrStage.CLOSED || request.isClosureStatus());
     }
 
+    private boolean isDone(EcrAction action) {
+        return action != null && (action.isChecked() || action.getStatus() == ActionStatus.DONE || action.getStatus() == ActionStatus.DONE_LATE);
+    }
+
     private boolean dossierReviewChanged(String currentValue, String nextValue) {
         return !Objects.equals(normalizeDossierReview(currentValue), normalizeDossierReview(nextValue));
     }
@@ -732,6 +761,30 @@ public class EcrRequestController {
 
         private String resourceType() {
             return resourceType;
+        }
+    }
+
+    public static class RequestProgress {
+        private final int totalActions;
+        private final int doneActions;
+        private final int progress;
+
+        public RequestProgress(int totalActions, int doneActions, int progress) {
+            this.totalActions = totalActions;
+            this.doneActions = doneActions;
+            this.progress = progress;
+        }
+
+        public int getTotalActions() {
+            return totalActions;
+        }
+
+        public int getDoneActions() {
+            return doneActions;
+        }
+
+        public int getProgress() {
+            return progress;
         }
     }
 

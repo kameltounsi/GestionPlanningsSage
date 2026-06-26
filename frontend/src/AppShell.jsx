@@ -60,6 +60,7 @@ import {
   chatTyping,
   addActionSuggestionToDefaults,
   acknowledgeActionDeadlineAlerts,
+  acknowledgePhaseSoundAlerts,
   archiveEcrRequest,
   deleteAction,
   deleteActionPlanningRule,
@@ -76,6 +77,7 @@ import {
   getActionPlanningRules,
   getActionStandardSuggestions,
   getPendingActionDeadlineAlerts,
+  getPendingPhaseSoundAlerts,
   getActions,
   getChecklist,
   getChatConversations,
@@ -84,6 +86,7 @@ import {
   getChatUsers,
   getClientReferences,
   getCurrentUser,
+  getEcrRequestProgress,
   getEcrRequests,
   getFinishedProductReferences,
   getAuditLogs,
@@ -1476,10 +1479,11 @@ function blobToDataUrl(blob) {
   });
 }
 
-function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
+function modificationGanttPdfHtml(request, actions = [], selectedStages = [], progressSummary = null) {
   const fallbackStart = requestTimelineStart(request);
   const ganttStages = ganttStagesForRequest(request, selectedStages);
   const filteredActions = filterGanttActionsForRequest(request, actions, selectedStages);
+  const allModificationActions = filterGanttActionsForRequest(request, actions, stagesForRequest(request));
   const actionRows = filteredActions
     .map((action) => {
       const start = actionTimelineStart(action, fallbackStart);
@@ -1505,8 +1509,13 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
   const sortedStages = ganttStages.length > 0
     ? ganttStages.map(([key]) => key)
     : Array.from(groupedRows.keys()).sort((first, second) => (stageOrder.get(first) ?? 99) - (stageOrder.get(second) ?? 99));
-  const doneCount = actionRows.filter(({ action }) => isActionDone(action)).length;
-  const completionRate = modificationCompletionRate(request, actionRows.map(({ action }) => action));
+  const computedDoneCount = allModificationActions.filter(isActionDone).length;
+  const progressTotalActions = Number(progressSummary?.totalActions);
+  const progressDoneActions = Number(progressSummary?.doneActions);
+  const progressRate = Number(progressSummary?.progress);
+  const globalActionCount = Number.isFinite(progressTotalActions) ? progressTotalActions : allModificationActions.length;
+  const doneCount = Number.isFinite(progressDoneActions) ? progressDoneActions : computedDoneCount;
+  const completionRate = Math.max(0, Math.min(100, Math.round(Number.isFinite(progressRate) ? progressRate : modificationCompletionRate(request, allModificationActions))));
   const lateCount = actionRows.filter(({ action }) => actionGanttStatusClass(action) === "late").length;
   const criticalCount = actionRows.filter(({ action }) => isCriticalActionValue(action)).length;
   const stagePages = [];
@@ -1577,7 +1586,7 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = []) {
   const pageHtml = stagePages.map((pageRows, pageIndex) => `<main class="pdf-export-page gantt-export-page">
     <header>
       <div class="brand-block"><img class="gantt-logo" src="/sage_logo1.png" alt="SAGE Automotive Interiors" /><div><h1>DIAGRAMME <span>DE GANTT</span></h1><div class="meta">${escapeHtml(requestDisplayName(request))} | Projet: ${escapeHtml(request.modificationProject || "-")} | Client: ${escapeHtml(request.client || "-")} | Produit: ${escapeHtml(request.product || "-")} | Pilote: ${escapeHtml(request.pilot || "-")}<br>Extraction: ${escapeHtml(new Date().toLocaleString("fr-FR"))} | Periode: ${escapeHtml(formatDateOnly(timelineStart))} - ${escapeHtml(formatDateOnly(timelineEnd))} | Avancement global actuel: ${completionRate}%</div></div></div>
-      <div class="summary"><span>Actions: ${actionRows.length}</span><span>Done: ${doneCount}</span><span>En retard: ${lateCount}</span><span>Critiques: ${criticalCount}</span><span>Phase: ${escapeHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</span><span class="progress-summary"><span class="progress-line"><b class="progress-label">Avancement global actuel: ${completionRate}%</b><i class="progress-track"><i class="progress-fill"></i></i></span></span></div>
+      <div class="summary"><span>Actions globales: ${globalActionCount}</span><span>Actions affichees: ${actionRows.length}</span><span>Done global: ${doneCount}</span><span>En retard: ${lateCount}</span><span>Critiques: ${criticalCount}</span><span>Phase: ${escapeHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</span><span class="progress-summary"><span class="progress-line"><b class="progress-label">Avancement global actuel: ${completionRate}%</b><i class="progress-track"><i class="progress-fill"></i></i></span></span></div>
     </header>
     <section class="gantt-table">
       ${tableHeadHtml}
@@ -2165,8 +2174,10 @@ function App() {
   useEffect(() => {
     if (!currentUser) return undefined;
     refreshActionDeadlineAlerts();
+    refreshPhaseSoundAlerts();
     const intervalId = window.setInterval(() => {
       refreshActionDeadlineAlerts();
+      refreshPhaseSoundAlerts();
     }, 3000);
     return () => window.clearInterval(intervalId);
   }, [currentUser]);
@@ -2247,6 +2258,51 @@ function App() {
           timerProgressBar: true
         });
         return acknowledgeActionDeadlineAlerts(alerts.map((alert) => alert.id)).then(() => alerts);
+      })
+      .catch(() => []);
+  }
+
+  function refreshPhaseSoundAlerts() {
+    return getPendingPhaseSoundAlerts()
+      .then((alerts) => {
+        if (!Array.isArray(alerts) || alerts.length === 0) {
+          return [];
+        }
+        playActionSuggestionSound();
+        const firstAlert = alerts[0];
+        const request = requests.find((item) => item.id === firstAlert.requestId);
+        Swal.fire({
+          toast: true,
+          position: "top-end",
+          icon: "success",
+          title: "Phase validée avec succès",
+          html: `<div style="text-align:left">
+              <div><strong>${escapeHtml(firstAlert.approvedPhaseLabel || "Phase")}</strong> validée dans <strong>${escapeHtml(firstAlert.requestLabel || "Modification")}</strong>.</div>
+              <div>Nouvelle phase ouverte: <strong>${escapeHtml(firstAlert.openedPhaseLabel || "Phase suivante")}</strong>.</div>
+            </div>`,
+          showConfirmButton: true,
+          confirmButtonText: "Consulter",
+          showCancelButton: true,
+          cancelButtonText: "Fermer",
+          timer: 12000,
+          timerProgressBar: true
+        }).then((result) => {
+          if (!result.isConfirmed) {
+            return;
+          }
+          if (request) {
+            openRequest(request, firstAlert.openedStage || request.currentStage);
+            return;
+          }
+          if (firstAlert.requestId) {
+            setSelectedId(firstAlert.requestId);
+            if (firstAlert.openedStage) {
+              setSelectedStage(firstAlert.openedStage);
+            }
+            navigateToPage("modifications");
+          }
+        });
+        return acknowledgePhaseSoundAlerts(alerts.map((alert) => alert.id)).then(() => alerts);
       })
       .catch(() => []);
   }
@@ -5980,7 +6036,7 @@ function ModificationsPage(props) {
   const requestTerminal = isTerminalRequest(selectedRequest);
   const canManageDossierReview = !requestTerminal && (canAdmin || canRequestValidation);
   const canExportDossierReview = canAdmin || canRequestValidation;
-  const canExportGantt = canAdmin || canRequestValidation;
+  const canExportGantt = Boolean(selectedRequest);
   const canCancelRequest = !requestTerminal && canAdmin && selectedRequest?.currentStage !== "CANCELLED";
   const workflowApproved = allWorkflowStagesApproved(selectedRequest, phaseValidations);
   const canRequestClosure = !requestTerminal && canRequestValidation && workflowApproved && !selectedRequest?.closureRequested;
@@ -6022,11 +6078,14 @@ function ModificationsPage(props) {
 
   function exportModificationGanttPdf() {
     if (!selectedRequest) return;
-    getActions(selectedRequest.id)
-      .then(async (requestActions) => {
+    Promise.all([
+      getActions(selectedRequest.id),
+      getEcrRequestProgress(selectedRequest.id).catch(() => null)
+    ])
+      .then(async ([requestActions, progressSummary]) => {
         await downloadHtmlAsPdf(
           `diagramme-gantt-${fileNameToken(requestDisplayName(selectedRequest))}.pdf`,
-          modificationGanttPdfHtml(selectedRequest, requestActions, selectedStages)
+          modificationGanttPdfHtml(selectedRequest, requestActions, stagesForRequest(selectedRequest), progressSummary)
         );
         successToast("Diagramme de Gantt PDF telecharge");
       })

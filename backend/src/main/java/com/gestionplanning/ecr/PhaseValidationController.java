@@ -29,19 +29,22 @@ public class PhaseValidationController {
     private final AccessControlService accessControlService;
     private final AccountMailService accountMailService;
     private final AuditLogService auditLogService;
+    private final PhaseSoundAlertService phaseSoundAlertService;
 
     public PhaseValidationController(EcrRequestRepository requestRepository,
                                      EcrActionRepository actionRepository,
                                      PhaseValidationRequestRepository validationRepository,
                                      AccessControlService accessControlService,
                                      AccountMailService accountMailService,
-                                     AuditLogService auditLogService) {
+                                     AuditLogService auditLogService,
+                                     PhaseSoundAlertService phaseSoundAlertService) {
         this.requestRepository = requestRepository;
         this.actionRepository = actionRepository;
         this.validationRepository = validationRepository;
         this.accessControlService = accessControlService;
         this.accountMailService = accountMailService;
         this.auditLogService = auditLogService;
+        this.phaseSoundAlertService = phaseSoundAlertService;
     }
 
     @GetMapping
@@ -172,7 +175,8 @@ public class PhaseValidationController {
                         updatedValidation.setReviewedAt(LocalDateTime.now());
                         validationRepository.save(updatedValidation);
                         EcrRequest request = updatedValidation.getRequest();
-                        advanceRequestAfterPhaseApproval(request, updatedValidation.getStage());
+                        EcrRequest savedRequest = advanceRequestAfterPhaseApproval(request, updatedValidation.getStage());
+                        phaseSoundAlertService.notifyPhaseApproved(savedRequest, updatedValidation.getStage(), savedRequest.getCurrentStage());
                         auditLogService.recordBusinessEvent(
                                 user,
                                 "VALIDATION_PHASE",
@@ -250,6 +254,7 @@ public class PhaseValidationController {
                     validationRepository.save(validation);
                     EcrRequest request = validation.getRequest();
                     EcrRequest savedRequest = advanceRequestAfterPhaseApproval(request, validation.getStage());
+                    phaseSoundAlertService.notifyPhaseApproved(savedRequest, validation.getStage(), savedRequest.getCurrentStage());
                     auditLogService.recordBusinessEvent(
                             user,
                             "VALIDATION_PHASE",

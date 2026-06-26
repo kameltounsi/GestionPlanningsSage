@@ -488,6 +488,10 @@ export function getActions(requestId, stage) {
   return request(`/ecr-requests/${requestId}/actions${query}`);
 }
 
+export function getEcrRequestProgress(requestId) {
+  return request(`/ecr-requests/${requestId}/progress`);
+}
+
 export function createAction(requestId, payload) {
   return request(`/ecr-requests/${requestId}/actions`, {
     method: "POST",
@@ -619,6 +623,17 @@ export function getPendingActionDeadlineAlerts() {
 
 export function acknowledgeActionDeadlineAlerts(ids) {
   return request("/action-deadline-alerts/ack-sound", {
+    method: "POST",
+    body: JSON.stringify(ids)
+  });
+}
+
+export function getPendingPhaseSoundAlerts() {
+  return request("/phase-sound-alerts/pending-sound");
+}
+
+export function acknowledgePhaseSoundAlerts(ids) {
+  return request("/phase-sound-alerts/ack-sound", {
     method: "POST",
     body: JSON.stringify(ids)
   });

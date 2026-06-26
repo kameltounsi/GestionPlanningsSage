@@ -105,6 +105,8 @@ public class EcrAction {
 
     private LocalDate closedDate;
     private LocalDateTime finalizationDate;
+    @Column(nullable = false, updatable = false)
+    private LocalDateTime createdAt;
 
     @Enumerated(EnumType.STRING)
     private ActionValidationStatus validationStatus;
@@ -489,6 +491,14 @@ public class EcrAction {
         this.finalizationDate = finalizationDate;
     }
 
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
+    }
+
     public ActionValidationStatus getValidationStatus() {
         return validationStatus;
     }
@@ -547,5 +557,12 @@ public class EcrAction {
 
     public boolean isLate() {
         return deadline != null && deadline.isBefore(LocalDate.now()) && status != ActionStatus.DONE && status != ActionStatus.DONE_LATE;
+    }
+
+    @PrePersist
+    public void prePersist() {
+        if (createdAt == null) {
+            createdAt = LocalDateTime.now();
+        }
     }
 }

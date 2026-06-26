@@ -9,7 +9,11 @@ import java.util.List;
 public interface EcrActionRepository extends JpaRepository<EcrAction, Long> {
     List<EcrAction> findByRequest_IdOrderByDeadlineAscIdAsc(Long requestId);
 
+    List<EcrAction> findByRequest_IdOrderByCreatedAtAscIdAsc(Long requestId);
+
     List<EcrAction> findByRequest_IdAndStageOrderByDeadlineAscIdAsc(Long requestId, EcrStage stage);
+
+    List<EcrAction> findByRequest_IdAndStageOrderByCreatedAtAscIdAsc(Long requestId, EcrStage stage);
 
     List<EcrAction> findByDeadlineBeforeAndStatusNotInOrderByDeadlineAsc(LocalDate date, List<ActionStatus> statuses);
 

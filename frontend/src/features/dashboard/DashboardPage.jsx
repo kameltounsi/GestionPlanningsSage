@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useRef, useState} from "react";
+import React, {useEffect, useMemo, useState} from "react";
 import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, ClipboardList, FileText, FolderKanban, Gauge, Plus, X, XCircle } from "lucide-react";
 import { getActions } from "../../api";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -70,6 +70,10 @@ function isActionDone(action) {
 function actionCompletionRate(actions = []) {
   if (!actions.length) return 0;
   return Math.round((actions.filter(isActionDone).length / actions.length) * 100);
+}
+
+function clampPercent(value) {
+  return Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0));
 }
 
 function cancelledCompletionRate(request, actions = []) {
@@ -181,6 +185,7 @@ export function DashboardPage({
   const allProjectsValue = "__ALL__";
   const [dossierProject, setDossierProject] = useState(allProjectsValue);
   const [modificationProgressPage, setModificationProgressPage] = useState(0);
+  const [dashboardGaugePage, setDashboardGaugePage] = useState(0);
   const [cancelledActionsByRequestId, setCancelledActionsByRequestId] = useState({});
   const [dashboardActionsByRequestId, setDashboardActionsByRequestId] = useState({});
   const [dashboardDialog, setDashboardDialog] = useState(null);
@@ -323,6 +328,16 @@ export function DashboardPage({
     modificationProgressPage * modificationProgressPageSize,
     modificationProgressPage * modificationProgressPageSize + modificationProgressPageSize
   );
+  const actionGaugeTotal = dashboardActionRows.length;
+  const actionGaugeDone = dashboardActionRows.filter(({ action }) => isActionDone(action)).length;
+  const actionGaugePercent = actionGaugeTotal ? Math.round((actionGaugeDone / actionGaugeTotal) * 100) : 0;
+  const dashboardGaugeRows = modificationProgressRows;
+  const dashboardGaugePageSize = 6;
+  const dashboardGaugePageCount = Math.max(1, Math.ceil(dashboardGaugeRows.length / dashboardGaugePageSize));
+  const visibleDashboardGaugeRows = dashboardGaugeRows.slice(
+    dashboardGaugePage * dashboardGaugePageSize,
+    dashboardGaugePage * dashboardGaugePageSize + dashboardGaugePageSize
+  );
   const modificationTypes = [
     { label: "Nouveau projet", count: dashboardRequests.filter((request) => request.newVersion).length },
     { label: "Digit change", count: dashboardRequests.filter((request) => request.digitChange).length },
@@ -349,6 +364,10 @@ export function DashboardPage({
   useEffect(() => {
     setModificationProgressPage((page) => Math.min(page, modificationProgressPageCount - 1));
   }, [modificationProgressPageCount]);
+
+  useEffect(() => {
+    setDashboardGaugePage((page) => Math.min(page, dashboardGaugePageCount - 1));
+  }, [dashboardGaugePageCount]);
 
   function openDashboardDialog(title, subtitle, type, items) {
     setDashboardDialog({ title, subtitle, type, items });
@@ -504,6 +523,21 @@ export function DashboardPage({
         <DashboardFinishedProductsCard title="Produits finis par client" subtitle="Distribution depuis les modifications" items={finishedByClient} />
       </section>
       <section className="dashboard-progress-grid">
+        <DashboardGaugePanel
+          actionDone={actionGaugeDone}
+          actionPercent={actionGaugePercent}
+          actionTotal={actionGaugeTotal}
+          page={dashboardGaugePage}
+          pageCount={dashboardGaugePageCount}
+          projectPercent={portfolioProgress}
+          projectTotal={dashboardRequests.length}
+          rows={visibleDashboardGaugeRows}
+          title={adminView ? "Indicateurs portefeuille" : "Indicateurs chef de projet"}
+          total={dashboardGaugeRows.length}
+          onNext={() => setDashboardGaugePage((page) => Math.min(page + 1, dashboardGaugePageCount - 1))}
+          onOpenRequest={onOpenRequest}
+          onPrevious={() => setDashboardGaugePage((page) => Math.max(page - 1, 0))}
+        />
         <DashboardProgressCard
           title="Avancement par projet"
           subtitle={`Portefeuille global ${portfolioProgress}%`}
@@ -682,6 +716,13 @@ export function DashboardPage({
           )}
         </div>
       </section>
+      {dashboardDialog && (
+        <DashboardDrilldownDialog
+          dialog={dashboardDialog}
+          onClose={() => setDashboardDialog(null)}
+          onOpen={handleDashboardDialogOpen}
+        />
+      )}
     </section>
   );
 }
@@ -705,20 +746,8 @@ function DashboardDonut({ active, closed, cancelled, late }) {
 }
 
 function DashboardStatCard({ icon: Icon, label, value, onClick }) {
-  const openedRef = useRef(false);
-
-  function open(event) {
-    if (openedRef.current) return;
-    openedRef.current = true;
-    window.setTimeout(() => {
-      openedRef.current = false;
-    }, 250);
-    if (event) event.preventDefault();
-    onClick();
-  }
-
   return (
-    <button className="stat-card clickable" type="button" onClick={open} onPointerDown={open}>
+    <button className="stat-card clickable" type="button" onClick={onClick}>
       <Icon size={20} />
       <span>{label}</span>
       <strong>{value}</strong>
@@ -961,6 +990,83 @@ function dashboardDistribution(items, labelFor, limit = 6) {
     .map(([label, count]) => ({ label, count }))
     .sort((first, second) => second.count - first.count || first.label.localeCompare(second.label, "fr", { sensitivity: "base" }))
     .slice(0, limit);
+}
+
+function DashboardGaugePanel({
+  actionDone = 0,
+  actionPercent = 0,
+  actionTotal = 0,
+  page = 0,
+  pageCount = 1,
+  projectPercent = 0,
+  projectTotal = 0,
+  rows = [],
+  title,
+  total = 0,
+  onNext,
+  onOpenRequest,
+  onPrevious
+}) {
+  return (
+    <article className="panel dashboard-gauge-panel">
+      <div className="section-title">
+        <div>
+          <h2>{title}</h2>
+          <span>{total} indicateur{total > 1 ? "s" : ""} modification | 6 par page</span>
+        </div>
+        <div className="dashboard-pager">
+          <button className="icon-button" type="button" title="Page precedente" disabled={page <= 0} onClick={onPrevious}>
+            <ChevronLeft size={17} />
+          </button>
+          <span>{page + 1} / {pageCount}</span>
+          <button className="icon-button" type="button" title="Page suivante" disabled={page >= pageCount - 1} onClick={onNext}>
+            <ChevronRight size={17} />
+          </button>
+        </div>
+      </div>
+      <div className="dashboard-gauge-main">
+        <DashboardGauge
+          label="Actions réalisées"
+          percent={actionPercent}
+          detail={`${actionDone}/${actionTotal} action${actionTotal > 1 ? "s" : ""}`}
+        />
+        <DashboardGauge
+          label="Projets suivis"
+          percent={projectPercent}
+          detail={`${projectTotal} modification${projectTotal > 1 ? "s" : ""}`}
+        />
+      </div>
+      <div className="dashboard-gauge-mini-list">
+        {rows.length === 0 ? (
+          <EmptyState title="Aucune modification" text="Les jauges apparaîtront après création des modifications." compact />
+        ) : rows.map(({ request, progress }) => (
+          <button className="dashboard-gauge-mini-row" key={request.id} type="button" onClick={() => onOpenRequest(request)}>
+            <DashboardGauge label={requestDisplayName(request)} percent={progress} compact />
+            <span>
+              <strong>{requestDisplayName(request)}</strong>
+              <small>{request.modificationProject || "Projet non renseigné"} | {stageLabel(request.currentStage, Boolean(request.newVersion))}</small>
+            </span>
+          </button>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function DashboardGauge({ compact = false, detail, label, percent }) {
+  const safePercent = clampPercent(percent);
+  const needleAngle = (safePercent / 100) * 180 - 90;
+  return (
+    <div className={compact ? "dashboard-gauge compact" : "dashboard-gauge"}>
+      <strong>{label}</strong>
+      <div className="dashboard-gauge-arc" aria-label={`${label} ${safePercent}%`}>
+        <span className="dashboard-gauge-value">{safePercent}%</span>
+        <i className="dashboard-gauge-needle" style={{ transform: `translateX(-50%) rotate(${needleAngle}deg)` }} />
+        <em />
+      </div>
+      {detail && <small>{detail}</small>}
+    </div>
+  );
 }
 
 function DashboardProgressCard({ title, subtitle, items = [] }) {

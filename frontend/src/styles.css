@@ -781,9 +781,14 @@ textarea {
 }
 
 .dashboard-drilldown-dialog {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.25);
   display: grid;
   gap: 14px;
   max-width: 980px;
+  padding: 16px;
 }
 
 .dashboard-drilldown-list {
@@ -957,6 +962,201 @@ textarea {
 
 .dashboard-progress-card {
   align-content: start;
+}
+
+.dashboard-gauge-panel {
+  align-content: start;
+  grid-column: span 3;
+}
+
+.dashboard-gauge-main {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.dashboard-gauge {
+  align-items: center;
+  background: #fbfdf8;
+  border: 1px solid #d9e3c8;
+  border-radius: 8px;
+  display: grid;
+  gap: 7px;
+  justify-items: center;
+  min-width: 0;
+  padding: 10px;
+  text-align: center;
+}
+
+.dashboard-gauge > strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.dashboard-gauge > small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.dashboard-gauge-arc {
+  background:
+    conic-gradient(from 270deg at 50% 100%,
+      #9bdc54 0deg 60deg,
+      #facc15 60deg 126deg,
+      #e11d48 126deg 180deg,
+      transparent 180deg 360deg);
+  border-radius: 150px 150px 0 0;
+  height: 78px;
+  overflow: hidden;
+  position: relative;
+  width: 154px;
+}
+
+.dashboard-gauge-arc::after {
+  background: #fbfdf8;
+  border-radius: 116px 116px 0 0;
+  bottom: 0;
+  content: "";
+  height: 48px;
+  left: 25px;
+  position: absolute;
+  width: 104px;
+  z-index: 1;
+}
+
+.dashboard-gauge-value {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 900;
+  left: 50%;
+  position: absolute;
+  top: 18px;
+  transform: translateX(-50%);
+  z-index: 3;
+}
+
+.dashboard-gauge-needle {
+  background: #111827;
+  border-radius: 999px;
+  bottom: 0;
+  height: 68px;
+  left: 50%;
+  position: absolute;
+  transform-origin: 50% 100%;
+  width: 3px;
+  z-index: 4;
+}
+
+.dashboard-gauge-arc em {
+  background: #111827;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  bottom: -5px;
+  box-shadow: 0 2px 5px rgba(15, 23, 42, 0.22);
+  height: 14px;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+  width: 14px;
+  z-index: 5;
+}
+
+.dashboard-gauge-mini-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dashboard-gauge-mini-row {
+  align-items: center;
+  appearance: none;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 92px minmax(0, 1fr);
+  min-height: 70px;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.dashboard-gauge-mini-row:hover {
+  background: #fbfdf8;
+  border-color: #abcdbf;
+}
+
+.dashboard-gauge-mini-row > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dashboard-gauge-mini-row strong,
+.dashboard-gauge-mini-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-gauge-mini-row strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.dashboard-gauge-mini-row small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 740;
+}
+
+.dashboard-gauge.compact {
+  background: transparent;
+  border: 0;
+  gap: 2px;
+  padding: 0;
+}
+
+.dashboard-gauge.compact > strong {
+  display: none;
+}
+
+.dashboard-gauge.compact .dashboard-gauge-arc {
+  height: 42px;
+  width: 84px;
+}
+
+.dashboard-gauge.compact .dashboard-gauge-arc::after {
+  height: 25px;
+  left: 14px;
+  width: 56px;
+}
+
+.dashboard-gauge.compact .dashboard-gauge-value {
+  font-size: 12px;
+  top: 11px;
+}
+
+.dashboard-gauge.compact .dashboard-gauge-needle {
+  height: 36px;
+  width: 2px;
+}
+
+.dashboard-gauge.compact .dashboard-gauge-arc em {
+  height: 10px;
+  width: 10px;
 }
 
 .dashboard-progress-list {
@@ -6221,6 +6421,10 @@ body:has(.dialog-backdrop) .modifications-toolbar {
     grid-column: auto;
   }
 
+  .dashboard-gauge-panel {
+    grid-column: auto;
+  }
+
   .ask-ai-search-panel {
     align-items: stretch;
     grid-template-columns: 1fr;
@@ -6340,6 +6544,16 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 
   .dashboard-donut {
     justify-self: center;
+  }
+
+  .dashboard-gauge-main,
+  .dashboard-gauge-mini-row {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-gauge-mini-row {
+    justify-items: center;
+    text-align: center;
   }
 
   .user-photo-uploader {

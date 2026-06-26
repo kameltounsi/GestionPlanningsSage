@@ -5610,12 +5610,12 @@ function finishedProductDetailRows(product) {
 function finishedProductAiSummary(product, requests = []) {
   const requestLines = requests.length === 0
     ? "Aucune modification ne contient actuellement ce produit fini."
-    : requests.map((request, index) => `${index + 1}. ${requestDisplayName(request)}, projet ${request.modificationProject || "-"}, client ${request.client || "-"}, phase ${stageLabel(request.currentStage, Boolean(request.newVersion))}, pilote ${request.pilot || "-"}, reception ${request.receptionDate || "-"}.`).join(" ");
+    : requests.map((request, index) => `${index + 1}. ${requestDisplayName(request)}, motif ${request.modificationReason || "non renseigne"}, projet ${request.modificationProject || "-"}, client ${request.client || "-"}, phase ${stageLabel(request.currentStage, Boolean(request.newVersion))}, pilote ${request.pilot || "-"}, reception ${request.receptionDate || "-"}.`).join(" ");
   return [
     `Produit fini ${product.partNumber || "-"}: ${product.designation || "designation non renseignee"}.`,
     `Il est lie au client ${product.client || "-"}, au projet ${product.project || "-"} et au produit ${product.product || "-"}.`,
     `PN client: ${product.customerPn || "-"}, code reduit: ${product.reducedCode || "-"}, indice coiffe: ${product.coiffeIndex || "-"}, indice drawing: ${product.drawingIndex || "-"}.`,
-    `Date d'integration production: ${product.productionIntegrationDate || "-"}, prix de vente: ${product.salePrice || "-"}.`,
+    `Date d'integration production: ${product.productionIntegrationDate || "-"}, prix de vente: ${product.salePrice ? `${product.salePrice} euros` : "-"}.`,
     product.comments ? `Commentaires: ${product.comments}.` : "",
     `Modifications trouvees: ${requests.length}. ${requestLines}`
   ].filter(Boolean).join(" ");

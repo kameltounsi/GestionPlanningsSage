@@ -60,20 +60,17 @@ export function withDossierReviewAssets(request, documents = []) {
 }
 
 export function dossierReviewExportText(request, value) {
-  const assetsText = dossierReviewAssetsText(request);
   return [
     "Revue dossier",
     dossierReviewMetaLine(request),
     "",
-    value || "Revue dossier vide.",
-    ...(assetsText ? ["", "Assets cloud", assetsText] : [])
+    value || "Revue dossier vide."
   ].join("\n");
 }
 
 export function dossierReviewExportExcel(request, value) {
   const generatedAt = new Date().toLocaleString("fr-FR");
   const reviewText = value || "Revue dossier vide.";
-  const assetsText = dossierReviewAssetsText(request);
   const detailRows = [
     ["N° client externe", request.modificationNumber],
     ["Client", request.client],
@@ -111,7 +108,6 @@ export function dossierReviewExportExcel(request, value) {
     ${detailRows}
     <tr><td class="section" colspan="4">Revue dossier</td></tr>
     <tr><td class="review" colspan="4">${escapeExcelHtml(reviewText)}</td></tr>
-    ${assetsText ? `<tr><td class="section" colspan="4">Assets cloud</td></tr><tr><td class="review" colspan="4">${escapeExcelHtml(assetsText)}</td></tr>` : ""}
   </table></body></html>`;
 }
 
@@ -119,7 +115,6 @@ export function dossierReviewPdfHtml(request, value) {
   const title = `Revue dossier - ${requestDisplayName(request)}`;
   const generatedAt = new Date().toLocaleString("fr-FR");
   const reviewText = value || "Revue dossier vide.";
-  const assetsText = dossierReviewAssetsText(request);
   const detailRows = [
     ["N° client externe", request.modificationNumber],
     ["Client", request.client],
@@ -145,7 +140,6 @@ export function dossierReviewPdfHtml(request, value) {
     <section class="meta-grid">${detailRows}</section>
     <div class="section-title"><h2>Notes de revue</h2></div>
     <section class="review-box"><pre>${escapeHtml(pageText)}</pre></section>
-    ${assetsText && index === reviewPages.length - 1 ? `<div class="section-title asset-section-title"><h2>Assets cloud</h2></div><section class="asset-name-box"><pre>${escapeHtml(assetsText)}</pre></section>` : ""}
     <footer class="footer"><span>SAGE Automotive Interiors</span><span>${escapeHtml(dossierReviewMetaLine(request))}</span></footer>
   </main>`).join("");
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
@@ -171,9 +165,6 @@ export function dossierReviewPdfHtml(request, value) {
     .section-title h2{font-size:18px;margin:0;text-transform:uppercase}
     .review-box{background:#fff;border:1px solid #bfd0a3;flex:1;min-height:0;padding:18px 20px;box-shadow:inset 0 0 0 4px #f1f6e8;overflow:hidden}
     .review-box pre{font-family:Arial,sans-serif;font-size:13px;line-height:1.55;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#172008}
-    .asset-section-title{margin-top:10px}
-    .asset-name-box{background:#fff;border:1px solid #bfd0a3;padding:10px 12px;max-height:120px;overflow:hidden}
-    .asset-name-box pre{font-family:Arial,sans-serif;font-size:12px;line-height:1.4;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#172008}
     .footer{display:flex;justify-content:space-between;gap:12px;margin-top:16px;border-top:1px solid #bfd0a3;padding-top:10px;color:#586148;font-size:11px}
   </style></head><body>${pagesHtml}</body></html>`;
 }
@@ -218,7 +209,6 @@ export function projectDossierReviewsExportText(projectName, projectRequests) {
       `Phase: ${stageLabel(request.currentStage, Boolean(request.newVersion))}`,
       "",
       request.dossierReview || "Revue dossier vide.",
-      ...(dossierReviewAssetsText(request) ? ["", "Assets cloud", dossierReviewAssetsText(request)] : []),
       ""
     ])
   ].join("\n");
@@ -245,7 +235,6 @@ export function projectDossierReviewsExportHtml(projectName, projectRequests) {
   const generatedAt = new Date().toLocaleString("fr-FR");
   const pagesHtml = sortedRequests.flatMap((request, requestIndex) => {
     const reviewPages = splitDossierReviewPages(request.dossierReview || "Revue dossier vide.");
-    const assetsText = dossierReviewAssetsText(request);
     const detailRows = [
       ["N° client externe", request.modificationNumber],
       ["Client", request.client],
@@ -264,7 +253,6 @@ export function projectDossierReviewsExportHtml(projectName, projectRequests) {
       <section class="meta-grid">${detailRows}</section>
       <div class="section-title"><h2>Notes de revue</h2></div>
       <section class="review-box"><pre>${escapeHtml(pageText)}</pre></section>
-      ${assetsText && pageIndex === reviewPages.length - 1 ? `<div class="section-title asset-section-title"><h2>Assets cloud</h2></div><section class="asset-name-box"><pre>${escapeHtml(assetsText)}</pre></section>` : ""}
       <footer class="footer"><span>SAGE Automotive Interiors</span><span>${escapeHtml(dossierReviewMetaLine(request))}</span></footer>
     </main>`);
   }).join("");
@@ -291,9 +279,6 @@ export function projectDossierReviewsExportHtml(projectName, projectRequests) {
     .section-title h2{font-size:18px;margin:0;text-transform:uppercase}
     .review-box{background:#fff;border:1px solid #bfd0a3;flex:1;min-height:0;padding:18px 20px;box-shadow:inset 0 0 0 4px #f1f6e8;overflow:hidden}
     .review-box pre{font-family:Arial,sans-serif;font-size:13px;line-height:1.55;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#172008}
-    .asset-section-title{margin-top:10px}
-    .asset-name-box{background:#fff;border:1px solid #bfd0a3;padding:10px 12px;max-height:120px;overflow:hidden}
-    .asset-name-box pre{font-family:Arial,sans-serif;font-size:12px;line-height:1.4;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#172008}
     .footer{display:flex;justify-content:space-between;gap:12px;margin-top:16px;border-top:1px solid #bfd0a3;padding-top:10px;color:#586148;font-size:11px}
   </style></head><body>${pagesHtml}</body></html>`;
 }
@@ -313,13 +298,12 @@ export function projectDossierReviewsExportExcel(projectName, projectRequests) {
       <td>${escapeHtml(request.receptionDate || "")}</td>
       <td>${escapeExcelHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</td>
       <td class="review">${escapeExcelHtml(request.dossierReview || "Revue dossier vide.")}</td>
-      <td class="assets">${escapeExcelHtml(dossierReviewAssetsText(request))}</td>
     </tr>`).join("");
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Export revue dossier - ${escapeHtml(projectName || "Projet")}</title><style>
     body{font-family:Calibri,Arial,sans-serif;color:#172008;margin:0;background:#fff}
-    table{border-collapse:collapse;table-layout:fixed;width:1960px}
+    table{border-collapse:collapse;table-layout:fixed;width:1760px}
     col.c0{width:46px} col.c1{width:160px} col.c2{width:170px} col.c3{width:145px} col.c4{width:145px}
-    col.c5{width:160px} col.c6{width:180px} col.c7{width:140px} col.c8{width:110px} col.c9{width:165px} col.c10{width:540px} col.c11{width:200px}
+    col.c5{width:160px} col.c6{width:180px} col.c7{width:140px} col.c8{width:110px} col.c9{width:165px} col.c10{width:540px}
     td,th{border:1px solid #c8d8ad;padding:6px 8px;vertical-align:top;font-size:11px;mso-number-format:"\\@";white-space:normal;line-height:1.25}
     .brand{background:#ffffff;color:#5f7f13;font-size:18px;font-weight:800;text-align:center;vertical-align:middle;border:2px solid #5f7f13}
     .brand small{display:block;color:#586148;font-size:10px;font-weight:700;letter-spacing:.5px}
@@ -329,14 +313,13 @@ export function projectDossierReviewsExportExcel(projectName, projectRequests) {
     th{background:#5f7f13;color:#ffffff;font-weight:800;text-align:center}
     .center{text-align:center;vertical-align:middle}
     .review{width:540px;white-space:normal}
-    .assets{width:200px;white-space:normal}
     tr:nth-child(even) td{background:#fbfdf8}
   </style></head><body><table>
-    <colgroup><col class="c0"><col class="c1"><col class="c2"><col class="c3"><col class="c4"><col class="c5"><col class="c6"><col class="c7"><col class="c8"><col class="c9"><col class="c10"><col class="c11"></colgroup>
-    <tr><td class="brand" colspan="2" rowspan="3">SAGE<small>Automotive Interiors</small></td><td class="title" colspan="10">Extraction revue dossier par projet</td></tr>
-    <tr><td class="subtitle" colspan="10">Projet: ${escapeHtml(projectName || "Projet non renseigne")} | Modifications: ${sortedRequests.length}</td></tr>
-    <tr><td class="meta" colspan="10">Extraction generee le ${escapeHtml(generatedAt)} | SAGE Automotive Interiors</td></tr>
-    <tr><th>N°</th><th>Projet</th><th>Modification</th><th>N° client externe</th><th>Client</th><th>Produit</th><th>Produits finis</th><th>Pilote</th><th>Reception</th><th>Phase</th><th>Revue dossier</th><th>Assets cloud</th></tr>
+    <colgroup><col class="c0"><col class="c1"><col class="c2"><col class="c3"><col class="c4"><col class="c5"><col class="c6"><col class="c7"><col class="c8"><col class="c9"><col class="c10"></colgroup>
+    <tr><td class="brand" colspan="2" rowspan="3">SAGE<small>Automotive Interiors</small></td><td class="title" colspan="9">Extraction revue dossier par projet</td></tr>
+    <tr><td class="subtitle" colspan="9">Projet: ${escapeHtml(projectName || "Projet non renseigne")} | Modifications: ${sortedRequests.length}</td></tr>
+    <tr><td class="meta" colspan="9">Extraction generee le ${escapeHtml(generatedAt)} | SAGE Automotive Interiors</td></tr>
+    <tr><th>N°</th><th>Projet</th><th>Modification</th><th>N° client externe</th><th>Client</th><th>Produit</th><th>Produits finis</th><th>Pilote</th><th>Reception</th><th>Phase</th><th>Revue dossier</th></tr>
     ${rows}
   </table></body></html>`;
 }

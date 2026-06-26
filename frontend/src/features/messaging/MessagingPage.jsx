@@ -65,12 +65,12 @@ function finishedProductDetailRows(product) {
 function finishedProductAiSummary(product, requests = []) {
   const requestLines = requests.length === 0
     ? "Aucune modification ne contient actuellement ce produit fini."
-    : requests.map((request, index) => `${index + 1}. ${requestDisplayName(request)}, projet ${request.modificationProject || "-"}, client ${request.client || "-"}, phase ${stageLabel(request.currentStage, Boolean(request.newVersion))}, pilote ${request.pilot || "-"}, reception ${request.receptionDate || "-"}.`).join(" ");
+    : requests.map((request, index) => `${index + 1}. ${requestDisplayName(request)}, motif ${request.modificationReason || "non renseigne"}, projet ${request.modificationProject || "-"}, client ${request.client || "-"}, phase ${stageLabel(request.currentStage, Boolean(request.newVersion))}, pilote ${request.pilot || "-"}, reception ${request.receptionDate || "-"}.`).join(" ");
   return [
     `Produit fini ${product.partNumber || "-"}: ${product.designation || "designation non renseignee"}.`,
     `Il est lie au client ${product.client || "-"}, au projet ${product.project || "-"} et au produit ${product.product || "-"}.`,
     `PN client: ${product.customerPn || "-"}, code reduit: ${product.reducedCode || "-"}, indice coiffe: ${product.coiffeIndex || "-"}, indice drawing: ${product.drawingIndex || "-"}.`,
-    `Date d'integration production: ${product.productionIntegrationDate || "-"}, prix de vente: ${product.salePrice || "-"}.`,
+    `Date d'integration production: ${product.productionIntegrationDate || "-"}, prix de vente: ${product.salePrice ? `${product.salePrice} euros` : "-"}.`,
     product.comments ? `Commentaires: ${product.comments}.` : "",
     `Modifications trouvees: ${requests.length}. ${requestLines}`
   ].filter(Boolean).join(" ");
@@ -112,6 +112,11 @@ export function ChatFloatingButton({ count = 0, onClick }) {
       {count > 0 && <span>{count > 9 ? "9+" : count}</span>}
     </button>
   );
+}
+
+function requestCreationTime(request) {
+  const time = Date.parse(request?.createdAt || request?.receptionDate || "");
+  return Number.isFinite(time) ? time : Number.MAX_SAFE_INTEGER;
 }
 
 export function AskAiFloatingButton({ onClick }) {
@@ -869,7 +874,11 @@ export function AskAiFinishedProductPage({ compact = false, finishedProducts = [
     const partNumber = normalizeReferenceValue(matchedProduct.partNumber);
     return requests
       .filter((request) => parseSelectedProducts(request.finishedProducts).some((value) => normalizeReferenceValue(value) === partNumber))
-      .sort((first, second) => String(second.receptionDate || "").localeCompare(String(first.receptionDate || "")) || requestDisplayName(first).localeCompare(requestDisplayName(second), "fr", { sensitivity: "base" }));
+      .sort((first, second) =>
+        requestCreationTime(first) - requestCreationTime(second)
+        || Number(first.id || 0) - Number(second.id || 0)
+        || requestDisplayName(first).localeCompare(requestDisplayName(second), "fr", { sensitivity: "base" })
+      );
   }, [matchedProduct, requests]);
   const productSummary = matchedProduct ? finishedProductAiSummary(matchedProduct, matchingRequests) : "";
 

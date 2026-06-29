@@ -1,11 +1,9 @@
 package com.gestionplanning.action;
 
 import com.gestionplanning.ecr.EcrRequest;
-import com.gestionplanning.project.ProjectReferenceRepository;
 import com.gestionplanning.user.AccountMailService;
 import com.gestionplanning.user.AppUser;
 import com.gestionplanning.user.AppUserRepository;
-import com.gestionplanning.user.UserRole;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -15,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.text.Normalizer;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -24,7 +23,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -35,18 +33,15 @@ public class ActionDeadlineAlertService {
     private final EcrActionRepository actionRepository;
     private final ActionDeadlineAlertRepository alertRepository;
     private final AppUserRepository userRepository;
-    private final ProjectReferenceRepository projectRepository;
     private final AccountMailService mailService;
 
     public ActionDeadlineAlertService(EcrActionRepository actionRepository,
                                       ActionDeadlineAlertRepository alertRepository,
                                       AppUserRepository userRepository,
-                                      ProjectReferenceRepository projectRepository,
                                       AccountMailService mailService) {
         this.actionRepository = actionRepository;
         this.alertRepository = alertRepository;
         this.userRepository = userRepository;
-        this.projectRepository = projectRepository;
         this.mailService = mailService;
     }
 
@@ -54,27 +49,35 @@ public class ActionDeadlineAlertService {
             initialDelayString = "${app.action-deadline-alert.initial-delay-ms:30000}")
     @Transactional
     public void scheduledScan() {
-        generateDueAlerts();
+        generateDueAlertsInternal();
     }
 
     @Transactional
     public void generateDueAlerts() {
-        LocalDate today = LocalDate.now();
+        generateDueAlertsInternal();
+    }
+
+    private void generateDueAlertsInternal() {
+        LocalDate today = LocalDate.now(ZoneId.systemDefault());
         List<EcrAction> actions = actionRepository.findByEndDateBetweenAndStatusNotInOrderByEndDateAscIdAsc(today.minusDays(2), today.plusDays(2), DONE_STATUSES);
         for (EcrAction action : actions) {
-            if (isDone(action) || action.getEndDate() == null || action.getRequest() == null) {
-                continue;
-            }
-            ActionDeadlineAlertType alertType = alertTypeFor(today, action.getEndDate());
-            if (alertType == null) {
-                continue;
-            }
-            for (AppUser recipient : recipientsFor(action)) {
-                ActionDeadlineAlert alert = alertRepository
-                        .findByAction_IdAndRecipientEmailAndAlertType(action.getId(), normalizeEmail(recipient.getEmail()), alertType)
-                        .orElseGet(() -> alertRepository.save(newAlert(action, recipient, alertType, today)));
-                sendMailIfNeeded(alert, recipient);
-            }
+            generateDueAlertFor(action, today);
+        }
+    }
+
+    private void generateDueAlertFor(EcrAction action, LocalDate today) {
+        if (isDone(action) || action.getEndDate() == null || action.getRequest() == null) {
+            return;
+        }
+        ActionDeadlineAlertType alertType = alertTypeFor(today, action.getEndDate());
+        if (alertType == null) {
+            return;
+        }
+        for (AppUser recipient : recipientsFor(action)) {
+            ActionDeadlineAlert alert = alertRepository
+                    .findByAction_IdAndRecipientEmailAndAlertType(action.getId(), normalizeEmail(recipient.getEmail()), alertType)
+                    .orElseGet(() -> alertRepository.save(newAlert(action, recipient, alertType, today)));
+            sendMailIfNeeded(alert, recipient);
         }
     }
 
@@ -83,8 +86,8 @@ public class ActionDeadlineAlertService {
         if (user == null || isBlank(user.getEmail())) {
             return new ArrayList<>();
         }
-        generateDueAlerts();
-        LocalDateTime now = LocalDateTime.now();
+        generateDueAlertsInternal();
+        LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
         List<ActionDeadlineAlert> alerts = alertRepository.findByRecipientEmailAndSoundAcknowledgedAtIsNullOrderByCreatedAtAscIdAsc(normalizeEmail(user.getEmail()));
         List<ActionDeadlineAlert> activeAlerts = new ArrayList<>();
         for (ActionDeadlineAlert alert : alerts) {
@@ -104,7 +107,7 @@ public class ActionDeadlineAlertService {
             return;
         }
         String email = normalizeEmail(user.getEmail());
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
         List<ActionDeadlineAlert> alerts = alertRepository.findAllById(ids).stream()
                 .filter(alert -> email.equals(normalizeEmail(alert.getRecipientEmail())))
                 .collect(Collectors.toList());
@@ -125,15 +128,15 @@ public class ActionDeadlineAlertService {
         alert.setActionResponsible(action.getResponsible());
         alert.setRequestLabel(requestLabel(request));
         alert.setPhaseLabel(action.getStage() == null ? "-" : action.getStage().getLabel(request.isNewVersion()));
-        alert.setCreatedAt(LocalDateTime.now());
+        alert.setCreatedAt(LocalDateTime.now(ZoneId.systemDefault()));
         return alert;
     }
 
     private void sendMailIfNeeded(ActionDeadlineAlert alert, AppUser recipient) {
-        if (alert.getMailSentAt() != null || alert.getAction() == null || alert.getAction().getRequest() == null) {
+        if (alert.getMailSentAt() != null || alert.getAction() == null || alert.getAction().getRequest() == null || recipient == null) {
             return;
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
         if (alert.getMailAttemptedAt() != null && alert.getMailAttemptedAt().isAfter(now.minusMinutes(30))) {
             return;
         }
@@ -187,18 +190,6 @@ public class ActionDeadlineAlertService {
                 .collect(Collectors.toList());
     }
 
-    private List<AppUser> adminsInProjectTeam(EcrRequest request) {
-        Set<String> team = projectTeamTokens(request);
-        if (team.isEmpty()) {
-            return Collections.emptyList();
-        }
-        return userRepository.findAll().stream()
-                .filter(AppUser::isEnabled)
-                .filter(this::isAdmin)
-                .filter(user -> team.stream().anyMatch(token -> matchesUser(user, token)))
-                .collect(Collectors.toList());
-    }
-
     private Optional<AppUser> findUser(String value) {
         String normalized = normalize(value);
         if (normalized.isEmpty()) {
@@ -212,33 +203,6 @@ public class ActionDeadlineAlertService {
                         || normalize(user.getJobTitle()).equals(normalized)
                         || normalize(user.getRole()).equals(normalized))
                 .findFirst();
-    }
-
-    private Set<String> projectTeamTokens(EcrRequest request) {
-        if (request == null || isBlank(request.getModificationProject())) {
-            return Collections.emptySet();
-        }
-        return projectRepository.findById(request.getModificationProject())
-                .map(project -> Arrays.stream(String.valueOf(project.getProjectTeam() == null ? "" : project.getProjectTeam()).split("[,;\\n]"))
-                        .map(this::normalize)
-                        .filter(value -> !value.isEmpty())
-                        .collect(Collectors.toSet()))
-                .orElseGet(Collections::emptySet);
-    }
-
-    private boolean matchesUser(AppUser user, String token) {
-        return normalize(user.getFullName()).equals(token)
-                || normalize(user.getUsername()).equals(token)
-                || normalize(user.getEmail()).equals(token);
-    }
-
-    private boolean isAdmin(AppUser user) {
-        String role = normalize(user == null ? null : user.getRole());
-        return role.equals(normalize(UserRole.ADMIN.name()))
-                || role.equals("admin")
-                || role.equals("administrateur")
-                || normalize(user == null ? null : user.getUsername()).equals("fchelbi")
-                || normalize(user == null ? null : user.getEmail()).equals("f.chalbi@sagetunisia.com");
     }
 
     private ActionDeadlineAlertType alertTypeFor(LocalDate today, LocalDate endDate) {

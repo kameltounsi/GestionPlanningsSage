@@ -4,6 +4,7 @@ import com.gestionplanning.user.AppUser;
 
 import javax.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -33,11 +34,11 @@ public class ChatGroup {
     private Set<AppUser> members = new LinkedHashSet<>();
 
     @Column(nullable = false, updatable = false)
-    private LocalDateTime createdAt = LocalDateTime.now();
+    private LocalDateTime createdAt = LocalDateTime.now(ZoneId.systemDefault());
 
     @PrePersist
     public void beforeCreate() {
-        createdAt = LocalDateTime.now();
+        createdAt = LocalDateTime.now(ZoneId.systemDefault());
     }
 
     public Long getId() { return id; }

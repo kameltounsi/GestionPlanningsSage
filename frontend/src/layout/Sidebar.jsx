@@ -13,13 +13,19 @@ const navItems = [
   ["profile", "Profil", UserCircle]
 ];
 
-export function Sidebar({ canAdmin, collapsed, currentUser, page, pageHref, onCollapseToggle, onLogout, onNavigate }) {
-  const visibleItems = navItems.filter(([key]) => canAdmin || ["dashboard", "modifications", "ask-ai", "messages", "profile"].includes(key));
+export function Sidebar({ canAccessPreferentials, canAdmin, collapsed, currentUser, page, pageHref, onCollapseToggle, onLogout, onNavigate }) {
+  const visibleItems = navItems.filter(([key]) =>
+    canAdmin
+    || ["dashboard", "modifications", "ask-ai", "messages", "profile"].includes(key)
+    || (key === "preferentials" && canAccessPreferentials)
+  );
 
   return (
       <aside className="app-nav">
         <div className="brand">
-          <img className="brand-logo" src="/sage_logo1.png" alt="SAGE Automotive Interiors" />
+          <a href={pageHref("dashboard")} onClick={(event) => onNavigate("dashboard", event)} title="Tableau de bord">
+            <img className="brand-logo" src="/sage_logo1.png" alt="SAGE Automotive Interiors" />
+          </a>
 
           <div className="brand-copy">
             <h1>Sage Plannings</h1>

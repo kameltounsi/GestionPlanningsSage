@@ -2,6 +2,7 @@ package com.gestionplanning.auth;
 
 import com.gestionplanning.user.AppUser;
 import com.gestionplanning.user.AccountMailService;
+import com.gestionplanning.user.AppUserDto;
 import com.gestionplanning.user.AppUserRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
@@ -9,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Base64;
 import java.util.Locale;
 
@@ -22,16 +24,18 @@ public class AuthController {
     private final PasswordResetCodeRepository resetCodeRepository;
     private final PasswordService passwordService;
     private final AccountMailService accountMailService;
+    private final AuthenticatedUserService authenticatedUserService;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthController(AppUserRepository userRepository, AuthTokenRepository tokenRepository,
                           PasswordResetCodeRepository resetCodeRepository, PasswordService passwordService,
-                          AccountMailService accountMailService) {
+                          AccountMailService accountMailService, AuthenticatedUserService authenticatedUserService) {
         this.userRepository = userRepository;
         this.tokenRepository = tokenRepository;
         this.resetCodeRepository = resetCodeRepository;
         this.passwordService = passwordService;
         this.accountMailService = accountMailService;
+        this.authenticatedUserService = authenticatedUserService;
     }
 
     @PostMapping("/login")
@@ -48,20 +52,22 @@ public class AuthController {
                         user.setPassword(passwordService.encode(request.getPassword()));
                         userRepository.save(user);
                     }
-                    tokenRepository.deleteByExpiresAtBefore(LocalDateTime.now());
+                    tokenRepository.deleteByExpiresAtBefore(LocalDateTime.now(ZoneId.systemDefault()));
                     AuthToken authToken = new AuthToken();
                     authToken.setUser(user);
                     authToken.setToken(generateToken());
-                    authToken.setExpiresAt(LocalDateTime.now().plusHours(12));
+                    authToken.setExpiresAt(LocalDateTime.now(ZoneId.systemDefault()).plusHours(12));
                     AuthToken savedToken = tokenRepository.save(authToken);
-                    return ResponseEntity.ok(new AuthResponse(savedToken.getToken(), savedToken.getExpiresAt(), user));
+                    return ResponseEntity.ok(new AuthResponse(savedToken.getToken(), savedToken.getExpiresAt(), toDto(user)));
                 })
                 .orElse(ResponseEntity.status(401).build());
     }
 
     @GetMapping("/me")
-    public ResponseEntity<AppUser> currentUser(@RequestAttribute(value = "authenticatedUser", required = false) AppUser user) {
-        return user == null ? ResponseEntity.status(401).build() : ResponseEntity.ok(user);
+    public ResponseEntity<AppUserDto> currentUser(@RequestAttribute(value = "authenticatedUserId", required = false) Long userId) {
+        return authenticatedUserService.find(userId)
+                .map(user -> ResponseEntity.ok(toDto(user)))
+                .orElseGet(() -> ResponseEntity.status(401).build());
     }
 
     @PostMapping("/logout")
@@ -80,14 +86,14 @@ public class AuthController {
         if (request == null || isBlank(request.getEmail())) {
             return ResponseEntity.badRequest().build();
         }
-        resetCodeRepository.deleteByExpiresAtBefore(LocalDateTime.now());
+        resetCodeRepository.deleteByExpiresAtBefore(LocalDateTime.now(ZoneId.systemDefault()));
         userRepository.findByEmail(request.getEmail().trim().toLowerCase(Locale.ROOT))
                 .filter(AppUser::isEnabled)
                 .ifPresent(user -> {
                     PasswordResetCode resetCode = new PasswordResetCode();
                     resetCode.setUser(user);
                     resetCode.setCode(generateResetCode());
-                    resetCode.setExpiresAt(LocalDateTime.now().plusMinutes(10));
+                    resetCode.setExpiresAt(LocalDateTime.now(ZoneId.systemDefault()).plusMinutes(10));
                     PasswordResetCode saved = resetCodeRepository.save(resetCode);
                     accountMailService.sendPasswordResetCodeEmail(user, saved.getCode());
                 });
@@ -121,7 +127,7 @@ public class AuthController {
                             user.setPassword(passwordService.encode(request.getPassword()));
                             userRepository.save(user);
                             resetCode.setUsed(true);
-                            resetCode.setUsedAt(LocalDateTime.now());
+                            resetCode.setUsedAt(LocalDateTime.now(ZoneId.systemDefault()));
                             resetCodeRepository.save(resetCode);
                             tokenRepository.deleteByUser(user);
                             return ResponseEntity.noContent().<Void>build();
@@ -154,12 +160,33 @@ public class AuthController {
         return resetCode != null
                 && !resetCode.isUsed()
                 && resetCode.getExpiresAt() != null
-                && resetCode.getExpiresAt().isAfter(LocalDateTime.now())
+                && resetCode.getExpiresAt().isAfter(LocalDateTime.now(ZoneId.systemDefault()))
                 && resetCode.getCode().equals(code);
     }
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private AppUserDto toDto(AppUser user) {
+        AppUserDto dto = new AppUserDto();
+        dto.setId(user.getId());
+        dto.setFullName(user.getFullName());
+        dto.setUsername(user.getUsername());
+        dto.setJobTitle(user.getJobTitle());
+        dto.setEmail(user.getEmail());
+        dto.setPhone(user.getPhone());
+        dto.setChef1(user.getChef1());
+        dto.setChef2(user.getChef2());
+        dto.setProfilePhotoFileName(user.getProfilePhotoFileName());
+        dto.setProfilePhotoContentType(user.getProfilePhotoContentType());
+        dto.setProfilePhotoFileSize(user.getProfilePhotoFileSize());
+        dto.setProfilePhotoUrl(user.getProfilePhotoUrl());
+        dto.setRole(user.getRole());
+        dto.setEnabled(user.isEnabled());
+        dto.setCreatedAt(user.getCreatedAt());
+        dto.setUpdatedAt(user.getUpdatedAt());
+        return dto;
     }
 
     public static class LoginRequest {
@@ -231,9 +258,9 @@ public class AuthController {
     public static class AuthResponse {
         private final String token;
         private final LocalDateTime expiresAt;
-        private final AppUser user;
+        private final AppUserDto user;
 
-        public AuthResponse(String token, LocalDateTime expiresAt, AppUser user) {
+        public AuthResponse(String token, LocalDateTime expiresAt, AppUserDto user) {
             this.token = token;
             this.expiresAt = expiresAt;
             this.user = user;
@@ -247,7 +274,7 @@ public class AuthController {
             return expiresAt;
         }
 
-        public AppUser getUser() {
+        public AppUserDto getUser() {
             return user;
         }
     }

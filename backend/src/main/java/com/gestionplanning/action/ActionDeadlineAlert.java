@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import javax.persistence.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "action_deadline_alert",
@@ -43,7 +44,7 @@ public class ActionDeadlineAlert {
     @Column(length = 1000)
     private String phaseLabel;
 
-    private LocalDateTime createdAt = LocalDateTime.now();
+    private LocalDateTime createdAt = LocalDateTime.now(ZoneId.systemDefault());
     private LocalDateTime mailAttemptedAt;
     private LocalDateTime mailSentAt;
     private LocalDateTime soundAcknowledgedAt;

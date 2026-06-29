@@ -1,4 +1,5 @@
 import React from "react";
+import PropTypes from "prop-types";
 
 export function PageHeader({ eyebrow, title, subtitle }) {
   return (
@@ -9,3 +10,9 @@ export function PageHeader({ eyebrow, title, subtitle }) {
     </header>
   );
 }
+
+PageHeader.propTypes = {
+  eyebrow: PropTypes.string.isRequired,
+  title: PropTypes.string.isRequired,
+  subtitle: PropTypes.string.isRequired
+};

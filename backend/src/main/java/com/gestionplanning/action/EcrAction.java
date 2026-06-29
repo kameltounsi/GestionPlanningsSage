@@ -8,6 +8,7 @@ import javax.persistence.*;
 import javax.validation.constraints.NotBlank;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -566,13 +567,13 @@ public class EcrAction {
     }
 
     public boolean isLate() {
-        return deadline != null && deadline.isBefore(LocalDate.now()) && status != ActionStatus.DONE && status != ActionStatus.DONE_LATE;
+        return deadline != null && deadline.isBefore(LocalDate.now(ZoneId.systemDefault())) && status != ActionStatus.DONE && status != ActionStatus.DONE_LATE;
     }
 
     @PrePersist
     public void prePersist() {
         if (createdAt == null) {
-            createdAt = LocalDateTime.now();
+            createdAt = LocalDateTime.now(ZoneId.systemDefault());
         }
     }
 }

@@ -4,22 +4,22 @@ import { EmptyState } from "../../components/common/EmptyState";
 import { PageHeader } from "../../components/common/PageHeader";
 import { emptyUserForm } from "../../constants/forms";
 import { userRoleOptions } from "../../constants/roles";
-import { userRoleLabel } from "../../utils/users";
+import { parseUserRoles, userRoleLabel } from "../../utils/users";
 
 export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, saving, userForm, users, onCancelEdit, onDelete, onEdit, onSubmit, setUserForm }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [page, setPage] = useState(1);
-  const currentRole = String(currentUser?.role || "").trim().toLowerCase().replaceAll("_", " ");
-  const canAdmin = currentUser?.username === "fchelbi" || currentRole === "admin";
+  const currentRoles = parseUserRoles(currentUser?.role).map((role) => roleOptionKey(role));
+  const canAdmin = currentUser?.username === "fchelbi" || currentRoles.includes("admin");
   const pageSize = 10;
   const roleFilterOptions = useMemo(() => {
     const options = userRoleOptions.map(([value, label]) => ({ value, label }));
     const seen = new Set(options.map((option) => roleOptionKey(option.label)));
     [
       ...actionRoleOptions,
-      ...users.map((user) => user.role)
+      ...users.flatMap((user) => parseUserRoles(user.role))
     ].filter(Boolean).forEach((role) => {
       const label = userRoleLabel(role);
       const key = roleOptionKey(label);
@@ -128,7 +128,13 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
                   <div className="user-identity"><strong>{user.fullName}</strong><span>{user.jobTitle || "-"}</span></div>
                   <div className="user-account"><strong>{user.username || "-"}</strong><span>{user.email}</span></div>
                   <div className="user-chefs"><strong>Chef 1: {userLabelForValue(users, user.chef1)}</strong><span>Chef 2: {userLabelForValue(users, user.chef2)}</span></div>
-                  <small className="status in_progress">{userRoleLabel(user.role)}</small>
+                  <ul className="user-role-list" aria-label="Roles applicatifs">
+                    {parseUserRoles(user.role).length === 0 ? (
+                      <li className="status in_progress">-</li>
+                    ) : parseUserRoles(user.role).map((role) => (
+                      <li className="status in_progress" key={role}>{userRoleLabel(role)}</li>
+                    ))}
+                  </ul>
                   <div className="row-actions">
                     <button className="secondary-action compact-action icon-only-action" disabled={!canAdmin} type="button" onClick={() => openEditDialog(user)} aria-label="Modifier l'utilisateur" title="Modifier">
                       <Pencil size={15} />
@@ -179,9 +185,15 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
     ...userRoleOptions.map(([value, label]) => ({ value, label })),
     ...actionRoleOptions.map((role) => ({ value: role, label: role }))
   ]);
-  const displayedRoleOptions = form.role && !roleOptions.some((role) => roleOptionKey(role.value) === roleOptionKey(form.role) || roleOptionKey(role.label) === roleOptionKey(userRoleLabel(form.role)))
-    ? [{ value: form.role, label: userRoleLabel(form.role) }, ...roleOptions]
+  const formRoles = parseUserRoles(form.role);
+  const missingRoleOptions = formRoles
+    .filter((formRole) => !roleOptions.some((role) => roleOptionKey(role.value) === roleOptionKey(formRole) || roleOptionKey(role.label) === roleOptionKey(userRoleLabel(formRole))))
+    .map((formRole) => ({ value: formRole, label: userRoleLabel(formRole) }));
+  const displayedRoleOptions = missingRoleOptions.length > 0
+    ? [...missingRoleOptions, ...roleOptions]
     : roleOptions;
+  const [roleSlotCount, setRoleSlotCount] = useState(Math.max(1, formRoles.length));
+  const roleRows = Array.from({ length: Math.max(1, roleSlotCount, formRoles.length) }, (_, index) => formRoles[index] || "");
   const previewPhotoUrl = localPhotoPreviewUrl || form.profilePhotoUrl || "";
   const chefOptions = userSelectOptions(users, form, editingUser);
 
@@ -195,12 +207,41 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
     return () => URL.revokeObjectURL(objectUrl);
   }, [form.profilePhotoFile]);
 
+  useEffect(() => {
+    setRoleSlotCount(Math.max(1, parseUserRoles(form.role).length));
+  }, [editingUser]);
+
   function updateUsername(value) {
     setForm((current) => ({
       ...current,
       username: value,
       password: editingUser ? current.password : value
     }));
+  }
+
+  function updateRoleAt(index, value) {
+    const nextRoles = roleRows
+      .map((role, roleIndex) => roleIndex === index ? value : role)
+      .filter(Boolean);
+    setForm((current) => ({ ...current, role: nextRoles.join("; ") }));
+  }
+
+  function removeRoleAt(index) {
+    const nextRoles = roleRows.filter((_, roleIndex) => roleIndex !== index).filter(Boolean);
+    setRoleSlotCount(Math.max(1, roleSlotCount - 1));
+    setForm((current) => ({ ...current, role: nextRoles.join("; ") }));
+  }
+
+  function addRoleSlot() {
+    setRoleSlotCount((count) => Math.min(displayedRoleOptions.length, count + 1));
+  }
+
+  function roleOptionsForIndex(index) {
+    const selectedKeys = new Set(roleRows
+      .filter((_, roleIndex) => roleIndex !== index)
+      .map(roleOptionKey)
+      .filter(Boolean));
+    return displayedRoleOptions.filter((option) => !selectedKeys.has(roleOptionKey(option.value)));
   }
 
   return (
@@ -287,18 +328,35 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
               ))}
             </select>
           </label>
-          <label>
-            Rôle applicatif
-            <select disabled={!canAdmin} value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}>
-              {displayedRoleOptions.map(({ value, label }) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-          </label>
           <label className="asset-required-field user-enabled-field">
             <input disabled={!canAdmin} checked={form.enabled} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))} />
             Compte actif
           </label>
+          <fieldset className="user-role-selects">
+            <legend>Roles applicatifs</legend>
+            {roleRows.map((role, index) => (
+              <div className="user-role-select-row" key={`role-${index}`}>
+                <label>
+                  Role {index + 1}
+                  <select required={index === 0} disabled={!canAdmin} value={role} onChange={(event) => updateRoleAt(index, event.target.value)}>
+                    <option value="">Selectionner un role</option>
+                    {roleOptionsForIndex(index).map(({ value, label }) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+                {index > 0 && (
+                  <button className="ghost-icon" disabled={!canAdmin} type="button" onClick={() => removeRoleAt(index)} title="Supprimer ce role">
+                    <X size={15} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button className="secondary-action compact-action" disabled={!canAdmin || roleRows.length >= displayedRoleOptions.length} type="button" onClick={addRoleSlot}>
+              <Plus size={15} />
+              Ajouter role
+            </button>
+          </fieldset>
         </div>
         <div className="button-row">
           <button className="primary-action" disabled={saving || !canAdmin} type="submit">
@@ -366,7 +424,7 @@ function userMatchesRoleFilter(user, roleFilter) {
   const filter = roleOptionKey(roleFilter);
   if (!filter) return true;
   return [
-    user?.role,
+    ...parseUserRoles(user?.role),
     userRoleLabel(user?.role),
     user?.jobTitle
   ].filter(Boolean).some((value) => roleOptionKey(value) === filter);

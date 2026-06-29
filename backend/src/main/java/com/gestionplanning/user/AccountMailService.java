@@ -27,6 +27,15 @@ import java.util.stream.Collectors;
 @Service
 public class AccountMailService {
     private static final Logger LOGGER = LoggerFactory.getLogger(AccountMailService.class);
+    private static final String EMAIL_CHARSET = "UTF-8";
+    private static final String HTML_CONTENT_TYPE = "text/html; charset=" + EMAIL_CHARSET;
+    private static final String TEXT_LINK_LINE = "\nLien : ";
+    private static final String TEXT_PROJECT_LINE = "\nProjet : ";
+    private static final String TEXT_MODIFICATION_NAME_LINE = "\nNom de la modification : ";
+    private static final String HTML_CLIENT_FIELD = "<br><strong>Client :</strong> ";
+    private static final String HTML_PRODUCT_FIELD = "<br><strong>Produit :</strong> ";
+    private static final String HTML_PROJECT_FIELD = "<br><strong>Projet :</strong> ";
+    private static final String SMTP_TIMEOUT_MS = "10000";
 
     private final String host;
     private final int port;
@@ -88,13 +97,13 @@ public class AccountMailService {
             MimeMessage message = new MimeMessage(mailSession());
             message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(user.getEmail()));
             message.setFrom(new InternetAddress(fromAddress));
-            message.setSubject("Vos accès Gestion Planning Sage", "UTF-8");
+            message.setSubject("Vos accès Gestion Planning Sage", EMAIL_CHARSET);
             message.setContent(buildContent(user, temporaryPassword));
             Transport.send(message);
             LOGGER.info("Account creation email sent to {}", user.getEmail());
         } catch (MessagingException | RuntimeException exception) {
             LOGGER.error("Unable to send account creation email to {}", user.getEmail(), exception);
-            throw new MailDeliveryException("Échec d'envoi email: " + rootMessage(exception), exception);
+            throw new MailDeliveryException("échec d'envoi email: " + rootMessage(exception), exception);
         }
     }
 
@@ -123,8 +132,8 @@ public class AccountMailService {
         String title = "Phase prête à valider";
         String text = "La phase " + value(stage == null ? null : stage.getLabel(request.isNewVersion()))
                 + " de la modification " + value(request.getModificationNumber())
-                + " est prête à être validée.\nProjet : " + value(request.getModificationProject())
-                + "\nLien : " + value(applicationUrl);
+                + " est prête à être validée." + TEXT_PROJECT_LINE + value(request.getModificationProject())
+                + TEXT_LINK_LINE + value(applicationUrl);
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
@@ -133,7 +142,7 @@ public class AccountMailService {
                 + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Phase prête à valider</h1>"
                 + "</div><div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
                 + "<p>La phase <strong>" + escape(stage == null ? "-" : stage.getLabel(request.isNewVersion())) + "</strong> de la modification <strong>" + escape(value(request.getModificationNumber())) + "</strong> est prête pour validation.</p>"
-                + "<p><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Client :</strong> " + escape(value(request.getClient())) + "<br><strong>Produit :</strong> " + escape(value(request.getProduct())) + "</p>"
+                + "<p><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + HTML_CLIENT_FIELD + escape(value(request.getClient())) + HTML_PRODUCT_FIELD + escape(value(request.getProduct())) + "</p>"
                 + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
                 + "</div></div></div></body></html>";
         sendMessage(to, title, text, html, "phase validation");
@@ -157,8 +166,8 @@ public class AccountMailService {
         String text = "L'action " + value(action.getTitle())
                 + " de la phase " + value(stage == null ? null : stage.getLabel(request.isNewVersion()))
                 + " est prête à être validée.\nModification : " + value(request.getModificationNumber())
-                + "\nProjet : " + value(request.getModificationProject())
-                + "\nLien : " + value(applicationUrl);
+                + TEXT_PROJECT_LINE + value(request.getModificationProject())
+                + TEXT_LINK_LINE + value(applicationUrl);
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
@@ -167,7 +176,7 @@ public class AccountMailService {
                 + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Action prête à valider</h1>"
                 + "</div><div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
                 + "<p>L'action <strong>" + escape(value(action.getTitle())) + "</strong> est prête pour validation.</p>"
-                + "<p><strong>Phase :</strong> " + escape(stage == null ? "-" : stage.getLabel(request.isNewVersion())) + "<br><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "</p>"
+                + "<p><strong>Phase :</strong> " + escape(stage == null ? "-" : stage.getLabel(request.isNewVersion())) + "<br><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + HTML_PROJECT_FIELD + escape(value(request.getModificationProject())) + "</p>"
                 + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
                 + "</div></div></div></body></html>";
         sendMessage(recipient.getEmail(), title, text, html, "action validation");
@@ -194,11 +203,11 @@ public class AccountMailService {
                 + " a été refusée et doit être revisitée."
                 + "\nMotif du refus : " + value(reason)
                 + "\nModification : " + value(request.getModificationNumber())
-                + "\nNom de la modification : " + value(modificationName)
-                + "\nProjet : " + value(request.getModificationProject())
+                + TEXT_MODIFICATION_NAME_LINE + value(modificationName)
+                + TEXT_PROJECT_LINE + value(request.getModificationProject())
                 + "\nPhase : " + value(phase)
                 + "\nPilote action : " + value(action.getResponsible())
-                + "\nLien : " + value(applicationUrl);
+                + TEXT_LINK_LINE + value(applicationUrl);
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
@@ -207,7 +216,7 @@ public class AccountMailService {
                 + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
                 + "<p>L'action <strong>" + escape(value(action.getTitle())) + "</strong> a été refusée et doit être revisitée.</p>"
                 + "<p><strong>Motif du refus :</strong><br>" + escape(value(reason)).replace("\n", "<br>") + "</p>"
-                + "<p><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Phase :</strong> " + escape(value(phase)) + "<br><strong>Pilote action :</strong> " + escape(value(action.getResponsible())) + "</p>"
+                + "<p><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + HTML_PROJECT_FIELD + escape(value(request.getModificationProject())) + "<br><strong>Phase :</strong> " + escape(value(phase)) + "<br><strong>Pilote action :</strong> " + escape(value(action.getResponsible())) + "</p>"
                 + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#b42318;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Revisiter l'action</a></div>"
                 + "</div></div></div></body></html>";
         sendMessage(recipient.getEmail(), title, text, html, "action rejection");
@@ -246,11 +255,11 @@ public class AccountMailService {
                 + "\nAction : " + value(action.getTitle())
                 + "\nDate de fin : " + value(action.getEndDate() == null ? null : action.getEndDate().toString())
                 + "\nModification : " + value(request.getModificationNumber())
-                + "\nNom de la modification : " + value(modificationName)
-                + "\nProjet : " + value(request.getModificationProject())
+                + TEXT_MODIFICATION_NAME_LINE + value(modificationName)
+                + TEXT_PROJECT_LINE + value(request.getModificationProject())
                 + "\nPhase : " + value(phase)
                 + "\nPilote action : " + value(action.getResponsible())
-                + "\nLien : " + value(applicationUrl);
+                + TEXT_LINK_LINE + value(applicationUrl);
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
@@ -258,7 +267,7 @@ public class AccountMailService {
                 + "<h1 style=\"margin:10px 0 0;font-size:24px;\">" + escape(alertTitle) + "</h1></div>"
                 + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
                 + "<p><strong>" + escape(value(timingLabel)) + "</strong> - " + escape(value(timingMessage)) + "</p>"
-                + "<p><strong>Action :</strong> " + escape(value(action.getTitle())) + "<br><strong>Date de fin :</strong> " + escape(value(action.getEndDate() == null ? null : action.getEndDate().toString())) + "<br><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Phase :</strong> " + escape(value(phase)) + "<br><strong>Pilote action :</strong> " + escape(value(action.getResponsible())) + "</p>"
+                + "<p><strong>Action :</strong> " + escape(value(action.getTitle())) + "<br><strong>Date de fin :</strong> " + escape(value(action.getEndDate() == null ? null : action.getEndDate().toString())) + "<br><strong>Modification :</strong> " + escape(value(request.getModificationNumber())) + "<br><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + HTML_PROJECT_FIELD + escape(value(request.getModificationProject())) + "<br><strong>Phase :</strong> " + escape(value(phase)) + "<br><strong>Pilote action :</strong> " + escape(value(action.getResponsible())) + "</p>"
                 + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:" + buttonBackground + ";color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
                 + "</div></div></div></body></html>";
         sendMessage(recipient.getEmail(), ccRecipients, title, text, html, "action deadline");
@@ -283,7 +292,7 @@ public class AccountMailService {
                 + " de la modification " + value(request.getModificationNumber())
                 + " a été refusée.\nRaison : " + value(reason)
                 + "\nActions à revisiter: " + value(actionsToRevisit)
-                + "\nLien : " + value(applicationUrl);
+                + TEXT_LINK_LINE + value(applicationUrl);
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
@@ -324,12 +333,12 @@ public class AccountMailService {
         String title = "Modification marquée terminée";
         String text = "La modification " + value(request.getModificationNumber())
                 + " est marquée comme terminée."
-                + "\nNom de la modification : " + value(modificationName)
-                + "\nProjet : " + value(request.getModificationProject())
+                + TEXT_MODIFICATION_NAME_LINE + value(modificationName)
+                + TEXT_PROJECT_LINE + value(request.getModificationProject())
                 + "\nClient : " + value(request.getClient())
                 + "\nProduit : " + value(request.getProduct())
                 + "\nDate de clôture : " + value(request.getClosureDate() == null ? null : request.getClosureDate().toString())
-                + "\nLien : " + value(applicationUrl);
+                + TEXT_LINK_LINE + value(applicationUrl);
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
@@ -337,7 +346,7 @@ public class AccountMailService {
                 + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Modification terminée</h1></div>"
                 + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
                 + "<p>La modification <strong>" + escape(value(request.getModificationNumber())) + "</strong> est maintenant marquée comme <strong>terminée</strong>.</p>"
-                + "<p><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Client :</strong> " + escape(value(request.getClient())) + "<br><strong>Produit :</strong> " + escape(value(request.getProduct())) + "<br><strong>Date de clôture :</strong> " + escape(value(request.getClosureDate() == null ? null : request.getClosureDate().toString())) + "</p>"
+                + "<p><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + HTML_PROJECT_FIELD + escape(value(request.getModificationProject())) + HTML_CLIENT_FIELD + escape(value(request.getClient())) + HTML_PRODUCT_FIELD + escape(value(request.getProduct())) + "<br><strong>Date de clôture :</strong> " + escape(value(request.getClosureDate() == null ? null : request.getClosureDate().toString())) + "</p>"
                 + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#15803d;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir la modification</a></div>"
                 + "</div></div></div></body></html>";
         sendMessage(to, title, text, html, "modification completion");
@@ -369,11 +378,11 @@ public class AccountMailService {
         String modificationName = modificationName(request);
         String title = "Demande de clôture de modification";
         String text = "Le pilote demande la clôture de la modification " + value(request.getModificationNumber())
-                + "\nNom de la modification : " + value(modificationName)
-                + "\nProjet : " + value(request.getModificationProject())
+                + TEXT_MODIFICATION_NAME_LINE + value(modificationName)
+                + TEXT_PROJECT_LINE + value(request.getModificationProject())
                 + "\nPilote : " + value(requesterName)
                 + "\nDate de demande : " + value(request.getClosureRequestedDate() == null ? null : request.getClosureRequestedDate().toString())
-                + "\nLien : " + value(applicationUrl);
+                + TEXT_LINK_LINE + value(applicationUrl);
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
@@ -381,7 +390,7 @@ public class AccountMailService {
                 + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Demande de clôture</h1></div>"
                 + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
                 + "<p>Le pilote <strong>" + escape(value(requesterName)) + "</strong> demande la clôture de la modification <strong>" + escape(value(request.getModificationNumber())) + "</strong>.</p>"
-                + "<p><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + "<br><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + "<br><strong>Client :</strong> " + escape(value(request.getClient())) + "<br><strong>Produit :</strong> " + escape(value(request.getProduct())) + "<br><strong>Date de demande :</strong> " + escape(value(request.getClosureRequestedDate() == null ? null : request.getClosureRequestedDate().toString())) + "</p>"
+                + "<p><strong>Nom de la modification :</strong> " + escape(value(modificationName)) + HTML_PROJECT_FIELD + escape(value(request.getModificationProject())) + HTML_CLIENT_FIELD + escape(value(request.getClient())) + HTML_PRODUCT_FIELD + escape(value(request.getProduct())) + "<br><strong>Date de demande :</strong> " + escape(value(request.getClosureRequestedDate() == null ? null : request.getClosureRequestedDate().toString())) + "</p>"
                 + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Marquer terminée</a></div>"
                 + "</div></div></div></body></html>";
         sendMessage(to, title, text, html, "modification closure request");
@@ -432,7 +441,7 @@ public class AccountMailService {
                 message.setRecipients(Message.RecipientType.CC, InternetAddress.parse(cc));
             }
             message.setFrom(new InternetAddress(fromAddress));
-            message.setSubject(subject, "UTF-8");
+            message.setSubject(subject, EMAIL_CHARSET);
             message.setContent(buildContent(plainText, html));
             Transport.send(message);
             LOGGER.info("{} email sent to {}{}", logContext, to, isBlank(cc) ? "" : " cc " + cc);
@@ -471,9 +480,9 @@ public class AccountMailService {
         properties.put("mail.smtp.starttls.enable", String.valueOf(startTlsEnabled));
         properties.put("mail.smtp.starttls.required", String.valueOf(startTlsRequired));
         properties.put("mail.smtp.ssl.enable", String.valueOf(sslEnabled));
-        properties.put("mail.smtp.connectiontimeout", "10000");
-        properties.put("mail.smtp.timeout", "10000");
-        properties.put("mail.smtp.writetimeout", "10000");
+        properties.put("mail.smtp.connectiontimeout", SMTP_TIMEOUT_MS);
+        properties.put("mail.smtp.timeout", SMTP_TIMEOUT_MS);
+        properties.put("mail.smtp.writetimeout", SMTP_TIMEOUT_MS);
         properties.put("mail.debug", "false");
 
         if (!smtpAuth) {
@@ -511,11 +520,11 @@ public class AccountMailService {
         MimeMultipart content = new MimeMultipart("alternative");
 
         MimeBodyPart plainText = new MimeBodyPart();
-        plainText.setText(plainTextValue, "UTF-8");
+        plainText.setText(plainTextValue, EMAIL_CHARSET);
         content.addBodyPart(plainText);
 
         MimeBodyPart html = new MimeBodyPart();
-        html.setContent(htmlValue, "text/html; charset=UTF-8");
+        html.setContent(htmlValue, HTML_CONTENT_TYPE);
         content.addBodyPart(html);
 
         return content;
@@ -631,3 +640,4 @@ public class AccountMailService {
         return escape(value).replace("\n", "");
     }
 }
+

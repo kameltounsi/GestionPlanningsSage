@@ -9,6 +9,7 @@ import org.springframework.web.socket.server.HandshakeInterceptor;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Map;
 
 @Component
@@ -25,7 +26,7 @@ public class RealtimeWebSocketAuthInterceptor implements HandshakeInterceptor {
         if (token == null || token.trim().isEmpty()) {
             return false;
         }
-        return tokenRepository.findByTokenAndExpiresAtAfter(token.trim(), LocalDateTime.now())
+        return tokenRepository.findByTokenAndExpiresAtAfter(token.trim(), LocalDateTime.now(ZoneId.systemDefault()))
                 .filter(authToken -> authToken.getUser().isEnabled())
                 .map(authToken -> {
                     attributes.put("authenticatedUserId", authToken.getUser().getId());
@@ -36,5 +37,6 @@ public class RealtimeWebSocketAuthInterceptor implements HandshakeInterceptor {
 
     @Override
     public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response, WebSocketHandler wsHandler, Exception exception) {
+        // No cleanup is required because the handshake only stores immutable authentication attributes.
     }
 }

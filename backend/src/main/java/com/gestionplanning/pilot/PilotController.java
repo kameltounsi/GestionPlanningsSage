@@ -4,6 +4,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/pilots")
@@ -15,21 +16,23 @@ public class PilotController {
     }
 
     @GetMapping
-    public List<Pilot> list() {
-        return pilotRepository.findAllByOrderByNameAsc();
+    public List<PilotDto> list() {
+        return pilotRepository.findAllByOrderByNameAsc().stream()
+                .map(this::toDto)
+                .collect(Collectors.toList());
     }
 
     @PostMapping
-    public ResponseEntity<Pilot> create(@RequestBody Pilot pilot) {
-        return ResponseEntity.ok(pilotRepository.save(pilot));
+    public ResponseEntity<PilotDto> create(@RequestBody PilotDto pilot) {
+        return ResponseEntity.ok(toDto(pilotRepository.save(toEntity(pilot))));
     }
 
     @PutMapping("/{name}")
-    public ResponseEntity<Pilot> update(@PathVariable String name, @RequestBody Pilot updatedPilot) {
+    public ResponseEntity<PilotDto> update(@PathVariable String name, @RequestBody PilotDto updatedPilot) {
         return pilotRepository.findById(name)
                 .map(pilot -> {
                     pilot.setManager(updatedPilot.getManager());
-                    return ResponseEntity.ok(pilotRepository.save(pilot));
+                    return ResponseEntity.ok(toDto(pilotRepository.save(pilot)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -41,5 +44,16 @@ public class PilotController {
         }
         pilotRepository.deleteById(name);
         return ResponseEntity.noContent().build();
+    }
+
+    private Pilot toEntity(PilotDto dto) {
+        Pilot pilot = new Pilot();
+        pilot.setName(dto.getName());
+        pilot.setManager(dto.getManager());
+        return pilot;
+    }
+
+    private PilotDto toDto(Pilot pilot) {
+        return new PilotDto(pilot.getName(), pilot.getManager());
     }
 }

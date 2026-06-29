@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -23,6 +24,7 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/chat")
 public class MessagingController {
     private static final int ONLINE_TIMEOUT_MINUTES = 10;
+    private static final String GROUP_TARGET_TYPE = "group";
     private final AppUserRepository userRepository;
     private final ChatMessageRepository messageRepository;
     private final ChatGroupRepository groupRepository;
@@ -44,7 +46,8 @@ public class MessagingController {
     }
 
     @GetMapping("/conversations")
-    public List<ChatConversationDto> conversations(@RequestAttribute("authenticatedUser") AppUser currentUser) {
+    public List<ChatConversationDto> conversations(@RequestAttribute("authenticatedUser") Object currentUserAttribute) {
+        AppUser currentUser = (AppUser) currentUserAttribute;
         Map<Long, ChatMessage> latestByPeer = messageRepository.recentDirectForUser(currentUser.getId()).stream()
                 .collect(Collectors.toMap(message -> peerId(message, currentUser), message -> message, (first, second) -> first, LinkedHashMap::new));
         List<ChatConversationDto> conversations = new ArrayList<>();
@@ -73,7 +76,8 @@ public class MessagingController {
     }
 
     @GetMapping("/users")
-    public List<ChatUserDto> users(@RequestAttribute("authenticatedUser") AppUser currentUser) {
+    public List<ChatUserDto> users(@RequestAttribute("authenticatedUser") Object currentUserAttribute) {
+        AppUser currentUser = (AppUser) currentUserAttribute;
         Map<Long, ChatMessage> latestByPeer = messageRepository.recentDirectForUser(currentUser.getId()).stream()
                 .collect(Collectors.toMap(message -> peerId(message, currentUser), message -> message, (first, second) -> first, LinkedHashMap::new));
         return userRepository.findAll().stream()
@@ -87,12 +91,13 @@ public class MessagingController {
 
     @GetMapping("/messages/{peerId}")
     @Transactional
-    public ResponseEntity<List<ChatMessageDto>> messages(@PathVariable Long peerId, @RequestAttribute("authenticatedUser") AppUser currentUser) {
+    public ResponseEntity<List<ChatMessageDto>> messages(@PathVariable Long peerId, @RequestAttribute("authenticatedUser") Object currentUserAttribute) {
+        AppUser currentUser = (AppUser) currentUserAttribute;
         return userRepository.findById(peerId)
                 .filter(AppUser::isEnabled)
                 .map(peer -> {
                     List<ChatMessage> messages = messageRepository.conversation(currentUser.getId(), peer.getId());
-                    LocalDateTime now = LocalDateTime.now();
+                    LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
                     messages.stream()
                             .filter(message -> message.getRecipient() != null && message.getRecipient().getId().equals(currentUser.getId()))
                             .filter(message -> message.getReadAt() == null)
@@ -104,7 +109,8 @@ public class MessagingController {
 
     @GetMapping("/groups/{groupId}/messages")
     @Transactional
-    public ResponseEntity<List<ChatMessageDto>> groupMessages(@PathVariable Long groupId, @RequestAttribute("authenticatedUser") AppUser currentUser) {
+    public ResponseEntity<List<ChatMessageDto>> groupMessages(@PathVariable Long groupId, @RequestAttribute("authenticatedUser") Object currentUserAttribute) {
+        AppUser currentUser = (AppUser) currentUserAttribute;
         return groupRepository.findById(groupId)
                 .filter(group -> isGroupMember(group, currentUser))
                 .map(group -> {
@@ -119,8 +125,12 @@ public class MessagingController {
     @PostMapping("/groups")
     @Transactional
     public ResponseEntity<ChatConversationDto> createGroup(@RequestBody CreateGroupRequest request,
-                                                           @RequestAttribute("authenticatedUser") AppUser currentUser) {
-        String name = request == null || request.getName() == null ? "" : request.getName().trim();
+                                                           @RequestAttribute("authenticatedUser") Object currentUserAttribute) {
+                                                               AppUser currentUser = (AppUser) currentUserAttribute;
+        if (request == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        String name = request.getName() == null ? "" : request.getName().trim();
         if (name.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
@@ -146,7 +156,8 @@ public class MessagingController {
     @Transactional
     public ResponseEntity<ChatConversationDto> addGroupMember(@PathVariable Long groupId,
                                                               @RequestBody AddGroupMemberRequest request,
-                                                              @RequestAttribute("authenticatedUser") AppUser currentUser) {
+                                                              @RequestAttribute("authenticatedUser") Object currentUserAttribute) {
+                                                                  AppUser currentUser = (AppUser) currentUserAttribute;
         if (request == null || request.getUserId() == null) {
             return ResponseEntity.badRequest().build();
         }
@@ -170,7 +181,8 @@ public class MessagingController {
     public ResponseEntity<ChatMessageDto> send(@RequestParam Long recipientId,
                                                @RequestParam(required = false) String content,
                                                @RequestParam(required = false) MultipartFile file,
-                                               @RequestAttribute("authenticatedUser") AppUser currentUser) {
+                                               @RequestAttribute("authenticatedUser") Object currentUserAttribute) {
+                                                   AppUser currentUser = (AppUser) currentUserAttribute;
         return userRepository.findById(recipientId)
                 .filter(AppUser::isEnabled)
                 .map(recipient -> {
@@ -197,7 +209,8 @@ public class MessagingController {
     public ResponseEntity<ChatMessageDto> sendGroup(@PathVariable Long groupId,
                                                     @RequestParam(required = false) String content,
                                                     @RequestParam(required = false) MultipartFile file,
-                                                    @RequestAttribute("authenticatedUser") AppUser currentUser) {
+                                                    @RequestAttribute("authenticatedUser") Object currentUserAttribute) {
+                                                        AppUser currentUser = (AppUser) currentUserAttribute;
         return groupRepository.findById(groupId)
                 .filter(group -> isGroupMember(group, currentUser))
                 .map(group -> {
@@ -221,17 +234,18 @@ public class MessagingController {
     }
 
     @PostMapping("/typing")
-    public ResponseEntity<Void> typing(@RequestBody TypingRequest request, @RequestAttribute("authenticatedUser") AppUser currentUser) {
+    public ResponseEntity<Void> typing(@RequestBody TypingRequest request, @RequestAttribute("authenticatedUser") Object currentUserAttribute) {
+        AppUser currentUser = (AppUser) currentUserAttribute;
         if (request == null || request.getTargetId() == null) {
             return ResponseEntity.badRequest().build();
         }
         String targetType = request.getTargetType() == null ? "user" : request.getTargetType();
-        if ("group".equalsIgnoreCase(targetType)) {
+        if (GROUP_TARGET_TYPE.equalsIgnoreCase(targetType)) {
             Optional<ChatGroup> group = groupRepository.findById(request.getTargetId());
             if (!group.isPresent() || !isGroupMember(group.get(), currentUser)) {
                 return ResponseEntity.notFound().build();
             }
-            realtimeUpdateService.publishChatTyping(currentUser.getId(), currentUser.getFullName(), "group", group.get().getId(), request.isActive());
+            realtimeUpdateService.publishChatTyping(currentUser.getId(), currentUser.getFullName(), GROUP_TARGET_TYPE, group.get().getId(), request.isActive());
             return ResponseEntity.noContent().build();
         }
         Optional<AppUser> recipient = userRepository.findById(request.getTargetId()).filter(AppUser::isEnabled);
@@ -243,23 +257,25 @@ public class MessagingController {
     }
 
     @PostMapping("/presence/heartbeat")
-    public ResponseEntity<Void> heartbeat(@RequestAttribute("authenticatedUser") AppUser currentUser) {
+    public ResponseEntity<Void> heartbeat(@RequestAttribute("authenticatedUser") Object currentUserAttribute) {
+        AppUser currentUser = (AppUser) currentUserAttribute;
         touch(currentUser, true);
         realtimeUpdateService.publishChatPresence(currentUser.getId());
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/presence/offline")
-    public ResponseEntity<Void> offline(@RequestAttribute("authenticatedUser") AppUser currentUser) {
+    public ResponseEntity<Void> offline(@RequestAttribute("authenticatedUser") Object currentUserAttribute) {
+        AppUser currentUser = (AppUser) currentUserAttribute;
         touch(currentUser, false);
         realtimeUpdateService.publishChatPresence(currentUser.getId());
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/messages/{messageId}/attachment")
-    public ResponseEntity<?> attachment(@PathVariable Long messageId) {
+    public ResponseEntity<Object> attachment(@PathVariable Long messageId) {
         return messageRepository.findByIdAndAttachmentUrlIsNotNull(messageId)
-                .<ResponseEntity<?>>map(message -> {
+                .<ResponseEntity<Object>>map(message -> {
                     DownloadedAsset asset = storageService.download(
                             message.getAttachmentPublicId(),
                             message.getAttachmentResourceType(),
@@ -285,7 +301,7 @@ public class MessagingController {
             return item;
         });
         presence.setOnline(online);
-        presence.setLastSeenAt(LocalDateTime.now());
+        presence.setLastSeenAt(LocalDateTime.now(ZoneId.systemDefault()));
         return presenceRepository.save(presence);
     }
 
@@ -295,7 +311,7 @@ public class MessagingController {
             return null;
         }
         UserPresence item = presence.get();
-        boolean fresh = item.getLastSeenAt() != null && item.getLastSeenAt().isAfter(LocalDateTime.now().minusMinutes(ONLINE_TIMEOUT_MINUTES));
+        boolean fresh = item.getLastSeenAt() != null && item.getLastSeenAt().isAfter(LocalDateTime.now(ZoneId.systemDefault()).minusMinutes(ONLINE_TIMEOUT_MINUTES));
         if (item.isOnline() && !fresh) {
             item.setOnline(false);
             presenceRepository.save(item);
@@ -349,7 +365,7 @@ public class MessagingController {
             item.setUser(user);
             return item;
         });
-        state.setLastReadAt(LocalDateTime.now());
+        state.setLastReadAt(LocalDateTime.now(ZoneId.systemDefault()));
         groupReadStateRepository.save(state);
     }
 
@@ -433,7 +449,7 @@ public class MessagingController {
         public static ChatConversationDto group(ChatGroup group, ChatMessage latestMessage, long unreadCount) {
             ChatConversationDto dto = new ChatConversationDto();
             dto.id = group.getId();
-            dto.type = "group";
+            dto.type = GROUP_TARGET_TYPE;
             dto.name = group.getName();
             dto.projectName = group.getProjectName();
             dto.memberCount = group.getMembers().size();
@@ -450,7 +466,7 @@ public class MessagingController {
         public Long getId() { return id; }
         public String getType() { return type; }
         public String getName() { return name; }
-        public String getFullName() { return name; }
+        public String getFullName() { return name == null ? "" : name; }
         public String getUsername() { return username; }
         public String getJobTitle() { return jobTitle; }
         public String getProfilePhotoUrl() { return profilePhotoUrl; }

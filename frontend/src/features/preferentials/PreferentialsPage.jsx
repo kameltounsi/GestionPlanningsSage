@@ -3,7 +3,8 @@ import { ChevronLeft, ChevronRight, Pencil, Plus, Save, Search, Trash2, Upload, 
 import { EmptyState } from "../../components/common/EmptyState";
 import { PageHeader } from "../../components/common/PageHeader";
 import { emptyFinishedProductForm } from "../../constants/forms";
-import { userRoleLabel } from "../../utils/users";
+import { userRoleOptions } from "../../constants/roles";
+import { parseUserRoles, userRoleLabel } from "../../utils/users";
 
 const PREFERENTIAL_PAGE_SIZE = 5;
 
@@ -16,12 +17,54 @@ function normalizeRoleToken(value) {
 }
 
 function hasApplicationRole(user, code, label) {
-  const role = normalizeRoleToken(user?.role);
-  return role === normalizeRoleToken(code) || role === normalizeRoleToken(label);
+  const roles = String(user?.role || "")
+    .split(/[;,|]+/)
+    .map(normalizeRoleToken)
+    .filter(Boolean);
+  return roles.includes(normalizeRoleToken(code)) || roles.includes(normalizeRoleToken(label));
 }
 
 function uniqueSorted(values) {
   return [...new Set(values.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
+}
+
+function roleOptionLabel(role) {
+  const normalizedRole = normalizeRoleToken(role).replaceAll("_", " ");
+  const option = userRoleOptions.find(([value, label]) =>
+    normalizeRoleToken(value).replaceAll("_", " ") === normalizedRole
+    || normalizeRoleToken(label).replaceAll("_", " ") === normalizedRole
+  );
+  return option?.[1] || role;
+}
+
+function roleMatches(left, right) {
+  return normalizeRoleToken(left).replaceAll("_", " ") === normalizeRoleToken(right).replaceAll("_", " ");
+}
+
+function userAssignableRoles(user) {
+  return uniqueSorted(parseUserRoles(user?.role).map(roleOptionLabel));
+}
+
+function rolesAllowedForUser(roles, user) {
+  const allowedRoles = userAssignableRoles(user);
+  return uniqueSorted(
+    roles
+      .map((role) => allowedRoles.find((allowedRole) => roleMatches(allowedRole, role)))
+      .filter(Boolean)
+  );
+}
+
+function entriesWithUniqueProjectRoles(entries) {
+  const usedRoles = new Set();
+  return entries.map((entry) => {
+    const roles = entry.roles.filter((role) => {
+      const key = normalizeRoleToken(role).replaceAll("_", " ");
+      if (!key || usedRoles.has(key)) return false;
+      usedRoles.add(key);
+      return true;
+    });
+    return { ...entry, roles };
+  });
 }
 
 function includeCurrentOption(options, currentValue) {
@@ -40,10 +83,30 @@ function normalizeSearchText(value) {
 }
 
 function parseProjectTeam(projectTeam) {
+  return parseProjectTeamEntries(projectTeam).map((entry) => entry.name);
+}
+
+function parseProjectTeamEntries(projectTeam) {
   return String(projectTeam || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+    .split(/[;\n]+/)
+    .flatMap((entry) => entry.includes("::") ? [entry] : entry.split(","))
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [name, roleText = ""] = entry.split("::");
+      return {
+        name: name.trim(),
+        roles: roleText.split(/[|,]+/).map((role) => role.trim()).filter(Boolean)
+      };
+    })
+    .filter((entry) => entry.name);
+}
+
+function serializeProjectTeamEntries(entries) {
+  return entries
+    .filter((entry) => entry.name)
+    .map((entry) => `${entry.name}::${entry.roles.join("|")}`)
+    .join("; ");
 }
 
 function findUserByTeamName(userName, users = []) {
@@ -56,9 +119,13 @@ function formatUserWithRole(userName, users = []) {
 }
 
 function formatProjectTeamWithRoles(projectTeam, users = []) {
-  const members = parseProjectTeam(projectTeam);
+  const members = parseProjectTeamEntries(projectTeam);
   if (members.length === 0) return "Equipe non renseignee";
-  return members.map((member) => formatUserWithRole(member, users)).join(", ");
+  return members.map((member) => {
+    const user = findUserByTeamName(member.name, users);
+    const roles = member.roles.length > 0 ? member.roles.join(", ") : userRoleLabel(user?.role);
+    return `${member.name}${roles ? ` (${roles})` : ""}`;
+  }).join(", ");
 }
 
 function userDisplayRole(user) {
@@ -77,14 +144,42 @@ function selectedProjectLeadNames(users = []) {
 }
 
 function countSelectedProjectLeads(projectTeam, users = []) {
-  const selectedNames = parseProjectTeam(projectTeam);
-  return selectedProjectLeadNames(users).filter((name) => selectedNames.includes(name)).length;
+  return parseProjectTeamEntries(projectTeam).filter((entry) =>
+    entry.roles.some((role) => normalizeRoleToken(role).replaceAll("_", " ") === "chef de projet")
+  ).length;
+}
+
+function userMatchesTeamName(user, name) {
+  const normalized = normalizeSearchText(name);
+  return [user?.fullName, user?.username, user?.email]
+    .filter(Boolean)
+    .some((value) => normalizeSearchText(value) === normalized);
+}
+
+function isProjectLeadForProject(user, project) {
+  if (!user || !project) return false;
+  return parseProjectTeamEntries(project.projectTeam).some((entry) =>
+    userMatchesTeamName(user, entry.name)
+    && (entry.roles.length === 0 && hasApplicationRole(user, "CHEF_DE_PROJET", "Chef de projet")
+      || entry.roles.some((role) => normalizeRoleToken(role).replaceAll("_", " ") === "chef de projet"))
+  );
 }
 
 function ProjectTeamSelector({ projectTeam, users = [], onChange }) {
   const [teamQuery, setTeamQuery] = useState("");
-  const selectedNames = useMemo(() => parseProjectTeam(projectTeam), [projectTeam]);
-  const selectedProjectLeadCount = useMemo(() => countSelectedProjectLeads(projectTeam, users), [projectTeam, users]);
+  const rawSelectedEntries = useMemo(() => parseProjectTeamEntries(projectTeam), [projectTeam]);
+  const selectedEntries = useMemo(() => entriesWithUniqueProjectRoles(rawSelectedEntries.map((entry) => {
+    const user = findUserByTeamName(entry.name, users);
+    return { ...entry, roles: rolesAllowedForUser(entry.roles, user) };
+  })), [rawSelectedEntries, users]);
+  const serializedRawEntries = useMemo(() => serializeProjectTeamEntries(rawSelectedEntries), [rawSelectedEntries]);
+  const serializedSelectedEntries = useMemo(() => serializeProjectTeamEntries(selectedEntries), [selectedEntries]);
+  const selectedNames = selectedEntries.map((entry) => entry.name);
+  const selectedProjectLeadCount = useMemo(() =>
+    selectedEntries.filter((entry) =>
+      entry.roles.some((role) => normalizeRoleToken(role).replaceAll("_", " ") === "chef de projet")
+    ).length
+  , [selectedEntries]);
   const normalizedQuery = normalizeSearchText(teamQuery);
   const sortedUsers = useMemo(
     () => [...users].sort((a, b) => String(a.fullName || "").localeCompare(String(b.fullName || ""))),
@@ -97,12 +192,34 @@ function ProjectTeamSelector({ projectTeam, users = [], onChange }) {
       .some((value) => normalizeSearchText(value).includes(normalizedQuery));
   });
 
+  useEffect(() => {
+    if (serializedRawEntries !== serializedSelectedEntries) {
+      onChange(serializedSelectedEntries);
+    }
+  }, [serializedRawEntries, serializedSelectedEntries]);
+
   function toggleUser(user, checked) {
     const userName = user.fullName || user.username || user.email;
-    const nextNames = checked
-      ? [...selectedNames.filter((name) => !isProjectLead(user) || !selectedProjectLeadNames(users).includes(name)), userName]
-      : selectedNames.filter((name) => name !== userName);
-    onChange([...new Set(nextNames)].join(", "));
+    const alreadyUsedRoles = new Set(selectedEntries.flatMap((entry) => entry.roles.map((role) => normalizeRoleToken(role).replaceAll("_", " "))));
+    const nextEntries = checked
+      ? [
+        ...selectedEntries.filter((entry) => entry.name !== userName),
+        {
+          name: userName,
+          roles: userAssignableRoles(user).filter((role) => !alreadyUsedRoles.has(normalizeRoleToken(role).replaceAll("_", " ")))
+        }
+      ]
+      : selectedEntries.filter((entry) => entry.name !== userName);
+    onChange(serializeProjectTeamEntries(nextEntries));
+  }
+
+  function toggleUserRole(userName, role, checked) {
+    const nextEntries = selectedEntries.map((entry) => {
+      if (entry.name !== userName) return entry;
+      const roles = checked ? uniqueSorted([...entry.roles, role]) : entry.roles.filter((item) => item !== role);
+      return { ...entry, roles };
+    });
+    onChange(serializeProjectTeamEntries(nextEntries));
   }
 
   return (
@@ -123,25 +240,49 @@ function ProjectTeamSelector({ projectTeam, users = [], onChange }) {
           filteredUsers.map((user) => {
             const userName = user.fullName || user.username || user.email;
             const checked = selectedNames.includes(userName);
+            const selectedEntry = selectedEntries.find((entry) => entry.name === userName);
+            const roleOptions = userAssignableRoles(user);
+            const rolesUsedByOthers = new Set(selectedEntries
+              .filter((entry) => entry.name !== userName)
+              .flatMap((entry) => entry.roles.map((role) => normalizeRoleToken(role).replaceAll("_", " "))));
             return (
-              <label className="project-team-option" key={user.id || userName}>
-                <input
-                  checked={checked}
-                  type="checkbox"
-                  onChange={(event) => toggleUser(user, event.target.checked)}
-                />
-                <span>
-                  <strong>{userName}</strong>
-                  <small>{userDisplayRole(user)}</small>
-                </span>
-              </label>
+              <div className="project-team-option" key={user.id || userName}>
+                <label>
+                  <input
+                    checked={checked}
+                    type="checkbox"
+                    onChange={(event) => toggleUser(user, event.target.checked)}
+                  />
+                  <span>
+                    <strong>{userName}</strong>
+                    <small>{userDisplayRole(user)}</small>
+                  </span>
+                </label>
+                {checked && (
+                  <div className="project-team-role-list">
+                    {roleOptions.length === 0 ? (
+                      <p className="form-hint">Aucun role disponible pour cet utilisateur.</p>
+                    ) : roleOptions.map((role) => (
+                      <label key={`${userName}-${role}`}>
+                        <input
+                          checked={selectedEntry?.roles.includes(role) || false}
+                          disabled={!selectedEntry?.roles.includes(role) && rolesUsedByOthers.has(normalizeRoleToken(role).replaceAll("_", " "))}
+                          type="checkbox"
+                          onChange={(event) => toggleUserRole(userName, role, event.target.checked)}
+                        />
+                        {role}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
             );
           })
         )}
       </div>
       <p className={selectedProjectLeadCount === 1 ? "form-hint" : "form-hint project-team-warning"}>
         {selectedNames.length} utilisateur{selectedNames.length > 1 ? "s" : ""} selectionne{selectedNames.length > 1 ? "s" : ""}.
-        {" "}Chef de projet: {selectedProjectLeadCount}/1
+        {" "}Chef de projet: {selectedProjectLeadCount}/1. Chaque utilisateur selectionne doit avoir au moins un role projet.
       </p>
     </fieldset>
   );
@@ -198,6 +339,7 @@ function PaginationControls({ currentPage, pageCount, totalCount, onPageChange }
 export function PreferentialsPage({
   clientForm,
   clients,
+  currentUser,
   editingClient,
   editingFinishedProduct,
   editingProduct,
@@ -241,13 +383,27 @@ export function PreferentialsPage({
   setRoleForm
 }) {
   const [activePreferential, setActivePreferential] = useState("projects");
+  const canAdmin = hasApplicationRole(currentUser, "ADMIN", "Admin") || normalizeRoleToken(currentUser?.username) === "fchelbi";
+  const managedProjectNames = new Set(projects
+    .filter((project) => canAdmin || isProjectLeadForProject(currentUser, project))
+    .map((project) => project.name));
+  const visibleProjects = canAdmin ? projects : projects.filter((project) => managedProjectNames.has(project.name));
+  const visibleFinishedProducts = canAdmin ? finishedProducts : finishedProducts.filter((reference) => managedProjectNames.has(reference.project));
   const preferentialEntities = [
-    { key: "projects", label: "Projets", count: projects.length },
-    { key: "clients", label: "Clients", count: clients.length },
-    { key: "products", label: "Produits", count: products.length },
-    { key: "finished-products", label: "Produits finis", count: finishedProducts.length },
-    { key: "roles", label: "Rôles d'action", count: roles.length }
+    { key: "projects", label: "Projets", count: visibleProjects.length },
+    ...(canAdmin ? [
+      { key: "clients", label: "Clients", count: clients.length },
+      { key: "products", label: "Produits", count: products.length }
+    ] : []),
+    { key: "finished-products", label: "Produits finis", count: visibleFinishedProducts.length },
+    ...(canAdmin ? [{ key: "roles", label: "Roles d'action", count: roles.length }] : [])
   ];
+
+  useEffect(() => {
+    if (!preferentialEntities.some((entity) => entity.key === activePreferential)) {
+      setActivePreferential(preferentialEntities[0]?.key || "projects");
+    }
+  }, [activePreferential, preferentialEntities]);
 
   return (
     <section className="page-content">
@@ -271,7 +427,9 @@ export function PreferentialsPage({
       <ProjectPreferentialPanel
         editingProject={editingProject}
         projectForm={projectForm}
-        projects={projects}
+        projects={visibleProjects}
+        roles={roles}
+        canAdmin={canAdmin}
         saving={saving}
         users={users}
         onCancelEdit={onCancelProjectEdit}
@@ -321,8 +479,8 @@ export function PreferentialsPage({
           editing={editingFinishedProduct}
           form={finishedProductForm}
           products={products}
-          projects={projects}
-          references={finishedProducts}
+          projects={visibleProjects}
+          references={visibleFinishedProducts}
           saving={saving}
           onCancelEdit={onCancelFinishedProductEdit}
           onDelete={onDeleteFinishedProduct}
@@ -722,7 +880,7 @@ function PreferentialDialog({ editing, form, saving, title, onClose, onSubmit, s
   );
 }
 
-function ProjectPreferentialPanel({ editingProject, projectForm, projects, saving, users, onCancelEdit, onDelete, onEdit, onSubmit, setProjectForm }) {
+function ProjectPreferentialPanel({ canAdmin, editingProject, projectForm, projects, roles, saving, users, onCancelEdit, onDelete, onEdit, onSubmit, setProjectForm }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const filteredProjects = useFilteredItems(projects, searchTerm, (project) => [
@@ -763,10 +921,12 @@ function ProjectPreferentialPanel({ editingProject, projectForm, projects, savin
           <h2>Projets</h2>
           <span>{projects.length} projet{projects.length > 1 ? "s" : ""}</span>
         </div>
-        <button className="primary-action compact-action" disabled={saving} type="button" onClick={openCreateDialog}>
-          <Plus size={15} />
-          Ajouter
-        </button>
+        {canAdmin && (
+          <button className="primary-action compact-action" disabled={saving} type="button" onClick={openCreateDialog}>
+            <Plus size={15} />
+            Ajouter
+          </button>
+        )}
       </div>
       <label className="preferential-search">
         Rechercher
@@ -792,9 +952,11 @@ function ProjectPreferentialPanel({ editingProject, projectForm, projects, savin
                   <button className="secondary-action compact-action icon-only-action" type="button" onClick={() => onEdit(project)} aria-label="Modifier le projet" title="Modifier">
                     <Pencil size={15} />
                   </button>
-                  <button className="ghost-icon" type="button" onClick={() => onDelete(project.name)} title="Supprimer">
-                    <Trash2 size={15} />
-                  </button>
+                  {canAdmin && (
+                    <button className="ghost-icon" type="button" onClick={() => onDelete(project.name)} title="Supprimer">
+                      <Trash2 size={15} />
+                    </button>
+                  )}
                 </div>
               </article>
             ))}
@@ -811,6 +973,7 @@ function ProjectPreferentialPanel({ editingProject, projectForm, projects, savin
         <ProjectDialog
           editingProject={editingProject}
           projectForm={projectForm}
+          roles={roles}
           saving={saving}
           users={users}
           onClose={closeDialog}
@@ -822,7 +985,7 @@ function ProjectPreferentialPanel({ editingProject, projectForm, projects, savin
   );
 }
 
-function ProjectDialog({ editingProject, projectForm, saving, users, onClose, onSubmit, setProjectForm }) {
+function ProjectDialog({ editingProject, projectForm, roles, saving, users, onClose, onSubmit, setProjectForm }) {
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <form
@@ -848,6 +1011,7 @@ function ProjectDialog({ editingProject, projectForm, saving, users, onClose, on
         </label>
         <ProjectTeamSelector
           projectTeam={projectForm.projectTeam}
+          roles={roles}
           users={users}
           onChange={(projectTeam) => setProjectForm((form) => ({ ...form, projectTeam }))}
         />

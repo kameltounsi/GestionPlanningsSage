@@ -4,6 +4,7 @@ import com.gestionplanning.ecr.EcrStage;
 
 import javax.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "action_standard_suggestion")
@@ -48,7 +49,7 @@ public class ActionStandardSuggestion {
 
     @Column(nullable = false, length = 1000)
     private String createdBy;
-    private LocalDateTime createdAt = LocalDateTime.now();
+    private LocalDateTime createdAt = LocalDateTime.now(ZoneId.systemDefault());
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

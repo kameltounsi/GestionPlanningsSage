@@ -4,6 +4,7 @@ import com.gestionplanning.user.AppUser;
 
 import javax.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "password_reset_code")
@@ -19,7 +20,7 @@ public class PasswordResetCode {
     private String code;
 
     @Column(nullable = false)
-    private LocalDateTime createdAt = LocalDateTime.now();
+    private LocalDateTime createdAt = LocalDateTime.now(ZoneId.systemDefault());
 
     @Column(nullable = false)
     private LocalDateTime expiresAt;
@@ -80,7 +81,7 @@ public class PasswordResetCode {
     @PrePersist
     public void beforeCreate() {
         if (createdAt == null) {
-            createdAt = LocalDateTime.now();
+            createdAt = LocalDateTime.now(ZoneId.systemDefault());
         }
     }
 }

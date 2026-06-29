@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -45,7 +46,7 @@ public class PhaseSoundAlertService {
             return;
         }
         String email = normalizeEmail(user.getEmail());
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
         List<PhaseSoundAlert> alerts = alertRepository.findAllById(ids).stream()
                 .filter(alert -> email.equals(normalizeEmail(alert.getRecipientEmail())))
                 .collect(Collectors.toList());
@@ -64,7 +65,7 @@ public class PhaseSoundAlertService {
         alert.setRequestLabel(requestLabel(request));
         alert.setApprovedPhaseLabel(approvedStage.getLabel(request.isNewVersion()));
         alert.setOpenedPhaseLabel(openedPhaseLabel(request, approvedStage, openedStage));
-        alert.setCreatedAt(LocalDateTime.now());
+        alert.setCreatedAt(LocalDateTime.now(ZoneId.systemDefault()));
         return alert;
     }
 

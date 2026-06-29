@@ -1,4 +1,5 @@
-import React, { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import PropTypes from "prop-types";
 import Swal from "sweetalert2";
 import "sweetalert2/dist/sweetalert2.min.css";
 import html2canvas from "html2canvas";
@@ -9,7 +10,6 @@ import {
   CircleAlert,
   Archive,
   ArchiveRestore,
-  Bot,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -19,20 +19,13 @@ import {
   FileText,
   FolderKanban,
   Gauge,
-  Image as ImageIcon,
   Maximize2,
-  MessageCircle,
-  Paperclip,
   Pencil,
   Plus,
   Save,
   Search,
-  Send,
-  Smile,
-  Square,
   Trash2,
   Upload,
-  Volume2,
   X,
   XCircle
 } from "lucide-react";
@@ -83,7 +76,6 @@ import {
   getChatConversations,
   getChatGroupMessages,
   getChatMessages,
-  getChatUsers,
   getClientReferences,
   getCurrentUser,
   getEcrRequestProgress,
@@ -139,7 +131,6 @@ import {
 } from "./api";
 import { EmptyState } from "./components/common/EmptyState";
 import { PageHeader } from "./components/common/PageHeader";
-import { StatCard } from "./components/common/StatCard";
 import { emptyActionForm, emptyEcrForm, emptyFinishedProductForm, emptyPlanningRuleForm, emptyUserForm } from "./constants/forms";
 import { userRoleOptions } from "./constants/roles";
 import { LoginPage } from "./features/auth/LoginPage";
@@ -157,7 +148,6 @@ import {
   totalUnreadConversations
 } from "./features/messaging/MessagingPage";
 import { DossierReviewDialog } from "./features/modifications/DossierReviewDialog";
-import { dossierReviewMetaLine } from "./features/modifications/dossierReviewExports";
 import { PreferentialsPage } from "./features/preferentials/PreferentialsPage";
 import { ProfilePage } from "./features/profile/ProfilePage";
 import { ProjectsPage } from "./features/projects/ProjectsPage";
@@ -175,7 +165,6 @@ const swalButtons = {
   cancelButtonColor: "#64748b"
 };
 
-const PREFERENTIAL_PAGE_SIZE = 5;
 const pageTitles = {
   dashboard: "Tableau de bord",
   modifications: "Modifications",
@@ -199,9 +188,10 @@ const pageRoutes = {
   profile: "/profil"
 };
 const routePages = Object.fromEntries(Object.entries(pageRoutes).map(([key, route]) => [route, key]));
-function pageFromPath(pathname = window.location.pathname) {
-  const normalized = pathname.replace(/\/+$/, "") || "/";
-  return routePages[normalized] || (normalized === "/" ? "dashboard" : "dashboard");
+function pageFromPath(pathname) {
+  const currentPathname = pathname ?? globalThis.location.pathname;
+  const normalized = currentPathname.replaceAll(/\/+$/g, "") || "/";
+  return routePages[normalized] || "dashboard";
 }
 
 function routeForPage(page) {
@@ -338,7 +328,7 @@ function formattedDateTime(value) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return String(value).replace("T", " ").slice(0, 16);
+    return String(value).replaceAll("T", " ").slice(0, 16);
   }
   return new Intl.DateTimeFormat("fr-FR", {
     dateStyle: "short",
@@ -348,6 +338,10 @@ function formattedDateTime(value) {
 
 function isActionDone(action) {
   return Boolean(action?.checked) || action?.status === "DONE" || action?.status === "DONE_LATE";
+}
+
+function isHistoricalActionDisplay(action) {
+  return isActionDone(action) || action?.validationStatus === "APPROVED";
 }
 
 function actionCompletionRate(actions = []) {
@@ -378,7 +372,7 @@ function workflowCompletionRate(request, actions = []) {
   return Math.round((currentIndex / (stages.length - 1)) * 100);
 }
 
-function dashboardProgressGroups(requests = [], labelFor, limit = 5, progressFor = workflowCompletionRate) {
+function dashboardProgressGroups(labelFor, requests = [], limit = 5, progressFor = workflowCompletionRate) {
   return Array.from(requests.reduce((map, request) => {
     const label = labelFor(request) || "Non renseigne";
     const item = map.get(label) || { label, count: 0, progressTotal: 0, late: 0, active: 0 };
@@ -446,15 +440,15 @@ function requestLoadOptions(view, user) {
 
 function escapeHtml(value) {
   return String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function escapeExcelHtml(value) {
-  return escapeHtml(value).replace(/\r?\n/g, "<br>");
+  return escapeHtml(value).replaceAll(/\r?\n/g, "<br>");
 }
 
 function requestDisplayName(request) {
@@ -464,9 +458,9 @@ function requestDisplayName(request) {
 function fileNameToken(value) {
   return String(value || "modification")
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
+    .replaceAll(/[\u0300-\u036f]/g, "")
+    .replaceAll(/[^a-zA-Z0-9]+/g, "-")
+    .replaceAll(/^-+|-+$/g, "")
     .toLowerCase() || "modification";
 }
 
@@ -483,6 +477,15 @@ function stagesForRequest(request) {
     ...visibleStages,
     ["CANCELLED", stageLabel("CANCELLED", Boolean(request.newVersion))]
   ];
+}
+
+function isStageInCancelledHistory(request, stage) {
+  if (!request || request.currentStage !== "CANCELLED" || !stage) return false;
+  if (stage === "CANCELLED") return true;
+  const stages = getStages(Boolean(request.newVersion)).map(([key]) => key);
+  const cancelledFromIndex = stages.indexOf(request.cancelledFromStage);
+  const stageIndex = stages.indexOf(stage);
+  return cancelledFromIndex >= 0 && stageIndex >= 0 && stageIndex <= cancelledFromIndex;
 }
 
 const modificationDossierChecklist = [
@@ -536,9 +539,9 @@ const modificationDossierChecklist = [
 function normalizeMatchText(value) {
   return String(value || "")
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replaceAll(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
+    .replaceAll(/[^a-z0-9]+/g, " ")
     .trim();
 }
 
@@ -589,17 +592,19 @@ function dossierBoolean(value) {
   return value ? "Oui" : "Non";
 }
 
+function requestStatusText(request) {
+  if (request.cancelledStatus) return "Annulée";
+  if (request.closureStatus) return "Clôturée";
+  return "Active";
+}
+
 function modificationDossierExportExcel(request, actions = []) {
   const sortedActions = [...actions].sort((first, second) =>
     (Number(first.id) || 0) - (Number(second.id) || 0)
   );
   const generatedAt = new Date().toLocaleString("fr-FR");
   const modificationTypes = modificationTypesLabel(request);
-  const statusLabel = request.cancelledStatus
-    ? "Annulée"
-    : request.closureStatus
-      ? "Clôturée"
-      : "Active";
+  const statusLabel = requestStatusText(request);
   const checklistRows = modificationDossierChecklist.map(([number, topic, document, pilot]) => {
     const action = findChecklistAction(sortedActions, topic, document);
     const cancelled = action?.status === "CANCELLED";
@@ -851,20 +856,11 @@ function projectPlanStyleDossierExportExcel(request, actions = []) {
       || (Number(first.id) || 0) - (Number(second.id) || 0)
   );
   const clientParts = String(request.client || "")
-    .split(/&|\/|;|,/)
+    .split(/[&/;,]/)
     .map((client) => client.trim())
     .filter(Boolean);
   const firstClient = clientParts[0] || request.client || "Client 1";
   const secondClient = clientParts[1] || "Client 2";
-  const statusLegend = [
-    ["all item", sortedActions.length],
-    ["open item", Math.max(0, sortedActions.length - sortedActions.filter(isActionDone).length)],
-    ["plan", "0.25"],
-    ["do", "0.5"],
-    ["check", "0.75"],
-    ["closed item", "1"],
-    ["overdue Item", "0"]
-  ];
   const phasePalette = ["phase-yellow", "phase-orange", "phase-green", "phase-blue", "phase-red"];
   const actionRows = sortedActions.map((action, index) => {
     const stageIndex = stageOrder.get(action.stage) ?? 0;
@@ -872,8 +868,20 @@ function projectPlanStyleDossierExportExcel(request, actions = []) {
     const startDate = dossierDate(action.startDate || action.date1 || action.createdAt);
     const endDate = dossierDate(action.deadline || action.endDate || action.date2);
     const completionDate = dossierDate(action.closedDate || action.finalizationDate);
-    const clientValue = action.status === "CANCELLED" ? 0 : isActionDone(action) ? 1 : actionGanttStatusClass(action) === "late" ? 0 : 0.5;
-    const priority = criticalityClass(action.criticality) === "critical" ? "Elevee" : criticalityClass(action.criticality) === "medium" ? "Moyenne" : "Faible";
+    const statusClassName = actionGanttStatusClass(action);
+    let clientValue = 0.5;
+    if (action.status === "CANCELLED" || statusClassName === "late") {
+      clientValue = 0;
+    } else if (isActionDone(action)) {
+      clientValue = 1;
+    }
+    const criticality = criticalityClass(action.criticality);
+    let priority = "Faible";
+    if (criticality === "critical") {
+      priority = "Elevee";
+    } else if (criticality === "medium") {
+      priority = "Moyenne";
+    }
     return `<tr class="plan-row">
       <td class="phase ${phasePalette[stageIndex % phasePalette.length]}">${isFirstInStage ? escapeExcelHtml(stageLabel(action.stage, Boolean(request.newVersion))) : ""}</td>
       <td class="action">${escapeExcelHtml(action.title || "-")}</td>
@@ -902,12 +910,6 @@ function projectPlanStyleDossierExportExcel(request, actions = []) {
         <td colspan="2">${stageActions.length} action${stageActions.length > 1 ? "s" : ""}</td>
       </tr>`;
     }).join("");
-  const legendRows = statusLegend.map(([label, value], index) => `<tr>
-    <td colspan="10"></td>
-    <td class="legend-label">${escapeExcelHtml(label)}</td>
-    <td class="legend-value">${escapeExcelHtml(value)}</td>
-  </tr>`).join("");
-
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Project plan - ${escapeHtml(requestDisplayName(request))}</title><style>
     body{font-family:"Century Gothic",Calibri,Arial,sans-serif;color:#000;margin:0;background:#fff}
     table{border-collapse:collapse;table-layout:fixed;width:1450px}
@@ -991,12 +993,21 @@ function completePhaseDossierExportExcel(request, actions = []) {
         const endDate = dossierDate(action.deadline || action.endDate || action.date2);
         const completionDate = dossierDate(action.closedDate || action.finalizationDate);
         const plannedDays = Number(action.workDurationDays) || (startDate && endDate ? `=F${excelRow}-E${excelRow}` : "");
-        const statusClassName = action.status === "CANCELLED"
-          ? "status-cancelled"
-          : isActionDone(action) ? "status-done" : actionGanttStatusClass(action) === "late" ? "status-late" : "status-open";
-        const priority = criticalityClass(action.criticality) === "critical"
-          ? "Elevee"
-          : criticalityClass(action.criticality) === "medium" ? "Moyenne" : "Faible";
+        let statusClassName = "status-open";
+        if (action.status === "CANCELLED") {
+          statusClassName = "status-cancelled";
+        } else if (isActionDone(action)) {
+          statusClassName = "status-done";
+        } else if (actionGanttStatusClass(action) === "late") {
+          statusClassName = "status-late";
+        }
+        const criticality = criticalityClass(action.criticality);
+        let priority = "Faible";
+        if (criticality === "critical") {
+          priority = "Elevee";
+        } else if (criticality === "medium") {
+          priority = "Moyenne";
+        }
         return `<tr class="action-row">
           <td class="center">${index + 1}</td>
           <td class="action">${escapeExcelHtml(action.title || "-")}</td>
@@ -1246,10 +1257,15 @@ function requestTimelineEnd(request, startDate) {
     || parseDateOnly(request.closureDate)
     || parseDateOnly(request.cancelledDate);
   if (explicitEnd && explicitEnd >= startDate) return explicitEnd;
-  const fallbackEnd = request.currentStage === "CLOSED" || request.currentStage === "CANCELLED"
-    ? startDate
-    : today > startDate ? today : addDays(startDate, 30);
-  return fallbackEnd >= startDate ? fallbackEnd : startDate;
+  let fallbackEnd = startDate;
+  if (request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED") {
+    if (today > startDate) {
+      fallbackEnd = today;
+    } else {
+      fallbackEnd = addDays(startDate, 30);
+    }
+  }
+  return new Date(Math.max(fallbackEnd.getTime(), startDate.getTime()));
 }
 
 function actionTimelineStart(action, fallbackDate) {
@@ -1315,18 +1331,22 @@ function ganttScale(timelineStart, timelineEnd) {
       const date = addDays(timelineStart, offset);
       ticks.push({ date, label: date.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) });
     }
-    if (ticks[ticks.length - 1]?.date < timelineEnd) {
+    if (ticks.at(-1)?.date < timelineEnd) {
       ticks.push({ date: timelineEnd, label: timelineEnd.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" }) });
     }
     return ticks;
   }
   const ticks = [];
-  const cursor = new Date(timelineStart.getFullYear(), timelineStart.getMonth(), 1);
-  if (cursor < timelineStart) cursor.setMonth(cursor.getMonth() + 1);
+  const firstMonthTick = new Date(timelineStart.getFullYear(), timelineStart.getMonth(), 1);
+  if (firstMonthTick < timelineStart) {
+    firstMonthTick.setMonth(firstMonthTick.getMonth() + 1);
+  }
   ticks.push({ date: timelineStart, label: timelineStart.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" }) });
-  while (cursor < timelineEnd) {
-    ticks.push({ date: new Date(cursor), label: cursor.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" }) });
-    cursor.setMonth(cursor.getMonth() + 1);
+  for (let cursorTime = firstMonthTick.getTime(); cursorTime < timelineEnd.getTime();) {
+    const tickDate = new Date(cursorTime);
+    ticks.push({ date: tickDate, label: tickDate.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" }) });
+    tickDate.setMonth(tickDate.getMonth() + 1);
+    cursorTime = tickDate.getTime();
   }
   ticks.push({ date: timelineEnd, label: timelineEnd.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" }) });
   return ticks;
@@ -1363,6 +1383,7 @@ function filterGanttActionsForRequest(request, actions = [], selectedStages = []
 
 async function downloadHtmlAsPdf(fileName, html, options = {}) {
   const orientation = options.orientation || "landscape";
+  const scale = options.scale || 2;
   const host = document.createElement("div");
   host.style.position = "fixed";
   host.style.left = "-10000px";
@@ -1386,7 +1407,7 @@ async function downloadHtmlAsPdf(fileName, html, options = {}) {
       }
       const canvas = await html2canvas(element, {
       backgroundColor: options.backgroundColor || "#f7f9f1",
-      scale: 2,
+      scale,
       useCORS: true
     });
     const pdf = new jsPDF({ orientation, unit: "pt", format: "a4" });
@@ -1394,7 +1415,6 @@ async function downloadHtmlAsPdf(fileName, html, options = {}) {
     const pageHeight = pdf.internal.pageSize.getHeight();
     const margin = 18;
     const imageWidth = pageWidth - margin * 2;
-    const imageHeight = (canvas.height * imageWidth) / canvas.width;
     const pageImageHeight = pageHeight - margin * 2;
     const pageCanvasHeight = Math.max(1, Math.floor((pageImageHeight * canvas.width) / imageWidth));
     let sourceY = 0;
@@ -1430,6 +1450,7 @@ async function downloadHtmlAsPdf(fileName, html, options = {}) {
 
 async function saveHtmlPagesAsPdf(fileName, pages, options = {}) {
   const orientation = options.orientation || "portrait";
+  const scale = options.scale || 2;
   const pdf = new jsPDF({ orientation, unit: "pt", format: "a4" });
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
@@ -1437,7 +1458,7 @@ async function saveHtmlPagesAsPdf(fileName, pages, options = {}) {
   for (let index = 0; index < pages.length; index += 1) {
     const canvas = await html2canvas(pages[index], {
       backgroundColor: options.backgroundColor || "#f7f9f1",
-      scale: 2,
+      scale,
       useCORS: true
     });
     const imageWidth = pageWidth - margin * 2;
@@ -1446,6 +1467,7 @@ async function saveHtmlPagesAsPdf(fileName, pages, options = {}) {
       pdf.addPage("a4", orientation);
     }
     pdf.addImage(canvas.toDataURL("image/png"), "PNG", margin, margin, imageWidth, imageHeight);
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
   }
   pdf.save(fileName);
 }
@@ -1457,7 +1479,7 @@ async function inlinePdfImages(images = []) {
       return;
     }
     try {
-      const response = await fetch(new URL(source, window.location.href).toString());
+      const response = await fetch(new URL(source, globalThis.location.href).toString());
       if (!response.ok) {
         return;
       }
@@ -1492,8 +1514,8 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = [], pr
     })
     .sort((first, second) => first.start - second.start || String(first.action.title || "").localeCompare(String(second.action.title || ""), "fr", { sensitivity: "base" }));
   const requestEnd = requestTimelineEnd(request, fallbackStart);
-  const minDate = actionRows.reduce((min, row) => row.start < min ? row.start : min, fallbackStart);
-  const maxDate = actionRows.reduce((max, row) => row.end > max ? row.end : max, requestEnd);
+  const minDate = actionRows.reduce((min, row) => new Date(Math.min(min.getTime(), row.start.getTime())), fallbackStart);
+  const maxDate = actionRows.reduce((max, row) => new Date(Math.max(max.getTime(), row.end.getTime())), requestEnd);
   const timelineStart = addDays(minDate, -2);
   const timelineEnd = addDays(maxDate, 3);
   const totalDays = Math.max(1, daysBetween(timelineStart, timelineEnd));
@@ -1535,8 +1557,8 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = [], pr
   };
   sortedStages.forEach((stage) => {
     const stageRows = (groupedRows.get(stage) || []).sort((first, second) => first.start - second.start);
-    const stageStart = stageRows.reduce((min, row) => row.start < min ? row.start : min, stageRows[0]?.start || null);
-    const stageEnd = stageRows.reduce((max, row) => row.end > max ? row.end : max, stageRows[0]?.end || null);
+    const stageStart = stageRows.reduce((min, row) => new Date(Math.min(min.getTime(), row.start.getTime())), stageRows[0]?.start || null);
+    const stageEnd = stageRows.reduce((max, row) => new Date(Math.max(max.getTime(), row.end.getTime())), stageRows[0]?.end || null);
     const phaseBar = stageStart && stageEnd
       ? `<span class="phase-bar" style="${ganttBarStyle(stageStart, stageEnd, timelineStart, totalDays)}"></span>`
       : "";
@@ -1581,7 +1603,8 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = [], pr
     stagePages.push([]);
   }
   const tickColumns = `repeat(${Math.max(1, ticks.length)}, 1fr)`;
-  const tableHeadHtml = `<div class="gantt-row gantt-head"><div class="left">Activites</div><div class="left">Deb</div><div class="left">Fin</div><div class="timeline">${ticks.map((tick) => `<span class="tick">${escapeHtml(tick.label)}</span>`).join("")}</div></div>`;
+  const tickHtml = ticks.map((tick) => `<span class="tick">${escapeHtml(tick.label)}</span>`).join("");
+  const tableHeadHtml = `<div class="gantt-row gantt-head"><div class="left">Activites</div><div class="left">Deb</div><div class="left">Fin</div><div class="timeline">${tickHtml}</div></div>`;
   const legendHtml = `<div class="legend"><span><i style="${ganttColorBarStyle("#8a9275")}"></i>Planifié / à faire</span><span><i style="${ganttColorBarStyle("#25D366")}"></i>Done</span><span><i style="${ganttColorBarStyle("#b42318")}"></i>En retard</span><span><i style="${ganttColorBarStyle("#6b7280")}"></i>Annulée</span><span><i class="critical-legend" style="${ganttColorBarStyle("#8a9275")}"></i>Critique: orange + statut</span></div>`;
   const pageHtml = stagePages.map((pageRows, pageIndex) => `<main class="pdf-export-page gantt-export-page">
     <header>
@@ -1680,22 +1703,52 @@ function canValidatePhases(user) {
   return isAdminUser(user) || hasApplicationRole(user, "MANAGER", "Manager");
 }
 
-function canSeeAllActionsForUser(user, request) {
-  return isAdminUser(user) || isRequestPilot(user, request);
+function isProjectLeadForAnyProject(user, projects = []) {
+  if (!user) return false;
+  return projects.some((project) => parseProjectTeamEntries(project.projectTeam).some((entry) =>
+    userMatchesAssignment(user, normalizeRoleToken(entry.name))
+    && (entry.roles.length === 0 && hasApplicationRole(user, "CHEF_DE_PROJET", "Chef de projet")
+      || entry.roles.some((role) => normalizeRoleToken(role).replaceAll("_", " ") === "chef de projet"))
+  ));
+}
+
+function projectForRequest(request, projects = []) {
+  return projects.find((project) => project.name === request?.modificationProject) || null;
+}
+
+function isProjectLeadForRequest(user, request, projects = []) {
+  const project = projectForRequest(request, projects);
+  if (!user || !project) return false;
+  return parseProjectTeamEntries(project.projectTeam).some((entry) =>
+    userMatchesAssignment(user, normalizeRoleToken(entry.name))
+    && (entry.roles.length === 0 && hasApplicationRole(user, "CHEF_DE_PROJET", "Chef de projet")
+      || entry.roles.some((role) => normalizeRoleToken(role).replaceAll("_", " ") === "chef de projet"))
+  );
+}
+
+function canAccessPreferentialsPage(user, projects = []) {
+  return isAdminUser(user) || isProjectLeadForAnyProject(user, projects);
 }
 
 function normalizeRoleToken(value) {
   return String(value || "")
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replaceAll(/[\u0300-\u036f]/g, "")
     .trim()
     .toLowerCase()
     .replaceAll("_", " ");
 }
 
 function hasApplicationRole(user, code, label) {
-  const value = normalizeRoleToken(user?.role).replaceAll("_", " ");
-  return value === normalizeRoleToken(code).replaceAll("_", " ") || value === normalizeRoleToken(label);
+  const roles = parseUserRoleTokens(user?.role);
+  return roles.includes(normalizeRoleToken(code).replaceAll("_", " ")) || roles.includes(normalizeRoleToken(label));
+}
+
+function parseUserRoleTokens(role) {
+  return String(role || "")
+    .split(/[;,|]+/)
+    .map((value) => normalizeRoleToken(value).replaceAll("_", " "))
+    .filter(Boolean);
 }
 
 function canManageActionForUser(user, action, phaseValidations = [], request = action?.request) {
@@ -1854,7 +1907,8 @@ function isActionParticipantForUser(user, action) {
 
 function isRequestParticipantForUser(user, request, actions = []) {
   if (isAdminUser(user)) return true;
-  return isRequestPilot(user, request) || actions.some((action) => isActionParticipantForUser(user, action));
+  return isRequestPilot(user, request)
+    || actions.some((action) => isActionParticipantForUser(user, action));
 }
 
 function firstActionParticipantStage(user, actions = []) {
@@ -1963,6 +2017,9 @@ function App() {
   }, [selectedRequest]);
   const visibleStages = useMemo(() => {
     if (!selectedRequest || isAdminUser(currentUser)) return selectedStages;
+    if (selectedRequest.currentStage === "CANCELLED") {
+      return selectedStages.filter(([key]) => isStageInCancelledHistory(selectedRequest, key));
+    }
     const approvedStages = new Set(phaseValidations
       .filter((validation) => validation.status === "APPROVED")
       .map((validation) => validation.stage)
@@ -1974,13 +2031,10 @@ function App() {
     selectedRequest &&
     !isAdminUser(currentUser) &&
     isClosedRequest(selectedRequest) &&
-    !Object.prototype.hasOwnProperty.call(actionsByRequestId, selectedRequest.id)
+    !Object.hasOwn(actionsByRequestId, selectedRequest.id)
   );
-  const canLoadSelectedStage = !waitingForClosedParticipantActions && visibleStages.some(([key]) => key === selectedStage);
-  const activeRequests = useMemo(() => requests.filter(isActiveRequest), [requests]);
-  const visibleActions = useMemo(() => (
-    canSeeAllActionsForUser(currentUser, selectedRequest) ? actions : actions.filter((action) => isActionParticipantForUser(currentUser, action))
-  ), [actions, currentUser, selectedRequest]);
+  const canLoadSelectedStage = !waitingForClosedParticipantActions
+    && visibleStages.some(([key]) => key === selectedStage);
   const doneCount = actions.filter(isActionDone).length;
   const completion = modificationCompletionRate(selectedRequest, actions);
   const lateActions = actions.filter((action) => action.late).length;
@@ -2139,8 +2193,8 @@ function App() {
       setEditingEcrRequest(null);
     }
 
-    window.addEventListener("popstate", syncPageFromLocation);
-    return () => window.removeEventListener("popstate", syncPageFromLocation);
+    globalThis.addEventListener("popstate", syncPageFromLocation);
+    return () => globalThis.removeEventListener("popstate", syncPageFromLocation);
   }, []);
 
   useEffect(() => {
@@ -2165,21 +2219,21 @@ function App() {
 
   useEffect(() => {
     if (!isAdminUser(currentUser)) return undefined;
-    const intervalId = window.setInterval(() => {
+    const intervalId = globalThis.setInterval(() => {
       refreshActionSuggestions({ notify: true, openDialog: false });
     }, 3000);
-    return () => window.clearInterval(intervalId);
+    return () => globalThis.clearInterval(intervalId);
   }, [currentUser]);
 
   useEffect(() => {
     if (!currentUser) return undefined;
     refreshActionDeadlineAlerts();
     refreshPhaseSoundAlerts();
-    const intervalId = window.setInterval(() => {
+    const intervalId = globalThis.setInterval(() => {
       refreshActionDeadlineAlerts();
       refreshPhaseSoundAlerts();
     }, 3000);
-    return () => window.clearInterval(intervalId);
+    return () => globalThis.clearInterval(intervalId);
   }, [currentUser]);
 
   useEffect(() => {
@@ -2193,7 +2247,7 @@ function App() {
     const sendChatOffline = () => getStoredSession()?.token ? chatOffline().catch(() => {}) : Promise.resolve();
     refreshChatData();
     sendChatHeartbeat();
-    const intervalId = window.setInterval(() => {
+    const intervalId = globalThis.setInterval(() => {
       sendChatHeartbeat();
       loadChatUsers();
     }, 60000);
@@ -2207,11 +2261,11 @@ function App() {
       sendChatOffline();
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("beforeunload", handleBeforeUnload);
+    globalThis.addEventListener("beforeunload", handleBeforeUnload);
     return () => {
-      window.clearInterval(intervalId);
+      globalThis.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("beforeunload", handleBeforeUnload);
+      globalThis.removeEventListener("beforeunload", handleBeforeUnload);
       sendChatOffline();
     };
   }, [authSession?.token, currentUser?.id]);
@@ -2378,13 +2432,13 @@ function App() {
     setChatDraft(value);
     const target = parseChatTarget(selectedChatUserId);
     const now = Date.now();
-    window.clearTimeout(chatTypingStopTimer.current);
+    globalThis.clearTimeout(chatTypingStopTimer.current);
     if (!target.id) return;
     if (now - chatTypingSentAt.current >= 1800) {
       chatTypingSentAt.current = now;
       chatTyping(target.type, target.id, true).catch(() => {});
     }
-    chatTypingStopTimer.current = window.setTimeout(() => {
+    chatTypingStopTimer.current = globalThis.setTimeout(() => {
       chatTyping(target.type, target.id, false).catch(() => {});
     }, 2200);
   }
@@ -2398,7 +2452,7 @@ function App() {
     }
     setChatSending(true);
     const target = parseChatTarget(selectedChatUserId);
-    window.clearTimeout(chatTypingStopTimer.current);
+    globalThis.clearTimeout(chatTypingStopTimer.current);
     chatTyping(target.type, target.id, false).catch(() => {});
     const request = target.type === "group"
       ? sendChatGroupMessage(target.id, chatDraft, chatFile)
@@ -2410,7 +2464,7 @@ function App() {
         clearChatFile();
         return loadChatUsers();
       })
-      .catch((message) => errorAlert(message.message || message))
+      .catch((error_) => errorAlert(error_.message || error_))
       .finally(() => setChatSending(false));
   }
 
@@ -2451,7 +2505,7 @@ function App() {
           return loadChatMessages(key);
         });
       })
-      .catch((message) => errorAlert(message.message || message))
+      .catch((error_) => errorAlert(error_.message || error_))
       .finally(() => setChatSending(false));
   }
 
@@ -2466,7 +2520,7 @@ function App() {
           successToast("Membre ajoute au groupe");
         });
       })
-      .catch((message) => errorAlert(message.message || message))
+      .catch((error_) => errorAlert(error_.message || error_))
       .finally(() => setChatSending(false));
   }
 
@@ -2573,8 +2627,8 @@ function App() {
     let disposed = false;
 
     const handlePlanningUpdated = () => {
-      window.clearTimeout(realtimeRefreshTimer.current);
-      realtimeRefreshTimer.current = window.setTimeout(refreshRealtimeData, 250);
+      globalThis.clearTimeout(realtimeRefreshTimer.current);
+      realtimeRefreshTimer.current = globalThis.setTimeout(refreshRealtimeData, 250);
     };
     const handleChatMessage = (payload = {}) => {
       const currentId = Number(currentUser?.id);
@@ -2626,7 +2680,7 @@ function App() {
         && activeTarget.type === "group"
         && Number(activeTarget.id) === targetId;
       if (!matchesActiveDirect && !matchesActiveGroup) return;
-      window.clearTimeout(chatTypingClearTimer.current);
+      globalThis.clearTimeout(chatTypingClearTimer.current);
       if (!active) {
         setChatTypingNotice(null);
         stopTypingSound();
@@ -2634,7 +2688,7 @@ function App() {
       }
       setChatTypingNotice(`${payload.senderName || "Quelqu'un"} est en train d'ecrire...`);
       playTypingSound();
-      chatTypingClearTimer.current = window.setTimeout(() => {
+      chatTypingClearTimer.current = globalThis.setTimeout(() => {
         setChatTypingNotice(null);
         stopTypingSound();
       }, 3500);
@@ -2701,10 +2755,10 @@ function App() {
 
     return () => {
       disposed = true;
-      window.clearTimeout(chatTypingClearTimer.current);
-      window.clearTimeout(chatTypingStopTimer.current);
+      globalThis.clearTimeout(chatTypingClearTimer.current);
+      globalThis.clearTimeout(chatTypingStopTimer.current);
       stopTypingSound();
-      window.clearTimeout(realtimeRefreshTimer.current);
+      globalThis.clearTimeout(realtimeRefreshTimer.current);
       if (events) events.close();
       if (socket) socket.close();
     };
@@ -2727,17 +2781,22 @@ function App() {
   }, [authSession?.token]);
 
   useLayoutEffect(() => {
-    if (!selectedId || !canLoadSelectedStage) {
+    if (!selectedId) {
       selectedDetailsRequestId.current += 1;
       setChecklist([]);
       setActions([]);
       setPhaseValidations([]);
       return;
     }
+    if (!canLoadSelectedStage) {
+      selectedDetailsRequestId.current += 1;
+      setChecklist([]);
+      setActions([]);
+      return;
+    }
     const requestSequence = ++selectedDetailsRequestId.current;
     setChecklist([]);
     setActions([]);
-    setPhaseValidations([]);
     Promise.all([getChecklist(selectedId, selectedStage), getActions(selectedId, selectedStage), getPhaseValidations(selectedId)])
       .then(([checklistData, actionData, validationData]) => {
         if (requestSequence !== selectedDetailsRequestId.current) return;
@@ -2745,11 +2804,16 @@ function App() {
         setActions(actionData);
         setPhaseValidations(validationData);
       })
-      .catch(() => {
+      .catch((exception) => {
         if (requestSequence !== selectedDetailsRequestId.current) return;
+        if (String(exception?.message || "").includes("Session")) {
+          clearSession();
+          setAuthSession(null);
+          setCurrentUser(null);
+          setError("Session expirée. Connectez-vous à nouveau.");
+        }
         setChecklist([]);
         setActions([]);
-        setPhaseValidations([]);
       });
   }, [selectedId, selectedStage, canLoadSelectedStage]);
 
@@ -2782,18 +2846,21 @@ function App() {
   }, [showCreateForm, showEditForm]);
 
   useEffect(() => {
-    if (currentUser && !isAdminUser(currentUser) && ["projects", "traceability", "preferentials", "users"].includes(page)) {
+    if (currentUser && !isAdminUser(currentUser) && ["projects", "traceability", "users"].includes(page)) {
       navigateToPage("modifications", { replace: true });
     }
-  }, [currentUser, page]);
+    if (currentUser && page === "preferentials" && !canAccessPreferentialsPage(currentUser, projects)) {
+      navigateToPage("modifications", { replace: true });
+    }
+  }, [currentUser, page, projects]);
 
   function navigateToPage(nextPage, options = {}) {
     const nextRoute = routeForPage(nextPage);
-    if (window.location.pathname !== nextRoute) {
+    if (globalThis.location.pathname !== nextRoute) {
       if (options.replace) {
-        window.history.replaceState(null, "", nextRoute);
+        globalThis.history.replaceState(null, "", nextRoute);
       } else {
-        window.history.pushState(null, "", nextRoute);
+        globalThis.history.pushState(null, "", nextRoute);
       }
     }
     setPage(nextPage);
@@ -2842,7 +2909,7 @@ function App() {
 
   function handleCreateEcr(event) {
     event.preventDefault();
-    if (!validateEcrRequiredFields(ecrForm, requests, null, setError)) {
+    if (!validateEcrRequiredFields(ecrForm, null, setError, requests)) {
       return;
     }
     if (parseSelectedProducts(ecrForm.product).length === 0) {
@@ -2914,7 +2981,7 @@ function App() {
   function handleUpdateEcr(event) {
     event.preventDefault();
     if (!editingEcrRequest) return;
-    if (!validateEcrRequiredFields(ecrEditForm, requests, editingEcrRequest.id, setError)) {
+    if (!validateEcrRequiredFields(ecrEditForm, editingEcrRequest.id, setError, requests)) {
       return;
     }
     if (parseSelectedProducts(ecrEditForm.product).length === 0) {
@@ -3503,8 +3570,8 @@ function App() {
 
   function handleRequestPhaseValidation() {
     if (!selectedRequest) return;
-    if (!isRequestPilot(currentUser, selectedRequest)) {
-      warningAlert("Validation reservee", "Seul le pilote de la modification peut demander la validation de phase.");
+    if (!isRequestPilot(currentUser, selectedRequest) && !isProjectLeadForRequest(currentUser, selectedRequest, projects)) {
+      warningAlert("Validation reservee", "Seul le pilote ou le chef de projet de la modification peut demander la validation de phase.");
       return;
     }
     if (selectedStage !== selectedRequest.currentStage) {
@@ -3688,6 +3755,20 @@ function App() {
     event.preventDefault();
     const name = projectForm.name.trim();
     if (!name) return Promise.reject(new Error("Nom du projet requis."));
+    const teamEntries = parseProjectTeamEntries(projectForm.projectTeam);
+    if (teamEntries.some((entry) => entry.roles.length === 0)) {
+      const message = "Chaque utilisateur de l'equipe projet doit avoir au moins un role.";
+      setError(message);
+      warningAlert("Role projet requis", message);
+      return Promise.reject(new Error(message));
+    }
+    const duplicatedRole = duplicatedProjectTeamRole(projectForm.projectTeam);
+    if (duplicatedRole) {
+      const message = `Le role ${duplicatedRole} est deja attribue dans cette equipe projet. Chaque role doit etre choisi une seule fois par projet.`;
+      setError(message);
+      warningAlert("Role duplique", message);
+      return Promise.reject(new Error(message));
+    }
     const projectLeadCount = countSelectedProjectLeads(projectForm.projectTeam, users);
     if (projectLeadCount !== 1) {
       const message = "Selectionnez exactement un utilisateur avec le role Chef de projet.";
@@ -4453,7 +4534,7 @@ function App() {
   function handleVerifyPasswordResetCode(event) {
     event.preventDefault();
     const code = passwordResetCode.join("");
-    if (!code.match(/^\d{4}$/)) {
+    if (!/^\d{4}$/.test(code)) {
       const message = "Saisissez les 4 chiffres du code reçu.";
       setError(message);
       warningAlert("Code incomplet", message);
@@ -4587,6 +4668,7 @@ function App() {
     <main className={menuCollapsed ? "app-frame nav-collapsed" : "app-frame"}>
       <Sidebar
           collapsed={menuCollapsed}
+          canAccessPreferentials={canAccessPreferentialsPage(currentUser, projects)}
           canAdmin={isAdminUser(currentUser)}
           currentUser={currentUser}
           page={page}
@@ -4713,6 +4795,7 @@ function App() {
           <PreferentialsPage
             clientForm={clientReferenceForm}
             clients={clientReferences}
+            currentUser={currentUser}
             editingClient={editingClientReference}
             editingFinishedProduct={editingFinishedProductReference}
             editingProduct={editingProductReference}
@@ -4790,6 +4873,7 @@ function App() {
             currentUser={currentUser}
             lateActions={lateActions}
             phaseValidations={phaseValidations}
+            projects={projects}
             projectFilter={projectFilter}
             projectOptions={projectOptions}
             query={query}
@@ -4802,6 +4886,7 @@ function App() {
             selectedRequest={selectedRequest}
             selectedStages={visibleStages}
             selectedStage={selectedStage}
+            setSaving={setSaving}
             successToast={successToast}
             setQuery={setQuery}
             setProjectFilter={setProjectFilter}
@@ -4835,6 +4920,7 @@ function App() {
             onUpdateDossierReview={handleUpdateDossierReview}
             requiresEvidence={requiresEvidence}
             updateActionForm={updateActionForm}
+            users={users}
           />
         )}
 
@@ -4926,6 +5012,7 @@ function App() {
       {showEditForm && page === "modifications" && editingEcrRequest && (
         <EditModificationDialog
           clientOptions={clientOptions}
+          currentUser={currentUser}
           ecrForm={ecrEditForm}
           existingRequest={editingEcrRequest}
           finishedProductReferences={finishedProductReferences}
@@ -5065,12 +5152,11 @@ function auditTargetSummary(log) {
 
 function CreateModificationDialog({ clientOptions, ecrForm, finishedProductReferences, pilots, productOptions, projects, saving, users, onClose, onSubmit, updateEcrForm }) {
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="dialog-backdrop" role="presentation">
       <div
         aria-labelledby="create-modification-title"
         aria-modal="true"
         className="dialog-card"
-        onMouseDown={(event) => event.stopPropagation()}
         role="dialog"
       >
         <NewModificationPage
@@ -5093,18 +5179,18 @@ function CreateModificationDialog({ clientOptions, ecrForm, finishedProductRefer
   );
 }
 
-function EditModificationDialog({ clientOptions, ecrForm, existingRequest, finishedProductReferences, pilots, productOptions, projects, saving, users, onClose, onSubmit, updateEcrForm }) {
+function EditModificationDialog({ clientOptions, currentUser, ecrForm, existingRequest, finishedProductReferences, pilots, productOptions, projects, saving, users, onClose, onSubmit, updateEcrForm }) {
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="dialog-backdrop" role="presentation">
       <div
         aria-labelledby="edit-modification-title"
         aria-modal="true"
         className="dialog-card"
-        onMouseDown={(event) => event.stopPropagation()}
         role="dialog"
       >
         <NewModificationPage
           clientOptions={clientOptions}
+          currentUser={currentUser}
           ecrForm={ecrForm}
           existingRequest={existingRequest}
           finishedProductReferences={finishedProductReferences}
@@ -5125,7 +5211,7 @@ function EditModificationDialog({ clientOptions, ecrForm, existingRequest, finis
   );
 }
 
-function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, finishedProductReferences = [], mode = "create", pilots, productOptions, projects, saving, submitIcon: SubmitIcon = Plus, submitLabel = "Créer et ouvrir le suivi", users, onCancel, onSubmit, updateEcrForm }) {
+function NewModificationPage({ clientOptions, currentUser = null, ecrForm, existingRequest = null, finishedProductReferences = [], mode = "create", pilots, productOptions, projects, saving, submitIcon: SubmitIcon = Plus, submitLabel = "Créer et ouvrir le suivi", users, onCancel, onSubmit, updateEcrForm }) {
   const availableStages = getStages(ecrForm.newVersion);
   const selectedProject = projects.find((project) => project.name === ecrForm.modificationProject);
   const projectTeamMembers = parseProjectTeam(selectedProject?.projectTeam);
@@ -5164,6 +5250,7 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, f
   const currentAfterDownloadUrl = existingRequest?.id ? ecrRequestFileDownloadUrl(existingRequest.id, "after") : currentAfterPhoto;
   const currentBeforeIsImage = isImageAsset(existingRequest?.beforePhotoContentType, currentBeforePhoto);
   const currentAfterIsImage = isImageAsset(existingRequest?.afterPhotoContentType, currentAfterPhoto);
+  const pilotFieldLocked = mode === "edit" && !isAdminUser(currentUser);
 
   return (
     <section className="creation-panel">
@@ -5191,18 +5278,18 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, f
         <PhasePreview newVersion={ecrForm.newVersion} stages={availableStages} />
         <div className="field-grid">
           <label>
-            Numéro client externe
+            <span>Numéro client externe</span>
             <input required value={ecrForm.modificationNumber} onChange={(event) => updateEcrForm("modificationNumber", event.target.value)} />
           </label>
           <label>
-            Client
+            <span>Client</span>
             <select required value={ecrForm.client} onChange={(event) => updateEcrForm("client", event.target.value)}>
               <option value="">Sélectionner un client</option>
               {displayedClientOptions.map((client) => <option key={client} value={client}>{client}</option>)}
             </select>
           </label>
           <label>
-            Projet
+            <span>Projet</span>
             <select required value={ecrForm.modificationProject} onChange={(event) => updateEcrForm("modificationProject", event.target.value)}>
               <option value="">Sélectionner un projet</option>
               {projects.map((project) => (
@@ -5242,6 +5329,7 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, f
                   return (
                     <label className={checked ? "product-option finished-product-option selected" : "product-option finished-product-option"} key={key}>
                       <input
+                        aria-label={`Selectionner le produit fini ${finishedProduct.partNumber || key}`}
                         checked={checked}
                         type="checkbox"
                         onChange={(event) => updateEcrForm("finishedProducts", toggleSelectedProduct(selectedFinishedProducts, key, event.target.checked).join("; "))}
@@ -5258,16 +5346,17 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, f
             <span className="form-hint">{selectedFinishedProducts.length} produit{selectedFinishedProducts.length > 1 ? "s" : ""} fini{selectedFinishedProducts.length > 1 ? "s" : ""} selectionne{selectedFinishedProducts.length > 1 ? "s" : ""}</span>
           </fieldset>
           <label>
-            Pilote
-            <select required disabled={!ecrForm.modificationProject || projectPilotOptions.length === 0} value={ecrForm.pilot} onChange={(event) => updateEcrForm("pilot", event.target.value)}>
+            <span>Pilote</span>
+            <select required disabled={pilotFieldLocked || !ecrForm.modificationProject || projectPilotOptions.length === 0} value={ecrForm.pilot} onChange={(event) => updateEcrForm("pilot", event.target.value)}>
               <option value="">{ecrForm.modificationProject ? "Sélectionner un chef de projet" : "Sélectionner d'abord un projet"}</option>
               {projectPilotOptions.map((member) => (
                 <option key={member} value={member}>{formatUserWithRole(member, users)}</option>
               ))}
             </select>
+            {pilotFieldLocked && <span className="form-hint">Le pilote de modification est bloqué. Seul un admin peut le changer.</span>}
           </label>
           <label>
-            Réception
+            <span>Réception</span>
             <input required type="date" value={ecrForm.receptionDate} onChange={(event) => updateEcrForm("receptionDate", event.target.value)} />
           </label>
           <div className="calculated-field">
@@ -5275,7 +5364,7 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, f
             <strong>{ecrForm.sopDate || "Calculé après génération des actions"}</strong>
           </div>
           <label>
-            Mixabilité
+            <span>Mixabilité</span>
             <select value={ecrForm.mixability} onChange={(event) => updateEcrForm("mixability", event.target.value)}>
               <option value="">Non renseignée</option>
               <option value="MIXABLE">Oui mixable</option>
@@ -5283,23 +5372,23 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, f
             </select>
           </label>
           <label>
-            Photo état
+            <span>Photo état</span>
             <input type="file" onChange={(event) => updateEcrForm("beforePhotoFile", event.target.files?.[0] || null)} />
             <span className="form-hint">{ecrForm.beforePhotoFile?.name || (currentBeforePhoto ? "Document actuel conservé si aucun fichier n'est choisi" : "Document avant modification")}</span>
             {currentBeforePhoto && (
               <a className="form-image-preview" href={currentBeforeDownloadUrl} target="_blank" rel="noreferrer">
-                {currentBeforeIsImage ? <img alt="Photo état actuelle" src={currentBeforeDownloadUrl} /> : <FileText size={28} />}
+                {currentBeforeIsImage ? <img alt="Etat actuel" src={currentBeforeDownloadUrl} /> : <FileText size={28} />}
                 Voir le fichier actuel
               </a>
             )}
           </label>
           <label>
-            Photo devient
+            <span>Photo devient</span>
             <input type="file" onChange={(event) => updateEcrForm("afterPhotoFile", event.target.files?.[0] || null)} />
             <span className="form-hint">{ecrForm.afterPhotoFile?.name || (currentAfterPhoto ? "Document actuel conservé si aucun fichier n'est choisi" : "Document après modification")}</span>
             {currentAfterPhoto && (
               <a className="form-image-preview" href={currentAfterDownloadUrl} target="_blank" rel="noreferrer">
-                {currentAfterIsImage ? <img alt="Photo devient actuelle" src={currentAfterDownloadUrl} /> : <FileText size={28} />}
+                {currentAfterIsImage ? <img alt="Etat apres modification" src={currentAfterDownloadUrl} /> : <FileText size={28} />}
                 Voir le fichier actuel
               </a>
             )}
@@ -5310,32 +5399,32 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, f
           <legend>Type de modification</legend>
           <label className="action-asset-toggle">
             <input checked={ecrForm.digitChange} type="checkbox" onChange={(event) => updateEcrForm("digitChange", event.target.checked)} />
-            Digit change
+            <span>Digit change</span>
           </label>
           <label className="action-asset-toggle">
             <input checked={ecrForm.componentChange} type="checkbox" onChange={(event) => updateEcrForm("componentChange", event.target.checked)} />
-            Component change
+            <span>Component change</span>
           </label>
           <label className="action-asset-toggle">
             <input checked={ecrForm.processChange} type="checkbox" onChange={(event) => updateEcrForm("processChange", event.target.checked)} />
-            Process change
+            <span>Process change</span>
           </label>
           <label className="action-asset-toggle">
             <input checked={ecrForm.supplierChange} type="checkbox" onChange={(event) => updateEcrForm("supplierChange", event.target.checked)} />
-            Supplier change
+            <span>Supplier change</span>
           </label>
         </fieldset>
         )}
         <label>
-          Raison de modification
+          <span>Raison de modification</span>
           <textarea value={ecrForm.modificationReason} onChange={(event) => updateEcrForm("modificationReason", event.target.value)} />
         </label>
         <label>
-          Détail de modification
+          <span>Détail de modification</span>
           <textarea value={ecrForm.modificationDetail} onChange={(event) => updateEcrForm("modificationDetail", event.target.value)} />
         </label>
         <label>
-          Revue dossier
+          <span>Revue dossier</span>
           <textarea value={ecrForm.dossierReview} onChange={(event) => updateEcrForm("dossierReview", event.target.value)} placeholder="Historique de suivi, OIL list, revues planifiées" />
         </label>
         <div className="button-row">
@@ -5356,6 +5445,73 @@ function NewModificationPage({ clientOptions, ecrForm, existingRequest = null, f
   );
 }
 
+const ecrFormPropType = PropTypes.shape({
+  afterPhotoFile: PropTypes.shape({
+    name: PropTypes.string
+  }),
+  beforePhotoFile: PropTypes.shape({
+    name: PropTypes.string
+  }),
+  client: PropTypes.string,
+  componentChange: PropTypes.bool,
+  digitChange: PropTypes.bool,
+  dossierReview: PropTypes.string,
+  finishedProducts: PropTypes.string,
+  mixability: PropTypes.string,
+  modificationDetail: PropTypes.string,
+  modificationNumber: PropTypes.string,
+  modificationProject: PropTypes.string,
+  modificationReason: PropTypes.string,
+  newVersion: PropTypes.bool,
+  pilot: PropTypes.string,
+  processChange: PropTypes.bool,
+  product: PropTypes.string,
+  receptionDate: PropTypes.string,
+  sopDate: PropTypes.string,
+  supplierChange: PropTypes.bool
+});
+
+const ecrDialogPropTypes = {
+  clientOptions: PropTypes.arrayOf(PropTypes.string).isRequired,
+  currentUser: PropTypes.object,
+  ecrForm: ecrFormPropType.isRequired,
+  finishedProductReferences: PropTypes.arrayOf(PropTypes.object).isRequired,
+  pilots: PropTypes.arrayOf(PropTypes.string).isRequired,
+  productOptions: PropTypes.arrayOf(PropTypes.string).isRequired,
+  projects: PropTypes.arrayOf(PropTypes.object).isRequired,
+  saving: PropTypes.bool.isRequired,
+  users: PropTypes.arrayOf(PropTypes.object).isRequired,
+  onClose: PropTypes.func.isRequired,
+  onSubmit: PropTypes.func.isRequired,
+  updateEcrForm: PropTypes.func.isRequired
+};
+
+CreateModificationDialog.propTypes = ecrDialogPropTypes;
+
+EditModificationDialog.propTypes = {
+  ...ecrDialogPropTypes,
+  existingRequest: PropTypes.object
+};
+
+NewModificationPage.propTypes = {
+  clientOptions: PropTypes.arrayOf(PropTypes.string).isRequired,
+  currentUser: PropTypes.object,
+  ecrForm: ecrFormPropType.isRequired,
+  existingRequest: PropTypes.object,
+  finishedProductReferences: PropTypes.arrayOf(PropTypes.object),
+  mode: PropTypes.oneOf(["create", "edit"]),
+  pilots: PropTypes.arrayOf(PropTypes.string).isRequired,
+  productOptions: PropTypes.arrayOf(PropTypes.string).isRequired,
+  projects: PropTypes.arrayOf(PropTypes.object).isRequired,
+  saving: PropTypes.bool.isRequired,
+  submitIcon: PropTypes.elementType,
+  submitLabel: PropTypes.string,
+  users: PropTypes.arrayOf(PropTypes.object).isRequired,
+  onCancel: PropTypes.func.isRequired,
+  onSubmit: PropTypes.func.isRequired,
+  updateEcrForm: PropTypes.func.isRequired
+};
+
 function PhasePreview({ newVersion, stages }) {
   return (
     <section className="phase-preview" aria-label="Aperçu des phases">
@@ -5375,6 +5531,11 @@ function PhasePreview({ newVersion, stages }) {
   );
 }
 
+PhasePreview.propTypes = {
+  newVersion: PropTypes.bool.isRequired,
+  stages: PropTypes.arrayOf(PropTypes.array).isRequired
+};
+
 function useFilteredItems(items, searchTerm, getValues) {
   return useMemo(() => {
     const normalized = normalizeSearchText(searchTerm);
@@ -5389,7 +5550,7 @@ function useFilteredItems(items, searchTerm, getValues) {
 function normalizeSearchText(value) {
   return String(value || "")
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replaceAll(/[\u0300-\u036f]/g, "")
     .trim()
     .toLowerCase();
 }
@@ -5430,6 +5591,13 @@ function PaginationControls({ currentPage, pageCount, totalCount, onPageChange }
     </nav>
   );
 }
+
+PaginationControls.propTypes = {
+  currentPage: PropTypes.number.isRequired,
+  pageCount: PropTypes.number.isRequired,
+  totalCount: PropTypes.number.isRequired,
+  onPageChange: PropTypes.func.isRequired
+};
 
 function ProjectTeamSelector({ projectTeam, users, onChange }) {
   const [teamQuery, setTeamQuery] = useState("");
@@ -5476,6 +5644,7 @@ function ProjectTeamSelector({ projectTeam, users, onChange }) {
             return (
               <label className="project-team-option" key={user.id || userName}>
                 <input
+                  aria-label={`Selectionner ${userName}`}
                   checked={checked}
                   type="checkbox"
                   onChange={(event) => toggleUser(user, event.target.checked)}
@@ -5497,11 +5666,30 @@ function ProjectTeamSelector({ projectTeam, users, onChange }) {
   );
 }
 
+ProjectTeamSelector.propTypes = {
+  projectTeam: PropTypes.string,
+  users: PropTypes.arrayOf(PropTypes.object).isRequired,
+  onChange: PropTypes.func.isRequired
+};
+
 function parseProjectTeam(projectTeam) {
+  return parseProjectTeamEntries(projectTeam).map((entry) => entry.name);
+}
+
+function parseProjectTeamEntries(projectTeam) {
   return String(projectTeam || "")
-    .split(/[,;]+/)
-    .map((name) => name.trim())
-    .filter(Boolean);
+    .split(/[;\n]+/)
+    .flatMap((entry) => entry.includes("::") ? [entry] : entry.split(","))
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [name, roleText = ""] = entry.split("::");
+      return {
+        name: name.trim(),
+        roles: roleText.split(/[|,]+/).map((role) => role.trim()).filter(Boolean)
+      };
+    })
+    .filter((entry) => entry.name);
 }
 
 function updateEcrFormState(form, field, value, projects, finishedProductReferences = []) {
@@ -5626,7 +5814,7 @@ function speakFinishedProductSummary(text, setSpeaking) {
     warningAlert("Lecture sonore indisponible", "La synthese vocale n'est pas disponible dans ce navigateur.");
     return;
   }
-  window.speechSynthesis.cancel();
+  globalThis.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "fr-FR";
   utterance.rate = 0.95;
@@ -5634,12 +5822,12 @@ function speakFinishedProductSummary(text, setSpeaking) {
   utterance.onend = () => setSpeaking(false);
   utterance.onerror = () => setSpeaking(false);
   setSpeaking(true);
-  window.speechSynthesis.speak(utterance);
+  globalThis.speechSynthesis.speak(utterance);
 }
 
 function stopFinishedProductSpeech(setSpeaking) {
   if ("speechSynthesis" in window) {
-    window.speechSynthesis.cancel();
+    globalThis.speechSynthesis.cancel();
   }
   setSpeaking(false);
 }
@@ -5671,7 +5859,7 @@ function selectedFinishedProductsForForm(form, references = []) {
   return parseSelectedProducts(form.finishedProducts).filter((key) => availableKeys.has(key));
 }
 
-function validateEcrRequiredFields(form, requests = [], currentRequestId, setError) {
+function validateEcrRequiredFields(form, currentRequestId, setError, requests = []) {
   const requiredChecks = [
     [form.modificationNumber?.trim(), "Numero client externe obligatoire."],
     [form.client, "Client obligatoire."],
@@ -5884,25 +6072,36 @@ function actionProofDocumentItemUrl(action, proofDocument) {
 }
 
 function modificationTypesLabel(request) {
-  if (request?.newVersion) return "Nouveau projet";
+  const types = modificationTypesList(request);
+  return types.length ? types.join(", ") : "-";
+}
+
+function modificationTypesList(request) {
+  if (request?.newVersion) return ["Nouveau projet"];
   const types = [
     request?.digitChange ? "Digit change" : "",
     request?.componentChange ? "Component change" : "",
     request?.processChange ? "Process change" : "",
     request?.supplierChange ? "Supplier change" : ""
   ].filter(Boolean);
-  return types.length ? types.join(", ") : "-";
+  return types;
 }
 
 function formatProjectTeamWithRoles(projectTeam, users) {
-  const members = parseProjectTeam(projectTeam);
+  const members = parseProjectTeamEntries(projectTeam);
   if (members.length === 0) return "Équipe non renseignée";
-  return members.map((member) => formatUserWithRole(member, users)).join(", ");
+  return members.map((member) => formatProjectTeamEntryWithRoles(member, users)).join(", ");
 }
 
 function formatUserWithRole(userName, users) {
   const user = findUserByTeamName(userName, users);
   return user ? `${userName} (${userDisplayRole(user)})` : userName;
+}
+
+function formatProjectTeamEntryWithRoles(member, users) {
+  const user = findUserByTeamName(member.name, users);
+  const roles = member.roles.length > 0 ? member.roles.join(", ") : userDisplayRole(user);
+  return `${member.name}${roles ? ` (${roles})` : ""}`;
 }
 
 function userDisplayRole(user) {
@@ -5911,6 +6110,22 @@ function userDisplayRole(user) {
 
 function findUserByTeamName(userName, users) {
   return users.find((user) => [user.fullName, user.username, user.email].filter(Boolean).includes(userName));
+}
+
+function projectRoleAssigneeDisplay(value, request, projects = [], users = []) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const normalized = normalizeRoleToken(text).replaceAll("_", " ");
+  const project = projects.find((item) => item.name === request?.modificationProject);
+  const entries = parseProjectTeamEntries(project?.projectTeam);
+  const directEntry = entries.find((entry) => normalizeRoleToken(entry.name).replaceAll("_", " ") === normalized);
+  if (directEntry) return directEntry.name;
+  const directUser = users.find((user) => [user.fullName, user.username, user.email]
+    .filter(Boolean)
+    .some((candidate) => normalizeRoleToken(candidate).replaceAll("_", " ") === normalized));
+  if (directUser) return directUser.fullName || directUser.username || directUser.email || text;
+  const roleEntry = entries.find((entry) => entry.roles.some((role) => normalizeRoleToken(role).replaceAll("_", " ") === normalized));
+  return roleEntry?.name || text;
 }
 
 function projectTeamUserIds(projectTeam, users, currentUser) {
@@ -5922,10 +6137,15 @@ function projectTeamUserIds(projectTeam, users, currentUser) {
 }
 
 function projectLeadTeamMembers(projectTeam, users) {
-  return parseProjectTeam(projectTeam).filter((member) => {
-    const user = findUserByTeamName(member, users);
-    return isProjectLead(user);
-  });
+  return parseProjectTeamEntries(projectTeam)
+    .filter((member) => {
+      if (member.roles.length > 0) {
+        return member.roles.some((role) => normalizeRoleToken(role) === "chef de projet" || normalizeRoleToken(role).replaceAll("_", " ") === "chef de projet");
+      }
+      const user = findUserByTeamName(member.name, users);
+      return isProjectLead(user);
+    })
+    .map((member) => member.name);
 }
 
 function selectedProjectLeadNames(users) {
@@ -5936,8 +6156,20 @@ function selectedProjectLeadNames(users) {
 }
 
 function countSelectedProjectLeads(projectTeam, users) {
-  const selectedNames = parseProjectTeam(projectTeam);
-  return selectedProjectLeadNames(users).filter((name) => selectedNames.includes(name)).length;
+  return projectLeadTeamMembers(projectTeam, users).length;
+}
+
+function duplicatedProjectTeamRole(projectTeam) {
+  const usedRoles = new Set();
+  for (const entry of parseProjectTeamEntries(projectTeam)) {
+    for (const role of entry.roles) {
+      const key = normalizeRoleToken(role).replaceAll("_", " ");
+      if (!key) continue;
+      if (usedRoles.has(key)) return role;
+      usedRoles.add(key);
+    }
+  }
+  return "";
 }
 
 function isProjectLead(user) {
@@ -5967,6 +6199,14 @@ function RequestDocumentCard({ contentType, onPreview, sourceUrl, title, url }) 
   );
 }
 
+RequestDocumentCard.propTypes = {
+  contentType: PropTypes.string,
+  onPreview: PropTypes.func.isRequired,
+  sourceUrl: PropTypes.string,
+  title: PropTypes.string.isRequired,
+  url: PropTypes.string.isRequired
+};
+
 function ModificationsPage(props) {
   const [listOpen, setListOpen] = useState(false);
   const [userSidebarOpen, setUserSidebarOpen] = useState(true);
@@ -5981,7 +6221,6 @@ function ModificationsPage(props) {
     checklist,
     completion,
     currentUser,
-    doneCount,
     filteredRequests,
     handleArchiveEcr,
     handleCancelEcr,
@@ -6004,8 +6243,8 @@ function ModificationsPage(props) {
     handleRequestClosure,
     handleRequestPhaseValidation,
     isCriticalAction,
-    lateActions,
     phaseValidations,
+    projects = [],
     projectFilter,
     projectOptions,
     query,
@@ -6021,6 +6260,7 @@ function ModificationsPage(props) {
     selectedRequest,
     selectedStages,
     selectedStage,
+    setSaving,
     setProjectFilter,
     setQuery,
     setSelectedId,
@@ -6028,22 +6268,25 @@ function ModificationsPage(props) {
     setShowCreateForm,
     setRequestTypeFilter,
     requiresEvidence,
-    updateActionForm
+    updateActionForm,
+    users = []
   } = props;
   const canAdmin = isAdminUser(currentUser);
   const canValidate = canValidatePhases(currentUser);
-  const canRequestValidation = isRequestPilot(currentUser, selectedRequest);
+  const canRequestValidation = isRequestPilot(currentUser, selectedRequest)
+    || isProjectLeadForRequest(currentUser, selectedRequest, projects);
   const requestTerminal = isTerminalRequest(selectedRequest);
   const canManageDossierReview = !requestTerminal && (canAdmin || canRequestValidation);
   const canExportDossierReview = canAdmin || canRequestValidation;
   const canExportGantt = Boolean(selectedRequest);
   const canCancelRequest = !requestTerminal && canAdmin && selectedRequest?.currentStage !== "CANCELLED";
+  const canEditRequest = !requestTerminal && (canAdmin || isRequestPilot(currentUser, selectedRequest));
   const workflowApproved = allWorkflowStagesApproved(selectedRequest, phaseValidations);
   const canRequestClosure = !requestTerminal && canRequestValidation && workflowApproved && !selectedRequest?.closureRequested;
   const canCloseRequest = !requestTerminal && canAdmin && workflowApproved && selectedRequest?.closureRequested;
   const currentValidation = phaseValidations.find((validation) => validation.stage === selectedStage && validation.status === "PENDING");
   const latestStageValidation = phaseValidations.find((validation) => validation.stage === selectedStage);
-  const visibleActions = canSeeAllActionsForUser(currentUser, selectedRequest) ? actions : actions.filter((action) => isActionParticipantForUser(currentUser, action));
+  const visibleActions = actions;
   const stageActionsDone = actions.length > 0 && actions.every(isActionDone);
   const isCurrentStage = selectedRequest && selectedStage === selectedRequest.currentStage;
   const authenticatedUserRequests = useMemo(() => {
@@ -6074,10 +6317,12 @@ function ModificationsPage(props) {
     setSelectedStage(safeStage(participantStage || request.currentStage, Boolean(request.newVersion)));
     setDetailsCollapsed(false);
     setListOpen(false);
+    setUserSidebarOpen(false);
   }
 
   function exportModificationGanttPdf() {
     if (!selectedRequest) return;
+    setSaving(true);
     Promise.all([
       getActions(selectedRequest.id),
       getEcrRequestProgress(selectedRequest.id).catch(() => null)
@@ -6085,13 +6330,15 @@ function ModificationsPage(props) {
       .then(async ([requestActions, progressSummary]) => {
         await downloadHtmlAsPdf(
           `diagramme-gantt-${fileNameToken(requestDisplayName(selectedRequest))}.pdf`,
-          modificationGanttPdfHtml(selectedRequest, requestActions, stagesForRequest(selectedRequest), progressSummary)
+          modificationGanttPdfHtml(selectedRequest, requestActions, stagesForRequest(selectedRequest), progressSummary),
+          { orientation: "landscape", width: "1280px", backgroundColor: "#f7f9f1", scale: 1 }
         );
         successToast("Diagramme de Gantt PDF telecharge");
       })
       .catch(() => {
         errorAlert("Generation du diagramme de Gantt impossible.");
-      });
+      })
+      .finally(() => setSaving(false));
   }
 
   function exportModificationDossierExcel() {
@@ -6146,6 +6393,7 @@ function ModificationsPage(props) {
                   key={request.id}
                   type="button"
                   role="option"
+                  aria-selected={selectedId === request.id}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
                     selectRequest(request);
@@ -6220,7 +6468,7 @@ function ModificationsPage(props) {
                 )}
                 <button
                   className="ghost-icon details-edit-button"
-                  disabled={!canAdmin || saving || requestTerminal}
+                  disabled={!canEditRequest || saving}
                   type="button"
                   onClick={() => onEditRequest(selectedRequest)}
                   title="Modifier la modification"
@@ -6304,7 +6552,20 @@ function ModificationsPage(props) {
                   <div><CalendarDays size={16} /><span>Réception</span><strong>{selectedRequest.receptionDate || "-"}</strong></div>
                   <div><CalendarDays size={16} /><span>SOP</span><strong>{selectedRequest.sopDate || "-"}</strong></div>
                   <div><ClipboardList size={16} /><span>Mixabilité</span><strong>{mixabilityLabel(selectedRequest.mixability)}</strong></div>
-                  <div><ClipboardList size={16} /><span>Type</span><strong>{modificationTypesLabel(selectedRequest)}</strong></div>
+                  <div className="meta-grid-type">
+                    <ClipboardList size={16} />
+                    <span>Type</span>
+                    <ul>
+                      {modificationTypesList(selectedRequest).length === 0 ? (
+                        <li>-</li>
+                      ) : modificationTypesList(selectedRequest).map((type) => (
+                        <li key={type}>{type}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  {selectedRequest.previousPilot && normalizeRoleToken(selectedRequest.previousPilot) !== normalizeRoleToken(selectedRequest.pilot) && (
+                    <div><Gauge size={16} /><span>Ancien pilote</span><strong>{selectedRequest.previousPilot}</strong></div>
+                  )}
                 </div>
                 <button className="dossier-review-card" type="button" onClick={() => setDossierDialogOpen(true)} title="Ouvrir la revue dossier">
                   <FileText size={24} />
@@ -6320,9 +6581,9 @@ function ModificationsPage(props) {
                       <FileText size={24} />
                       <span>Dossier PDF</span>
                     </button>
-                    <button className="dossier-review-card" type="button" onClick={exportModificationGanttPdf} title="Extraire le diagramme de Gantt">
+                    <button className="dossier-review-card" type="button" onClick={exportModificationGanttPdf} title="Telecharger le diagramme de Gantt imprimable">
                       <CalendarDays size={24} />
-                      <span>Gantt PDF</span>
+                      <span>Gantt</span>
                     </button>
                   </>
                 )}
@@ -6410,12 +6671,14 @@ function ModificationsPage(props) {
                   selectedRequest={selectedRequest}
                   phaseValidation={currentValidation}
                   phaseValidations={phaseValidations}
+                  projects={projects}
                   readOnly={requestTerminal}
                   stageNewProject={Boolean(selectedRequest.newVersion)}
                   selectedStages={selectedStages}
                   selectedStage={selectedStage}
                   updateActionForm={updateActionForm}
                   removeActionProofDocumentFile={removeActionProofDocumentFile}
+                  users={users}
                 />
                 <ChecklistPanel checklist={checklist} />
               </section>
@@ -6461,12 +6724,11 @@ function ModificationsPage(props) {
         </button>
       )}
       {listOpen && (
-        <div className="dialog-backdrop" role="presentation" onMouseDown={() => setListOpen(false)}>
+        <div className="dialog-backdrop" role="presentation">
           <section
             aria-labelledby="request-dialog-title"
             aria-modal="true"
             className="request-dialog"
-            onMouseDown={(event) => event.stopPropagation()}
             role="dialog"
           >
             <header className="actions-dialog-header">
@@ -6514,12 +6776,11 @@ function ModificationsPage(props) {
         </div>
       )}
       {previewImage && (
-        <div className="dialog-backdrop" role="presentation" onMouseDown={() => setPreviewImage(null)}>
+        <div className="dialog-backdrop" role="presentation">
           <section
             aria-labelledby="image-preview-title"
             aria-modal="true"
             className="image-preview-dialog"
-            onMouseDown={(event) => event.stopPropagation()}
             role="dialog"
           >
             <header className="actions-dialog-header">
@@ -6557,24 +6818,88 @@ function ModificationsPage(props) {
   );
 }
 
+ModificationsPage.propTypes = {
+  actionForm: PropTypes.object.isRequired,
+  actionRoleOptions: PropTypes.array.isRequired,
+  actions: PropTypes.array.isRequired,
+  actionsByRequestId: PropTypes.object,
+  checklist: PropTypes.array.isRequired,
+  completion: PropTypes.number.isRequired,
+  currentUser: PropTypes.object,
+  filteredRequests: PropTypes.array.isRequired,
+  handleArchiveEcr: PropTypes.func.isRequired,
+  handleCancelEcr: PropTypes.func.isRequired,
+  handleCreateAction: PropTypes.func.isRequired,
+  handleDeleteAction: PropTypes.func.isRequired,
+  handleStageChange: PropTypes.func.isRequired,
+  handleToggleAction: PropTypes.func.isRequired,
+  handleUpdateActionDuration: PropTypes.func.isRequired,
+  handleDeleteActionAsset: PropTypes.func.isRequired,
+  handleUploadEvidence: PropTypes.func.isRequired,
+  handleAddEvidenceLink: PropTypes.func.isRequired,
+  removeActionProofDocumentFile: PropTypes.func.isRequired,
+  handleApprovePhase: PropTypes.func.isRequired,
+  handleApproveActionValidation: PropTypes.func.isRequired,
+  handleCloseRequest: PropTypes.func.isRequired,
+  handleRejectActionValidation: PropTypes.func.isRequired,
+  handleRequestActionValidation: PropTypes.func.isRequired,
+  handleRejectPhase: PropTypes.func.isRequired,
+  handleReopenPhase: PropTypes.func.isRequired,
+  handleRequestClosure: PropTypes.func.isRequired,
+  handleRequestPhaseValidation: PropTypes.func.isRequired,
+  isCriticalAction: PropTypes.func.isRequired,
+  phaseValidations: PropTypes.array.isRequired,
+  projects: PropTypes.array,
+  projectFilter: PropTypes.string.isRequired,
+  projectOptions: PropTypes.array.isRequired,
+  query: PropTypes.string.isRequired,
+  requests: PropTypes.array,
+  requestSearchSuggestions: PropTypes.array.isRequired,
+  requestArchiveView: PropTypes.string.isRequired,
+  requestTypeFilter: PropTypes.string.isRequired,
+  onEditRequest: PropTypes.func.isRequired,
+  onRequestArchiveViewChange: PropTypes.func.isRequired,
+  onUpdateDossierReview: PropTypes.func.isRequired,
+  saving: PropTypes.bool.isRequired,
+  selectedId: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+  selectedRequest: PropTypes.object,
+  selectedStages: PropTypes.array.isRequired,
+  selectedStage: PropTypes.string.isRequired,
+  setSaving: PropTypes.func.isRequired,
+  setProjectFilter: PropTypes.func.isRequired,
+  setQuery: PropTypes.func.isRequired,
+  setSelectedId: PropTypes.func.isRequired,
+  setSelectedStage: PropTypes.func.isRequired,
+  setShowCreateForm: PropTypes.func.isRequired,
+  setRequestTypeFilter: PropTypes.func.isRequired,
+  requiresEvidence: PropTypes.func.isRequired,
+  updateActionForm: PropTypes.func.isRequired,
+  users: PropTypes.array
+};
+
+function phaseValidationStatusText({ canRequestValidation, isCurrentStage, phaseApproved, phaseReopened, stageActionsDone, validation }) {
+  if (!isCurrentStage) return "Cette phase est consultable, mais seule la phase courante peut être envoyée en validation";
+  if (phaseApproved) return "Phase déjà validée";
+  if (phaseReopened) return "Phase rouverte, en attente de reprise";
+  if (validation) return "Demande en attente de validation";
+  if (!canRequestValidation) return "Seul le pilote ou le chef de projet de la modification peut demander la validation";
+  if (stageActionsDone) return "Phase prête a envoyér en validation";
+  return "Toutes les actions doivent être terminées";
+}
+
 function PhaseValidationPanel({ canAdmin, canRequestValidation, canValidate, isCurrentStage, latestValidation, readOnly = false, saving, stageActionsDone, validation, validationRate, onApprove, onReject, onReopen, onRequest }) {
   const phaseApproved = latestValidation?.status === "APPROVED";
   const phaseReopened = latestValidation?.status === "REOPENED";
   const displayedRate = latestValidation?.validationRate ?? validationRate ?? 0;
   const allActionsValidated = validation && (validation.totalActions || 0) > 0 && (validation.approvedActions || 0) >= (validation.totalActions || 0);
-  const statusText = !isCurrentStage
-    ? "Cette phase est consultable, mais seule la phase courante peut être envoyée en validation"
-    : phaseApproved
-      ? "Phase déjà validée"
-    : phaseReopened
-      ? "Phase rouverte, en attente de reprise"
-    : validation
-      ? "Demande en attente de validation"
-      : !canRequestValidation
-        ? "Seul le pilote de la modification peut demander la validation"
-        : stageActionsDone
-        ? "Phase prête a envoyér en validation"
-        : "Toutes les actions doivent être terminées";
+  const statusText = phaseValidationStatusText({
+    canRequestValidation,
+    isCurrentStage,
+    phaseApproved,
+    phaseReopened,
+    stageActionsDone,
+    validation
+  });
   return (
     <section className="panel phase-validation-panel">
       <div>
@@ -6622,13 +6947,58 @@ function PhaseValidationPanel({ canAdmin, canRequestValidation, canValidate, isC
   );
 }
 
+PhaseValidationPanel.propTypes = {
+  canAdmin: PropTypes.bool.isRequired,
+  canRequestValidation: PropTypes.bool.isRequired,
+  canValidate: PropTypes.bool.isRequired,
+  isCurrentStage: PropTypes.bool,
+  latestValidation: PropTypes.shape({
+    actionsToRevisit: PropTypes.string,
+    approvedActions: PropTypes.number,
+    refusalReason: PropTypes.string,
+    reviewedBy: PropTypes.string,
+    status: PropTypes.string,
+    totalActions: PropTypes.number,
+    validationRate: PropTypes.number
+  }),
+  readOnly: PropTypes.bool,
+  saving: PropTypes.bool.isRequired,
+  stageActionsDone: PropTypes.bool.isRequired,
+  validation: PropTypes.shape({
+    approvedActions: PropTypes.number,
+    totalActions: PropTypes.number
+  }),
+  validationRate: PropTypes.number,
+  onApprove: PropTypes.func.isRequired,
+  onReject: PropTypes.func.isRequired,
+  onReopen: PropTypes.func.isRequired,
+  onRequest: PropTypes.func.isRequired
+};
+
 function phaseValidationStatusLabel(status) {
   if (status === "APPROVED") return "Phase validée";
   if (status === "REOPENED") return "Phase rouverte";
   return "Phase refusée";
 }
 
-function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleDeleteAction, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, handleAddEvidenceLink, isCriticalAction, lateActions, phaseValidation, phaseValidations = [], readOnly = false, requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm, removeActionProofDocumentFile }) {
+function actionParticipantDisplay({ historical, value, fallback, selectedRequest, projects, users }) {
+  if (historical) return value || fallback;
+  return projectRoleAssigneeDisplay(value, selectedRequest, projects, users) || fallback;
+}
+
+function blockingActionStatusClass(action, isBlocked) {
+  if (isBlocked) return "status late";
+  if (action.dependsOnActionId) return "status done";
+  return "";
+}
+
+function actionValidationDisplay(status) {
+  if (status === "APPROVED") return { className: "done", label: "Validee" };
+  if (status === "REJECTED") return { className: "late", label: "Refusee" };
+  return { className: "in_progress", label: "En attente" };
+}
+
+function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleDeleteAction, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, handleAddEvidenceLink, isCriticalAction, lateActions, phaseValidation, phaseValidations = [], projects = [], readOnly = false, requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm, removeActionProofDocumentFile, users = [] }) {
   const [expanded, setExpanded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const stageTitle = stageLabel(selectedStage, stageNewProject);
@@ -6679,17 +7049,18 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
         isCriticalAction={isCriticalAction}
         requiresEvidence={requiresEvidence}
         phaseValidations={phaseValidations}
+        projects={projects}
         readOnly={readOnly}
         saving={saving}
         selectedRequest={selectedRequest}
+        users={users}
       />
       {expanded && (
-        <div className="dialog-backdrop" role="presentation" onMouseDown={() => setExpanded(false)}>
+        <div className="dialog-backdrop" role="presentation">
           <section
             aria-labelledby="expanded-actions-title"
             aria-modal="true"
             className="actions-dialog"
-            onMouseDown={(event) => event.stopPropagation()}
             role="dialog"
           >
             <header className="actions-dialog-header">
@@ -6721,9 +7092,11 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
               isCriticalAction={isCriticalAction}
               requiresEvidence={requiresEvidence}
               phaseValidations={phaseValidations}
+              projects={projects}
               readOnly={readOnly}
               saving={saving}
               selectedRequest={selectedRequest}
+              users={users}
             />
           </section>
         </div>
@@ -6747,7 +7120,41 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
   );
 }
 
-function ActionList({ actions, currentUser, expanded = false, phaseValidation, phaseValidations = [], readOnly = false, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteAction, handleDeleteActionAsset, handleUploadEvidence, handleAddEvidenceLink, requiresEvidence, saving, selectedRequest }) {
+ActionsPanel.propTypes = {
+  actionForm: PropTypes.object.isRequired,
+  actionRoleOptions: PropTypes.array.isRequired,
+  actions: PropTypes.array.isRequired,
+  canAdmin: PropTypes.bool.isRequired,
+  currentUser: PropTypes.object,
+  doneCount: PropTypes.number.isRequired,
+  handleCreateAction: PropTypes.func.isRequired,
+  handleDeleteAction: PropTypes.func.isRequired,
+  handleToggleAction: PropTypes.func.isRequired,
+  handleUpdateActionDuration: PropTypes.func.isRequired,
+  handleApproveActionValidation: PropTypes.func.isRequired,
+  handleRejectActionValidation: PropTypes.func.isRequired,
+  handleRequestActionValidation: PropTypes.func.isRequired,
+  handleDeleteActionAsset: PropTypes.func.isRequired,
+  handleUploadEvidence: PropTypes.func.isRequired,
+  handleAddEvidenceLink: PropTypes.func.isRequired,
+  isCriticalAction: PropTypes.func.isRequired,
+  lateActions: PropTypes.number.isRequired,
+  phaseValidation: PropTypes.object,
+  phaseValidations: PropTypes.array,
+  projects: PropTypes.array,
+  readOnly: PropTypes.bool,
+  requiresEvidence: PropTypes.func.isRequired,
+  saving: PropTypes.bool.isRequired,
+  selectedRequest: PropTypes.object,
+  selectedStages: PropTypes.array.isRequired,
+  selectedStage: PropTypes.string.isRequired,
+  stageNewProject: PropTypes.bool.isRequired,
+  updateActionForm: PropTypes.func.isRequired,
+  removeActionProofDocumentFile: PropTypes.func.isRequired,
+  users: PropTypes.array
+};
+
+function ActionList({ actions, currentUser, expanded = false, phaseValidation, phaseValidations = [], projects = [], readOnly = false, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteAction, handleDeleteActionAsset, handleUploadEvidence, handleAddEvidenceLink, requiresEvidence, saving, selectedRequest, users = [] }) {
   const [durationValues, setDurationValues] = useState({});
   const [assetLinks, setAssetLinks] = useState({});
 
@@ -6794,11 +7201,29 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
             const canEditDuration = !readOnly && canEditActionDurationForUser(currentUser, action, selectedRequest, phaseValidations);
             const canManageAction = !readOnly && canManageActionForUser(currentUser, action, phaseValidations, selectedRequest);
             const canToggleAction = !readOnly && canToggleActionForUser(currentUser, action, selectedRequest, phaseValidations);
+            const historical = isHistoricalActionDisplay(action);
+            const responsibleDisplay = actionParticipantDisplay({
+              historical,
+              value: action.responsible,
+              fallback: "À définir",
+              selectedRequest,
+              projects,
+              users
+            });
+            const validatorDisplay = actionParticipantDisplay({
+              historical,
+              value: action.validatorDisplayName || action.validator,
+              fallback: "à définir",
+              selectedRequest,
+              projects,
+              users
+            });
+            const validationDisplay = actionValidationDisplay(action.validationStatus);
 
             return (
             <article className={action.late ? "action-row late" : "action-row"} key={action.id}>
               <label className="action-check" title={isActionDone(action) ? "Marquer non terminée" : "Marquer terminée"}>
-                <input checked={isActionDone(action)} disabled={saving || !canToggleAction} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
+                <input aria-label={`Changer le statut de ${action.title || "l'action"}`} checked={isActionDone(action)} disabled={saving || !canToggleAction} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
               </label>
               <div className="action-main">
                 <h3>{action.title}</h3>
@@ -6811,10 +7236,10 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
               </div>
               <div className="action-meta">
                 <span><em>Ordre</em><strong>Action {index + 1}</strong></span>
-                <span><em>Pilote</em><strong>{action.responsible || "À définir"}</strong></span>
-                <span><em>Validateur</em><strong>{action.validatorDisplayName || action.validator || "à définir"}</strong></span>
+                <span><em>Pilote</em><strong>{responsibleDisplay}</strong></span>
+                <span><em>Validateur</em><strong>{validatorDisplay}</strong></span>
                 <span><em>Criticité</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>
-                <span className="blocking-action-meta"><em>Blocage</em><strong className={isBlocked ? "status late" : action.dependsOnActionId ? "status done" : ""}>{action.dependsOnActionId ? `Par: ${blockingActionLabel(action, actions)}` : "Aucune"}</strong></span>
+                <span className="blocking-action-meta"><em>Blocage</em><strong className={blockingActionStatusClass(action, isBlocked)}>{action.dependsOnActionId ? `Par: ${blockingActionLabel(action, actions)}` : "Aucune"}</strong></span>
                 <span><em>Début</em><strong>{action.startDate || "-"}</strong></span>
                 <span><em>Fin</em><strong>{action.endDate || "-"}</strong></span>
                 <span><em>Finalisation</em><strong>{formattedDateTime(action.finalizationDate)}</strong></span>
@@ -6923,8 +7348,8 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
                 {phaseValidation && (
                   <span className="action-validation-cell">
                     <em>Validation</em>
-                    <small className={`status ${action.validationStatus === "APPROVED" ? "done" : action.validationStatus === "REJECTED" ? "late" : "in_progress"}`}>
-                      {action.validationStatus === "APPROVED" ? "Validee" : action.validationStatus === "REJECTED" ? "Refusee" : "En attente"}
+                    <small className={`status ${validationDisplay.className}`}>
+                      {validationDisplay.label}
                     </small>
                     {!readOnly && isActionAwaitingValidation(action, phaseValidation) && canValidateActionForUser(currentUser, action) && (
                       <span className="action-validation-actions">
@@ -6958,14 +7383,36 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
   );
 }
 
+ActionList.propTypes = {
+  actions: PropTypes.array.isRequired,
+  currentUser: PropTypes.object,
+  expanded: PropTypes.bool,
+  phaseValidation: PropTypes.object,
+  phaseValidations: PropTypes.array,
+  projects: PropTypes.array,
+  readOnly: PropTypes.bool,
+  handleToggleAction: PropTypes.func.isRequired,
+  handleUpdateActionDuration: PropTypes.func.isRequired,
+  handleApproveActionValidation: PropTypes.func.isRequired,
+  handleRejectActionValidation: PropTypes.func.isRequired,
+  handleRequestActionValidation: PropTypes.func.isRequired,
+  handleDeleteAction: PropTypes.func.isRequired,
+  handleDeleteActionAsset: PropTypes.func.isRequired,
+  handleUploadEvidence: PropTypes.func.isRequired,
+  handleAddEvidenceLink: PropTypes.func.isRequired,
+  requiresEvidence: PropTypes.func.isRequired,
+  saving: PropTypes.bool.isRequired,
+  selectedRequest: PropTypes.object,
+  users: PropTypes.array
+};
+
 function ActionSuggestionDialog({ saving, suggestions, onAdd, onClose, onIgnore }) {
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="dialog-backdrop" role="presentation">
       <section
         aria-labelledby="action-suggestion-title"
         aria-modal="true"
         className="dialog-card action-suggestion-dialog panel"
-        onMouseDown={(event) => event.stopPropagation()}
         role="dialog"
       >
         <div className="form-intro">
@@ -7025,6 +7472,22 @@ function ActionRoleSelect({ options = [], placeholder = "Selectionner un role", 
   );
 }
 
+ActionRoleSelect.propTypes = {
+  options: PropTypes.arrayOf(PropTypes.string),
+  placeholder: PropTypes.string,
+  required: PropTypes.bool,
+  value: PropTypes.string,
+  onChange: PropTypes.func.isRequired
+};
+
+ActionSuggestionDialog.propTypes = {
+  saving: PropTypes.bool.isRequired,
+  suggestions: PropTypes.array.isRequired,
+  onAdd: PropTypes.func.isRequired,
+  onClose: PropTypes.func.isRequired,
+  onIgnore: PropTypes.func.isRequired
+};
+
 function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCriticalAction, saving, selectedStages = [], stageNewProject, onClose, onSubmit, updateActionForm, removeActionProofDocumentFile }) {
   const selectedActionStage = actionForm.stage || selectedStages[0]?.[0] || "";
   const selectedProofDocumentFiles = filesFromValue(actionForm.proofDocumentFile);
@@ -7043,13 +7506,12 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
   }
 
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="dialog-backdrop" role="presentation">
       <form
         aria-labelledby="create-action-title"
         aria-modal="true"
         className="dialog-card action-rule-dialog panel form-page"
         noValidate
-        onMouseDown={(event) => event.stopPropagation()}
         onSubmit={onSubmit}
         role="dialog"
       >
@@ -7064,7 +7526,7 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
         </div>
         <div className="planning-rule-form dialog-rule-form">
           <label>
-            Phase
+            <span>Phase</span>
             <select value={selectedActionStage} onChange={(event) => updateActionForm("stage", event.target.value)}>
               {selectedStages.map(([stage, label]) => (
                 <option key={stage} value={stage}>{label || stageLabel(stage, stageNewProject)}</option>
@@ -7072,23 +7534,23 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
             </select>
           </label>
           <label className="planning-action-title-field">
-            Action
+            <span>Action</span>
             <input required value={actionForm.title} onChange={(event) => updateActionForm("title", event.target.value)} placeholder="Ex: Action 7 - Validation input" />
           </label>
           <label>
-            Topic / risque
+            <span>Topic / risque</span>
             <input value={actionForm.topicRisk} onChange={(event) => updateActionForm("topicRisk", event.target.value)} placeholder="Risque ou sujet" />
           </label>
           <label>
-            Pilote d'action
+            <span>Pilote d'action</span>
             <ActionRoleSelect required options={actionRoleOptions} value={actionForm.responsible} onChange={(value) => updateActionForm("responsible", value)} />
           </label>
           <label>
-            Validateur
+            <span>Validateur</span>
             <ActionRoleSelect required options={actionRoleOptions} value={actionForm.validator} onChange={(value) => updateActionForm("validator", value)} placeholder="Selectionner un role" />
           </label>
           <label>
-            Criticité
+            <span>Criticité</span>
             <select value={actionForm.criticality} onChange={(event) => updateActionForm("criticality", event.target.value)}>
               <option value="1-critique">1-critique</option>
               <option value="2-moyenne">2-moyenne</option>
@@ -7096,7 +7558,7 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
             </select>
           </label>
           <label>
-            Bloquee par
+            <span>Bloquee par</span>
             <select value={actionForm.dependsOnActionId || ""} onChange={(event) => updateActionForm("dependsOnActionId", event.target.value)}>
               <option value="">Aucune action</option>
               {dependencyOptions.map((action, index) => (
@@ -7105,7 +7567,7 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
             </select>
           </label>
           <label>
-            Jours de travail
+            <span>Jours de travail</span>
             <input min="0" type="number" value={actionForm.workDurationDays} onChange={(event) => updateActionForm("workDurationDays", event.target.value)} />
           </label>
           <div className="proof-document-picker-field">
@@ -7129,11 +7591,13 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
             )}
             <div className="asset-link-inputs proof-document-link-inputs">
               <input
+                aria-label="Nom du lien preuve"
                 placeholder="Nom du lien preuve"
                 value={actionForm.proofDocumentLinkName || ""}
                 onChange={(event) => updateActionForm("proofDocumentLinkName", event.target.value)}
               />
               <input
+                aria-label="Lien fichier partage"
                 placeholder="Lien fichier partagé"
                 value={actionForm.proofDocumentLinkUrl || ""}
                 onChange={(event) => updateActionForm("proofDocumentLinkUrl", event.target.value)}
@@ -7142,11 +7606,13 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
           </div>
           <div className="asset-link-inputs action-evidence-link-inputs">
             <input
+              aria-label="Nom du lien asset"
               placeholder="Nom du lien asset"
               value={actionForm.evidenceLinkName || ""}
               onChange={(event) => updateActionForm("evidenceLinkName", event.target.value)}
             />
             <input
+              aria-label="Lien asset partage"
               placeholder="Lien asset partagé"
               value={actionForm.evidenceLinkUrl || ""}
               onChange={(event) => updateActionForm("evidenceLinkUrl", event.target.value)}
@@ -7154,12 +7620,13 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
           </div>
           <label className="asset-required-field user-enabled-field">
             <input
+              aria-label="Asset obligatoire"
               checked={actionForm.evidenceRequired || selectedProofDocumentFiles.length > 0 || hasProofDocumentLink || isCriticalAction(actionForm)}
               disabled={selectedProofDocumentFiles.length > 0 || hasProofDocumentLink || isCriticalAction(actionForm)}
               type="checkbox"
               onChange={(event) => updateActionForm("evidenceRequired", event.target.checked)}
             />
-            Asset obligatoire
+            <span>Asset obligatoire</span>
           </label>
         </div>
         <div className="button-row">
@@ -7173,6 +7640,20 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
     </div>
   );
 }
+
+ActionCreateDialog.propTypes = {
+  actionForm: PropTypes.object.isRequired,
+  actionRoleOptions: PropTypes.array.isRequired,
+  actions: PropTypes.array,
+  isCriticalAction: PropTypes.func.isRequired,
+  saving: PropTypes.bool.isRequired,
+  selectedStages: PropTypes.array,
+  stageNewProject: PropTypes.bool.isRequired,
+  onClose: PropTypes.func.isRequired,
+  onSubmit: PropTypes.func.isRequired,
+  updateActionForm: PropTypes.func.isRequired,
+  removeActionProofDocumentFile: PropTypes.func.isRequired
+};
 
 function ChecklistPanel({ checklist }) {
   const visibleChecklist = checklist.filter((item) => {
@@ -7197,4 +7678,9 @@ function ChecklistPanel({ checklist }) {
   );
 }
 
+ChecklistPanel.propTypes = {
+  checklist: PropTypes.arrayOf(PropTypes.object).isRequired
+};
+
 export default App;
+

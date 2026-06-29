@@ -10,6 +10,8 @@ public interface EcrRequestRepository extends JpaRepository<EcrRequest, Long> {
 
     List<EcrRequest> findByArchivedFalseOrderByReceptionDateDescIdDesc();
 
+    List<EcrRequest> findByModificationProject(String modificationProject);
+
     boolean existsByModificationNumberIgnoreCase(String modificationNumber);
 
     boolean existsByModificationNumberIgnoreCaseAndIdNot(String modificationNumber, Long id);

@@ -1,4 +1,5 @@
 import React from "react";
+import PropTypes from "prop-types";
 import { AlertTriangle } from "lucide-react";
 
 export function EmptyState({ title, text, compact = false }) {
@@ -10,3 +11,9 @@ export function EmptyState({ title, text, compact = false }) {
     </div>
   );
 }
+
+EmptyState.propTypes = {
+  title: PropTypes.string.isRequired,
+  text: PropTypes.string.isRequired,
+  compact: PropTypes.bool
+};

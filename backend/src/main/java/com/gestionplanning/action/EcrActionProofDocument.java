@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import javax.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 public class EcrActionProofDocument {
@@ -27,7 +28,7 @@ public class EcrActionProofDocument {
     private String resourceType;
 
     @Column(nullable = false, updatable = false)
-    private LocalDateTime uploadedAt = LocalDateTime.now();
+    private LocalDateTime uploadedAt = LocalDateTime.now(ZoneId.systemDefault());
 
     public Long getId() {
         return id;

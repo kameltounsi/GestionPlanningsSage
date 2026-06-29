@@ -13,6 +13,7 @@ import org.springframework.web.multipart.MultipartFile;
 import javax.validation.Valid;
 import java.net.URI;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api")
@@ -29,28 +30,31 @@ public class EcrDocumentController {
     }
 
     @GetMapping("/ecr-requests/{requestId}/documents")
-    public ResponseEntity<List<EcrDocument>> listByRequest(@PathVariable Long requestId) {
+    public ResponseEntity<List<EcrDocumentDto>> listByRequest(@PathVariable Long requestId) {
         if (!requestRepository.existsById(requestId)) {
             return ResponseEntity.notFound().build();
         }
-        return ResponseEntity.ok(documentRepository.findByRequest_IdOrderByUploadedAtDescIdDesc(requestId));
+        return ResponseEntity.ok(documentRepository.findByRequest_IdOrderByUploadedAtDescIdDesc(requestId).stream()
+                .map(this::toDto)
+                .collect(Collectors.toList()));
     }
 
     @PostMapping("/ecr-requests/{requestId}/documents")
-    public ResponseEntity<EcrDocument> create(@PathVariable Long requestId, @Valid @RequestBody EcrDocument document) {
+    public ResponseEntity<EcrDocumentDto> create(@PathVariable Long requestId, @Valid @RequestBody EcrDocumentDto documentDto) {
         return requestRepository.findById(requestId)
                 .map(request -> {
+                    EcrDocument document = toEntity(documentDto);
                     document.setRequest(request);
                     EcrDocument saved = documentRepository.save(document);
-                    return ResponseEntity.created(URI.create("/api/documents/" + saved.getId())).body(saved);
+                    return ResponseEntity.created(URI.create("/api/documents/" + saved.getId())).body(toDto(saved));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping(value = "/ecr-requests/{requestId}/documents/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<EcrDocument> upload(@PathVariable Long requestId,
-                                              @RequestParam("file") MultipartFile file,
-                                              @RequestParam(value = "uploadedBy", required = false) String uploadedBy) {
+    public ResponseEntity<EcrDocumentDto> upload(@PathVariable Long requestId,
+                                                 @RequestParam("file") MultipartFile file,
+                                                 @RequestParam(value = "uploadedBy", required = false) String uploadedBy) {
         if (file.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
@@ -67,15 +71,15 @@ public class EcrDocumentController {
                     document.setFileSize(asset.getSize());
                     document.setUploadedBy(uploadedBy);
                     EcrDocument saved = documentRepository.save(document);
-                    return ResponseEntity.created(URI.create("/api/documents/" + saved.getId())).body(saved);
+                    return ResponseEntity.created(URI.create("/api/documents/" + saved.getId())).body(toDto(saved));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/documents/{id}/download")
-    public ResponseEntity<?> download(@PathVariable Long id) {
+    public ResponseEntity<Object> download(@PathVariable Long id) {
         return documentRepository.findById(id)
-                .<ResponseEntity<?>>map(document -> {
+                .<ResponseEntity<Object>>map(document -> {
                     DownloadedAsset asset = storageService.download(document.getPublicId(), document.getResourceType(), document.getFileUrl(), document.getFileType());
                     return ResponseEntity.ok()
                             .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(document.getFileName(), asset.getContentType()))
@@ -109,5 +113,32 @@ public class EcrDocumentController {
                 ? "inline"
                 : "attachment";
         return disposition + "; filename=\"" + safeFileName(fileName) + "\"";
+    }
+
+    private EcrDocument toEntity(EcrDocumentDto dto) {
+        EcrDocument document = new EcrDocument();
+        document.setFileName(dto.getFileName());
+        document.setFileUrl(dto.getFileUrl());
+        document.setPublicId(dto.getPublicId());
+        document.setResourceType(dto.getResourceType());
+        document.setFileType(dto.getFileType());
+        document.setFileSize(dto.getFileSize());
+        document.setUploadedBy(dto.getUploadedBy());
+        return document;
+    }
+
+    private EcrDocumentDto toDto(EcrDocument document) {
+        EcrDocumentDto dto = new EcrDocumentDto();
+        dto.setId(document.getId());
+        dto.setRequestId(document.getRequestId());
+        dto.setFileName(document.getFileName());
+        dto.setFileUrl(document.getFileUrl());
+        dto.setPublicId(document.getPublicId());
+        dto.setResourceType(document.getResourceType());
+        dto.setFileType(document.getFileType());
+        dto.setFileSize(document.getFileSize());
+        dto.setUploadedBy(document.getUploadedBy());
+        dto.setUploadedAt(document.getUploadedAt());
+        return dto;
     }
 }

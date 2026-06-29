@@ -5,6 +5,7 @@ import com.gestionplanning.user.AppUser;
 
 import javax.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "auth_token")
@@ -22,7 +23,7 @@ public class AuthToken {
     private AppUser user;
 
     @Column(nullable = false, updatable = false)
-    private LocalDateTime createdAt = LocalDateTime.now();
+    private LocalDateTime createdAt = LocalDateTime.now(ZoneId.systemDefault());
 
     @Column(nullable = false)
     private LocalDateTime expiresAt;

@@ -12,6 +12,7 @@ import com.gestionplanning.action.EcrActionRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -42,14 +43,20 @@ public class EcrTemplateService {
     }
 
     public void createActionsFor(EcrRequest request, List<EcrAction> initialActions) {
-        List<EcrAction> actions = initialActions == null ? new ArrayList<>() : initialActions.stream()
+        List<EcrAction> sourceActions = initialActions == null ? new ArrayList<>() : initialActions;
+        List<EcrAction> actions = sourceActions.stream()
                 .filter(action -> action.getTitle() != null && !action.getTitle().trim().isEmpty())
                 .filter(action -> EcrStage.isAllowed(action.getStage(), request.isNewVersion()))
                 .map(action -> {
                     action.setRequest(request);
                     action.setStatus(action.getStatus() == null ? ActionStatus.TODO : action.getStatus());
                     action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
-                    action.setValidatorRole(action.getValidatorRole() == null || action.getValidatorRole().trim().isEmpty() ? action.getValidator() : action.getValidatorRole());
+                    String validatorRole = action.getValidatorRole();
+                    if (validatorRole == null || validatorRole.trim().isEmpty()) {
+                        validatorRole = action.getValidator();
+                    }
+                    action.setValidatorRole(validatorRole);
+                    action.setValidator(assigneeResolver.resolveOptional(request, action.getValidatorRole()));
                     action.setEvidenceRequired(action.isEvidenceRequired()
                             || String.valueOf(action.getCriticality()).startsWith("1"));
                     action.setChecked(false);
@@ -167,14 +174,12 @@ public class EcrTemplateService {
                 .collect(Collectors.toCollection(HashSet::new));
         List<EcrAction> routineActions = new ArrayList<>();
         for (ActionPlanningRule rule : rulesFor(request)) {
-            if (!rule.isRoutineAction() || rule.getId() == null) {
-                continue;
+            if (rule.isRoutineAction() && rule.getId() != null) {
+                String seriesId = routineSeriesId(rule);
+                if (!existingSeries.contains(seriesId)) {
+                    routineActions.addAll(routineActionsFromRule(request, rule, existingActions));
+                }
             }
-            String seriesId = routineSeriesId(rule);
-            if (existingSeries.contains(seriesId)) {
-                continue;
-            }
-            routineActions.addAll(routineActionsFromRule(request, rule, existingActions));
         }
         if (!routineActions.isEmpty()) {
             actionRepository.saveAll(routineActions);
@@ -218,10 +223,7 @@ public class EcrTemplateService {
         LocalDate selectedStart = null;
         for (EcrStage stage : stages) {
             LocalDate stageStart = actualPhaseStartDate(stage, actions);
-            if (stageStart == null || stageStart.isAfter(date)) {
-                continue;
-            }
-            if (selectedStart == null || stageStart.isAfter(selectedStart)) {
+            if (stageStart != null && !stageStart.isAfter(date) && (selectedStart == null || stageStart.isAfter(selectedStart))) {
                 selectedStage = stage;
                 selectedStart = stageStart;
             }
@@ -231,7 +233,10 @@ public class EcrTemplateService {
 
     private LocalDate phaseStartDate(EcrRequest request, EcrStage stage, List<EcrAction> actions) {
         LocalDate plannedStart = actualPhaseStartDate(stage, actions);
-        return plannedStart == null ? request.getReceptionDate() == null ? LocalDate.now() : request.getReceptionDate() : plannedStart;
+        if (plannedStart != null) {
+            return plannedStart;
+        }
+        return request.getReceptionDate() == null ? LocalDate.now(ZoneId.systemDefault()) : request.getReceptionDate();
     }
 
     private LocalDate actualPhaseStartDate(EcrStage stage, List<EcrAction> actions) {
@@ -256,7 +261,7 @@ public class EcrTemplateService {
                 .filter(action -> action.getStage() != EcrStage.CANCELLED)
                 .filter(action -> !isDone(action))
                 .filter(action -> action.getStatus() != ActionStatus.CANCELLED)
-                .peek(action -> {
+                .map(action -> {
                     action.setChecked(false);
                     action.setStatus(ActionStatus.CANCELLED);
                     action.setClosedDate(null);
@@ -266,6 +271,7 @@ public class EcrTemplateService {
                     action.setValidationReviewedAt(null);
                     action.setValidationReviewedBy(null);
                     action.setValidationRefusalReason(null);
+                    return action;
                 })
                 .collect(Collectors.toList());
         if (!changedActions.isEmpty()) {
@@ -306,8 +312,8 @@ public class EcrTemplateService {
             action.setTitle("Revue et validation - " + stage.getLabel(request.isNewVersion()));
             action.setTopicRisk("Suivi ECR");
             action.setResponsible(assigneeResolver.resolve(request, request.getPilot()));
-            action.setValidator("Validateur");
             action.setValidatorRole("Validateur");
+            action.setValidator(assigneeResolver.resolveOptional(request, "Validateur"));
             action.setCriticality("3-faible");
             action.setExpectedEvidence("Compte rendu, preuve ou document de validation");
             action.setEvidenceRequired(false);
@@ -339,8 +345,8 @@ public class EcrTemplateService {
         action.setTitle(rule.getActionTitle());
         action.setTopicRisk(rule.getTopicRisk());
         action.setResponsible(assigneeResolver.resolve(request, rule.getResponsible()));
-        action.setValidator(rule.getValidator());
         action.setValidatorRole(rule.getValidator());
+        action.setValidator(assigneeResolver.resolveOptional(request, rule.getValidator()));
         action.setCriticality(rule.getCriticality());
         action.setExpectedEvidence(rule.getExpectedEvidence());
         copyProofDocument(action, rule, replaceProofDocuments);
@@ -355,10 +361,11 @@ public class EcrTemplateService {
         List<EcrAction> changedActions = actions.stream()
                 .filter(action -> rulesByKey.containsKey(actionKey(action)))
                 .filter(action -> !isDone(action))
-                .peek(action -> {
+                .map(action -> {
                     ActionPlanningRule rule = rulesByKey.get(actionKey(action));
                     applyRuleMetadata(request, action, rule, false);
                     applyRulePlanning(action, rule);
+                    return action;
                 })
                 .collect(Collectors.toList());
         if (!changedActions.isEmpty()) {
@@ -410,17 +417,15 @@ public class EcrTemplateService {
                 .collect(Collectors.toMap(this::actionKey, Function.identity(), (first, second) -> second));
         List<EcrAction> changedActions = new ArrayList<>();
         for (EcrAction action : actions) {
-            if (isDone(action)) {
-                continue;
-            }
-            ActionPlanningRule rule = rulesByKey.get(actionKey(action));
-            if (rule == null) {
-                continue;
-            }
-            Long dependencyId = dependencyActionId(action, rule, actionsByKey);
-            if (!Objects.equals(action.getDependsOnActionId(), dependencyId)) {
-                action.setDependsOnActionId(dependencyId);
-                changedActions.add(action);
+            if (action != null && !isDone(action)) {
+                ActionPlanningRule rule = rulesByKey.get(actionKey(action));
+                if (rule != null) {
+                    Long dependencyId = dependencyActionId(action, rule, actionsByKey);
+                    if (!Objects.equals(action.getDependsOnActionId(), dependencyId)) {
+                        action.setDependsOnActionId(dependencyId);
+                        changedActions.add(action);
+                    }
+                }
             }
         }
         if (!changedActions.isEmpty()) {
@@ -440,9 +445,12 @@ public class EcrTemplateService {
     }
 
     private boolean isDone(EcrAction action) {
-        return action != null && (action.isChecked()
+        if (action == null) {
+            return false;
+        }
+        return action.isChecked()
                 || action.getStatus() == ActionStatus.DONE
-                || action.getStatus() == ActionStatus.DONE_LATE);
+                || action.getStatus() == ActionStatus.DONE_LATE;
     }
 
     private void copyProofDocument(EcrAction action, ActionPlanningRule rule, boolean replaceDocumentItems) {

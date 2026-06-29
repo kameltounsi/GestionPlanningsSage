@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import javax.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "phase_sound_alert")
@@ -41,7 +42,7 @@ public class PhaseSoundAlert {
     @Column(length = 1000)
     private String openedPhaseLabel;
 
-    private LocalDateTime createdAt = LocalDateTime.now();
+    private LocalDateTime createdAt = LocalDateTime.now(ZoneId.systemDefault());
     private LocalDateTime soundAcknowledgedAt;
 
     public Long getId() {

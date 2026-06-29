@@ -4,6 +4,7 @@ import javax.persistence.*;
 import javax.validation.constraints.Email;
 import javax.validation.constraints.NotBlank;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 @Entity
@@ -46,17 +47,17 @@ public class AppUser {
     private String profilePhotoPublicId;
     private String profilePhotoResourceType;
 
-    @Column(nullable = false, length = 160)
+    @Column(nullable = false, length = 500)
     private String role = UserRole.CHEF_DE_PROJET.name();
 
     @Column(nullable = false)
     private boolean enabled = true;
 
     @Column(nullable = false, updatable = false)
-    private LocalDateTime createdAt = LocalDateTime.now();
+    private LocalDateTime createdAt = LocalDateTime.now(ZoneId.systemDefault());
 
     @Column(nullable = false)
-    private LocalDateTime updatedAt = LocalDateTime.now();
+    private LocalDateTime updatedAt = LocalDateTime.now(ZoneId.systemDefault());
 
     public Long getId() {
         return id;
@@ -200,13 +201,13 @@ public class AppUser {
 
     @PrePersist
     public void beforeCreate() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
         createdAt = now;
         updatedAt = now;
     }
 
     @PreUpdate
     public void beforeUpdate() {
-        updatedAt = LocalDateTime.now();
+        updatedAt = LocalDateTime.now(ZoneId.systemDefault());
     }
 }

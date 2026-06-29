@@ -11,12 +11,14 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
-import java.net.URL;
+import java.net.URI;
 import java.util.Map;
 
 @Service
 public class CloudinaryStorageService {
     private static final Logger LOGGER = LoggerFactory.getLogger(CloudinaryStorageService.class);
+    private static final String RESOURCE_TYPE = "resource_type";
+    private static final String IMAGE_RESOURCE_TYPE = "image";
 
     private final Cloudinary cloudinary;
     private final String cloudName;
@@ -41,9 +43,9 @@ public class CloudinaryStorageService {
         validateConfiguration();
         try {
             String resourceType = resourceTypeFor(file);
-            Map uploadResult = cloudinary.uploader().upload(file.getBytes(), ObjectUtils.asMap(
+            Map<?, ?> uploadResult = cloudinary.uploader().upload(file.getBytes(), ObjectUtils.asMap(
                     "folder", folder,
-                    "resource_type", resourceType,
+                    RESOURCE_TYPE, resourceType,
                     "access_mode", "public",
                     "filename_override", file.getOriginalFilename(),
                     "use_filename", true,
@@ -55,12 +57,9 @@ public class CloudinaryStorageService {
                     file.getSize(),
                     String.valueOf(uploadResult.get("secure_url")),
                     String.valueOf(uploadResult.get("public_id")),
-                    String.valueOf(uploadResult.get("resource_type"))
+                    String.valueOf(uploadResult.get(RESOURCE_TYPE))
             );
-        } catch (IOException exception) {
-            LOGGER.error("Cloudinary upload failed for folder {}", folder, exception);
-            throw new IllegalStateException("Impossible d'envoyér le fichier vers Cloudinary", exception);
-        } catch (RuntimeException exception) {
+        } catch (IOException | RuntimeException exception) {
             LOGGER.error("Cloudinary upload failed for folder {}", folder, exception);
             throw new IllegalStateException("Impossible d'envoyér le fichier vers Cloudinary", exception);
         }
@@ -93,7 +92,7 @@ public class CloudinaryStorageService {
 
     private DownloadedAsset downloadFromUrl(String fileUrl, String fallbackContentType) {
         try {
-            HttpURLConnection connection = (HttpURLConnection) new URL(fileUrl).openConnection();
+            HttpURLConnection connection = (HttpURLConnection) URI.create(fileUrl).toURL().openConnection();
             connection.setConnectTimeout(10000);
             connection.setReadTimeout(30000);
             int responseCode = connection.getResponseCode();
@@ -117,7 +116,7 @@ public class CloudinaryStorageService {
         com.cloudinary.Url url = cloudinary.url()
                 .secure(true)
                 .signed(true)
-                .resourceType(resourceType == null || resourceType.trim().isEmpty() ? "image" : resourceType);
+                .resourceType(resourceType == null || resourceType.trim().isEmpty() ? IMAGE_RESOURCE_TYPE : resourceType);
         String version = versionFromUrl(fileUrl);
         if (version != null) {
             url.version(version);
@@ -128,7 +127,7 @@ public class CloudinaryStorageService {
     private String privateDownloadUrl(String publicId, String resourceType) {
         try {
             return cloudinary.privateDownload(publicId, null, ObjectUtils.asMap(
-                    "resource_type", resourceType == null || resourceType.trim().isEmpty() ? "raw" : resourceType,
+                    RESOURCE_TYPE, resourceType == null || resourceType.trim().isEmpty() ? "raw" : resourceType,
                     "type", "upload",
                     "attachment", false
             ));
@@ -183,7 +182,7 @@ public class CloudinaryStorageService {
         }
         try {
             cloudinary.uploader().destroy(publicId, ObjectUtils.asMap(
-                    "resource_type", resourceType == null || resourceType.trim().isEmpty() ? "image" : resourceType
+                    RESOURCE_TYPE, resourceType == null || resourceType.trim().isEmpty() ? IMAGE_RESOURCE_TYPE : resourceType
             ));
         } catch (Exception ignored) {
             // La suppression applicative ne doit pas échouer si l'asset Cloudinary est déjà absent.
@@ -208,7 +207,7 @@ public class CloudinaryStorageService {
             return "raw";
         }
         if (contentType.startsWith("image/")) {
-            return "image";
+            return IMAGE_RESOURCE_TYPE;
         }
         if (contentType.startsWith("video/")) {
             return "video";

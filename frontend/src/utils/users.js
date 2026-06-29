@@ -1,7 +1,16 @@
 import { userRoleOptions } from "../constants/roles";
 
 export function userRoleLabel(role) {
-  return userRoleOptions.find(([value]) => value === role)?.[1] || role || "-";
+  const roles = parseUserRoles(role);
+  if (roles.length === 0) return "-";
+  return roles.map((item) => userRoleOptions.find(([value]) => value === item)?.[1] || item).join(", ");
+}
+
+export function parseUserRoles(role) {
+  return String(role || "")
+    .split(/[;,|]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 export function userToForm(user) {

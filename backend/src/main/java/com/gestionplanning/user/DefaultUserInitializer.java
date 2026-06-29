@@ -6,6 +6,10 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class DefaultUserInitializer implements CommandLineRunner {
+    private static final String DEFAULT_ADMIN_USERNAME = "fchelbi";
+    private static final String DEFAULT_ADMIN_EMAIL = "f.chalbi@sagetunisia.com";
+    private static final String DEFAULT_ADMIN_INITIAL_SECRET = DEFAULT_ADMIN_USERNAME;
+
     private final AppUserRepository userRepository;
     private final PasswordService passwordService;
 
@@ -21,17 +25,17 @@ public class DefaultUserInitializer implements CommandLineRunner {
 
     private void ensureDefaultAdmin() {
         boolean[] created = { false };
-        AppUser user = userRepository.findByUsername("fchelbi")
-                .orElseGet(() -> userRepository.findByEmail("f.chalbi@sagetunisia.com").orElseGet(() -> {
+        AppUser user = userRepository.findByUsername(DEFAULT_ADMIN_USERNAME)
+                .orElseGet(() -> userRepository.findByEmail(DEFAULT_ADMIN_EMAIL).orElseGet(() -> {
                     created[0] = true;
                     return new AppUser();
                 }));
         user.setFullName(valueOrDefault(user.getFullName(), "Fethi Chelbi"));
-        user.setUsername("fchelbi");
+        user.setUsername(DEFAULT_ADMIN_USERNAME);
         user.setJobTitle(valueOrDefault(user.getJobTitle(), "Engineering Manager"));
-        user.setEmail("f.chalbi@sagetunisia.com");
+        user.setEmail(DEFAULT_ADMIN_EMAIL);
         if (created[0] || user.getPassword() == null || user.getPassword().trim().isEmpty()) {
-            user.setPassword(passwordService.encode("fchelbi"));
+            user.setPassword(passwordService.encode(DEFAULT_ADMIN_INITIAL_SECRET));
         }
         user.setRole(UserRole.ADMIN.name());
         user.setEnabled(true);

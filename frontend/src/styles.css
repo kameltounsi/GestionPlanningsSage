@@ -3066,6 +3066,43 @@ textarea {
   padding: 11px 12px;
 }
 
+.user-role-selects {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 11px 12px;
+}
+
+.user-role-selects legend {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 4px;
+}
+
+.user-role-select-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.user-role-select-row label {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  font-weight: 760;
+  gap: 8px;
+}
+
+.user-role-select-row .ghost-icon {
+  align-self: end;
+  margin-bottom: 2px;
+}
+
 .project-type-toggle {
   align-items: center;
   background: linear-gradient(135deg, #f8fcfa 0%, #e7f2ed 100%);
@@ -5124,6 +5161,20 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   white-space: nowrap;
 }
 
+.meta-grid .meta-grid-type ul {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.meta-grid .meta-grid-type li {
+  overflow-wrap: anywhere;
+}
+
 .meta-grid div:last-child strong {
   white-space: normal;
 }
@@ -6258,6 +6309,18 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   width: auto;
 }
 
+.user-role-list {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  list-style: none;
+  margin: 0;
+  max-width: 180px;
+  min-width: 0;
+  padding: 0;
+}
+
+.user-role-list .status,
 .user-row .status {
   justify-self: end;
   max-width: 140px;

@@ -6,6 +6,7 @@ import com.gestionplanning.ecr.EcrRequest;
 import javax.persistence.*;
 import javax.validation.constraints.NotBlank;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "ecr_document")
@@ -34,7 +35,7 @@ public class EcrDocument {
     private String uploadedBy;
 
     @Column(nullable = false, updatable = false)
-    private LocalDateTime uploadedAt = LocalDateTime.now();
+    private LocalDateTime uploadedAt = LocalDateTime.now(ZoneId.systemDefault());
 
     public Long getId() {
         return id;

@@ -1,4 +1,5 @@
 import React from "react";
+import PropTypes from "prop-types";
 
 export function StatCard({ icon: Icon, label, value, onClick }) {
   const Component = onClick ? "button" : "article";
@@ -14,3 +15,10 @@ export function StatCard({ icon: Icon, label, value, onClick }) {
     </Component>
   );
 }
+
+StatCard.propTypes = {
+  icon: PropTypes.elementType.isRequired,
+  label: PropTypes.string.isRequired,
+  value: PropTypes.oneOfType([PropTypes.number, PropTypes.string]).isRequired,
+  onClick: PropTypes.func
+};

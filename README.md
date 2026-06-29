@@ -138,12 +138,133 @@ docker compose logs -f backend
 docker compose logs -f frontend
 ```
 
+## CI/CD Jenkins
+
+Le pipeline Jenkins est defini dans `Jenkinsfile`. Il execute:
+
+1. Verification Docker
+2. Tests Maven backend
+3. Build frontend Vite
+4. Creation du fichier `.env`
+5. Build des images Docker
+6. Deploiement `docker compose up -d`
+7. Health check backend, Prometheus et Grafana
+
+Credentials Jenkins a creer:
+
+```text
+gestion-planning-postgres-password
+gestion-planning-grafana-password
+gestion-planning-cloudinary-name
+gestion-planning-cloudinary-key
+gestion-planning-cloudinary-secret
+gestion-planning-mail-username
+gestion-planning-mail-password
+```
+
+Important: le Jenkinsfile utilise des commandes `sh`; il doit tourner sur un agent Linux ou un agent Docker compatible.
+
+## Monitoring Grafana / Prometheus
+
+Le backend expose les metriques Spring Boot Actuator pour Prometheus:
+
+```text
+http://localhost:3001/actuator/prometheus
+```
+
+Demarrer l'application avec le monitoring:
+
+```bash
+docker compose up -d --build
+```
+
+URLs:
+
+```text
+Application: http://localhost:3000
+API:         http://localhost:3001/api
+Prometheus: http://localhost:9090
+Grafana:    http://localhost:3002
+SonarQube:  http://localhost:9000
+```
+
+Grafana est deja provisionne avec la datasource Prometheus suivante:
+
+```text
+http://prometheus:9090
+```
+
+Identifiant Grafana par defaut en local:
+
+```text
+admin / admin
+```
+
+En production, changer `GRAFANA_ADMIN_PASSWORD` dans `.env`.
+
+## Analyse Qualite SonarQube
+
+SonarQube analyse le code backend Java et frontend React pour detecter:
+
+- bugs
+- vulnerabilites
+- code smells
+- duplications
+- couverture des tests Java via JaCoCo
+
+Demarrer SonarQube:
+
+```powershell
+docker compose up -d sonar-db sonarqube
+```
+
+Ouvrir SonarQube:
+
+```text
+http://localhost:9000
+```
+
+Identifiants initiaux:
+
+```text
+admin / admin
+```
+
+Au premier login, SonarQube demande de changer le mot de passe. Ensuite, creer un token:
+
+```text
+My Account > Security > Generate Tokens
+```
+
+Lancer une analyse locale complete depuis PowerShell:
+
+```powershell
+.\scripts\sonar-scan.ps1 -Token "VOTRE_TOKEN_SONAR"
+```
+
+Le scan effectue:
+
+1. Demarrage de SonarQube
+2. Tests Maven backend avec rapport JaCoCo
+3. Build frontend
+4. Analyse SonarQube du backend et du frontend
+
+Dans Jenkins, creer aussi ces credentials:
+
+```text
+gestion-planning-sonar-db-password
+gestion-planning-sonar-token
+```
+
 Ouvrir les ports sur la VM:
 
 ```bash
 sudo ufw allow 3000
 sudo ufw allow 3001
 sudo ufw allow 5432
+sudo ufw allow 9090
+sudo ufw allow 3002
+sudo ufw allow 9000
 ```
 
 Interface web: `http://localhost:3000`

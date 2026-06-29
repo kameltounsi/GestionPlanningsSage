@@ -7,9 +7,22 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Component
 public class AuthInterceptor implements HandlerInterceptor {
+    private static final String[] PUBLIC_GET_PATTERNS = {
+            "/api/documents/\\d+/download",
+            "/api/action-assets/\\d+/download",
+            "/api/action-proof-documents/\\d+/download",
+            "/api/actions/\\d+/proof-document",
+            "/api/action-planning-rules/\\d+/proof-document",
+            "/api/action-planning-rules/proof-documents/\\d+/download",
+            "/api/ecr-requests/\\d+/files/(before|after)/download",
+            "/api/chat/messages/\\d+/attachment",
+            "/api/actions/\\d+/evidence"
+    };
+
     private final AuthTokenRepository tokenRepository;
     private final AccessControlService accessControlService;
 
@@ -25,28 +38,23 @@ public class AuthInterceptor implements HandlerInterceptor {
         }
         String authorization = request.getHeader("Authorization");
         if (authorization == null || !authorization.startsWith("Bearer ")) {
-            response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
+            sendError(response, HttpServletResponse.SC_UNAUTHORIZED);
             return false;
         }
         String token = authorization.substring("Bearer ".length()).trim();
-        return tokenRepository.findByTokenAndExpiresAtAfter(token, LocalDateTime.now())
+        return tokenRepository.findByTokenAndExpiresAtAfter(token, LocalDateTime.now(ZoneId.systemDefault()))
                 .filter(authToken -> authToken.getUser().isEnabled())
                 .map(authToken -> {
                     request.setAttribute("authenticatedUser", authToken.getUser());
+                    request.setAttribute("authenticatedUserId", authToken.getUser().getId());
                     if (isAdminOnlyRequest(request) && !accessControlService.isAdmin(authToken.getUser())) {
-                        try {
-                            response.sendError(HttpServletResponse.SC_FORBIDDEN);
-                        } catch (Exception ignored) {
-                        }
+                        sendError(response, HttpServletResponse.SC_FORBIDDEN);
                         return false;
                     }
                     return true;
                 })
                 .orElseGet(() -> {
-                    try {
-                        response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
-                    } catch (Exception ignored) {
-                    }
+                    sendError(response, HttpServletResponse.SC_UNAUTHORIZED);
                     return false;
                 });
     }
@@ -54,46 +62,27 @@ public class AuthInterceptor implements HandlerInterceptor {
     private boolean isPublicRequest(HttpServletRequest request) {
         String path = request.getRequestURI();
         String method = request.getMethod();
-        if (HttpMethod.OPTIONS.matches(method)) {
-            return true;
+        return HttpMethod.OPTIONS.matches(method)
+                || "/api/auth/login".equals(path)
+                || HttpMethod.POST.matches(method) && path.matches("/api/auth/password-reset/(request|verify|confirm)")
+                || HttpMethod.GET.matches(method) && ("/api/events".equals(path) || "/ws/events".equals(path) || matchesAny(path, PUBLIC_GET_PATTERNS));
+    }
+
+    private void sendError(HttpServletResponse response, int status) {
+        try {
+            response.sendError(status);
+        } catch (Exception ignored) {
+            // Best-effort operation: the request will still be rejected.
         }
-        if ("/api/auth/login".equals(path)) {
-            return true;
+    }
+
+    private boolean matchesAny(String path, String[] patterns) {
+        for (String pattern : patterns) {
+            if (path.matches(pattern)) {
+                return true;
+            }
         }
-        if (HttpMethod.POST.matches(method) && path.matches("/api/auth/password-reset/(request|verify|confirm)")) {
-            return true;
-        }
-        if (HttpMethod.GET.matches(method) && "/api/events".equals(path)) {
-            return true;
-        }
-        if (HttpMethod.GET.matches(method) && "/ws/events".equals(path)) {
-            return true;
-        }
-        if (HttpMethod.GET.matches(method) && path.matches("/api/documents/\\d+/download")) {
-            return true;
-        }
-        if (HttpMethod.GET.matches(method) && path.matches("/api/action-assets/\\d+/download")) {
-            return true;
-        }
-        if (HttpMethod.GET.matches(method) && path.matches("/api/action-proof-documents/\\d+/download")) {
-            return true;
-        }
-        if (HttpMethod.GET.matches(method) && path.matches("/api/actions/\\d+/proof-document")) {
-            return true;
-        }
-        if (HttpMethod.GET.matches(method) && path.matches("/api/action-planning-rules/\\d+/proof-document")) {
-            return true;
-        }
-        if (HttpMethod.GET.matches(method) && path.matches("/api/action-planning-rules/proof-documents/\\d+/download")) {
-            return true;
-        }
-        if (HttpMethod.GET.matches(method) && path.matches("/api/ecr-requests/\\d+/files/(before|after)/download")) {
-            return true;
-        }
-        if (HttpMethod.GET.matches(method) && path.matches("/api/chat/messages/\\d+/attachment")) {
-            return true;
-        }
-        return HttpMethod.GET.matches(method) && path.matches("/api/actions/\\d+/evidence");
+        return false;
     }
 
     private boolean isAdminOnlyRequest(HttpServletRequest request) {
@@ -108,7 +97,7 @@ public class AuthInterceptor implements HandlerInterceptor {
         if (path.matches("/api/users(/.*)?")) {
             return true;
         }
-        if (path.matches("/api/projects(/.*)?")) {
+        if (path.matches("/api/projects(/.*)?") && !HttpMethod.PUT.matches(method)) {
             return true;
         }
         if (path.matches("/api/preferentials/(clients|products|roles)(/.*)?")) {

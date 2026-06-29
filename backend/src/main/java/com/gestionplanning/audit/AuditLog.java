@@ -2,6 +2,7 @@ package com.gestionplanning.audit;
 
 import javax.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "audit_log")
@@ -11,7 +12,7 @@ public class AuditLog {
     private Long id;
 
     @Column(nullable = false)
-    private LocalDateTime occurredAt = LocalDateTime.now();
+    private LocalDateTime occurredAt = LocalDateTime.now(ZoneId.systemDefault());
 
     private Long actorId;
     private String actorName;

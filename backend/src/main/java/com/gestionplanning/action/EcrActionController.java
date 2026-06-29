@@ -7,6 +7,7 @@ import com.gestionplanning.ecr.PhaseValidationRequestRepository;
 import com.gestionplanning.ecr.PhaseValidationStatus;
 import com.gestionplanning.audit.AuditLogService;
 import com.gestionplanning.auth.AccessControlService;
+import com.gestionplanning.auth.AuthenticatedUserService;
 import com.gestionplanning.storage.CloudinaryStorageService;
 import com.gestionplanning.storage.CloudinaryStorageService.DownloadedAsset;
 import com.gestionplanning.storage.StoredAsset;
@@ -22,6 +23,7 @@ import javax.validation.Valid;
 import java.net.URI;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -33,6 +35,8 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api")
 public class EcrActionController {
+    private static final String MODIFICATION_DETAIL_SEPARATOR = " - Modification: ";
+
     private final EcrActionRepository actionRepository;
     private final EcrActionEvidenceRepository evidenceRepository;
     private final EcrActionAssetRepository assetRepository;
@@ -46,7 +50,9 @@ public class EcrActionController {
     private final AuditLogService auditLogService;
     private final ActionStandardSuggestionRepository suggestionRepository;
     private final PhaseValidationRequestRepository validationRepository;
+    private final AuthenticatedUserService authenticatedUserService;
 
+    @SuppressWarnings("java:S107")
     public EcrActionController(EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
                                EcrActionAssetRepository assetRepository,
                                EcrActionProofDocumentRepository proofDocumentRepository,
@@ -54,7 +60,8 @@ public class EcrActionController {
                                EcrTemplateService templateService, CloudinaryStorageService storageService,
                                ActionAssigneeResolver assigneeResolver, AccessControlService accessControlService,
                                AuditLogService auditLogService, ActionStandardSuggestionRepository suggestionRepository,
-                               PhaseValidationRequestRepository validationRepository) {
+                               PhaseValidationRequestRepository validationRepository,
+                               AuthenticatedUserService authenticatedUserService) {
         this.actionRepository = actionRepository;
         this.evidenceRepository = evidenceRepository;
         this.assetRepository = assetRepository;
@@ -68,25 +75,27 @@ public class EcrActionController {
         this.auditLogService = auditLogService;
         this.suggestionRepository = suggestionRepository;
         this.validationRepository = validationRepository;
+        this.authenticatedUserService = authenticatedUserService;
     }
 
     @GetMapping("/actions")
-    public List<EcrAction> list(@RequestParam(required = false) Boolean late) {
+    public List<EcrActionDto> list(@RequestParam(required = false) Boolean late) {
         if (Boolean.TRUE.equals(late)) {
-            List<EcrAction> actions = actionRepository.findByDeadlineBeforeAndStatusNotInOrderByDeadlineAsc(LocalDate.now(), Arrays.asList(ActionStatus.DONE, ActionStatus.DONE_LATE));
+            List<EcrAction> actions = actionRepository.findByDeadlineBeforeAndStatusNotInOrderByDeadlineAsc(LocalDate.now(ZoneId.systemDefault()), Arrays.asList(ActionStatus.DONE, ActionStatus.DONE_LATE));
             planningService.refreshActionStatuses(actions);
-            return enrichActions(actionRepository.saveAll(actions).stream()
+            return toDtos(enrichActions(actionRepository.saveAll(actions).stream()
                     .filter(action -> action.getStatus() != ActionStatus.DONE && action.getStatus() != ActionStatus.DONE_LATE)
-                    .collect(Collectors.toList()));
+                    .collect(Collectors.toList())));
         }
         List<EcrAction> actions = actionRepository.findAll();
         planningService.refreshActionStatuses(actions);
-        return enrichActions(actionRepository.saveAll(actions));
+        return toDtos(enrichActions(actionRepository.saveAll(actions)));
     }
 
     @GetMapping("/ecr-requests/{requestId}/actions")
-    public ResponseEntity<List<EcrAction>> listByRequest(@PathVariable Long requestId, @RequestParam(required = false) EcrStage stage,
-                                                         @RequestAttribute("authenticatedUser") AppUser user) {
+    public ResponseEntity<List<EcrActionDto>> listByRequest(@PathVariable Long requestId, @RequestParam(required = false) EcrStage stage,
+                                                         @RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
         Optional<com.gestionplanning.ecr.EcrRequest> optionalRequest = requestRepository.findById(requestId);
         if (!optionalRequest.isPresent()) {
             return ResponseEntity.notFound().build();
@@ -98,87 +107,98 @@ public class EcrActionController {
         templateService.ensureActionsFor(request);
         planningService.recalculateRequest(request);
         List<EcrAction> actions = actionRepository.findByRequest_IdOrderByStartDateAscEndDateAscDeadlineAscCreatedAtAscIdAsc(requestId);
+        boolean admin = accessControlService.isAdmin(user);
+        if (!admin) {
+            if (stage != null && !canViewStage(request, stage)) {
+                return ResponseEntity.ok(java.util.Collections.<EcrActionDto>emptyList());
+            }
+            actions = actions.stream()
+                    .filter(action -> canViewStage(request, action.getStage()))
+                    .collect(Collectors.toList());
+        }
         if (!accessControlService.canSeeAllActions(user, request)) {
             actions = visibleActionsForUser(actions, user);
-            if (stage != null) {
-                if (!canViewStage(request, stage)) {
-                    return ResponseEntity.ok(java.util.Collections.<EcrAction>emptyList());
-                }
-                actions = actions.stream()
-                        .filter(action -> action.getStage() == stage)
-                        .collect(Collectors.toList());
-            }
-        } else if (stage != null) {
+        }
+        if (stage != null) {
             actions = actions.stream()
                     .filter(action -> action.getStage() == stage)
                     .collect(Collectors.toList());
         }
-        return ResponseEntity.ok(enrichActions(actions));
+        return ResponseEntity.ok(toDtos(enrichActions(actions)));
     }
 
     @PostMapping("/ecr-requests/{requestId}/actions")
     @Transactional
-    public ResponseEntity<EcrAction> create(@PathVariable Long requestId, @Valid @RequestBody EcrAction action,
-                                            @RequestAttribute("authenticatedUser") AppUser user) {
+    @SuppressWarnings("java:S3776")
+    public ResponseEntity<EcrActionDto> create(@PathVariable Long requestId, @Valid @RequestBody EcrActionDto actionDto,
+                                            @RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
+        EcrAction action = actionDto.toEntity();
         return requestRepository.findById(requestId)
                 .map(request -> {
                     if (isTerminalRequest(request)) {
-                        return ResponseEntity.status(403).<EcrAction>build();
+                        return ResponseEntity.status(403).<EcrActionDto>build();
                     }
                     boolean admin = accessControlService.isAdmin(user);
                     boolean pilot = accessControlService.isRequestPilot(user, request);
                     if (!admin && !pilot) {
-                        return ResponseEntity.status(403).<EcrAction>build();
+                        return ResponseEntity.status(403).<EcrActionDto>build();
                     }
                     action.setRoutineAction(false);
                     action.setRecurrenceIntervalDays(null);
                     EcrStage actionStage = action.getStage() == null ? request.getCurrentStage() : action.getStage();
                     if (request.getCurrentStage() == EcrStage.CANCELLED && actionStage != EcrStage.CANCELLED) {
-                        return ResponseEntity.status(403).<EcrAction>build();
+                        return ResponseEntity.status(403).<EcrActionDto>build();
                     }
                     if (isPhaseApproved(requestId, actionStage)) {
-                        return ResponseEntity.status(403).<EcrAction>build();
+                        return ResponseEntity.status(403).<EcrActionDto>build();
                     }
                     if (isDone(action) && requiresEvidence(action)) {
-                        return ResponseEntity.badRequest().<EcrAction>build();
+                        return ResponseEntity.badRequest().<EcrActionDto>build();
                     }
                     if (!hasText(action.getResponsible()) || !hasText(action.getValidator())) {
-                        return ResponseEntity.badRequest().<EcrAction>build();
+                        return ResponseEntity.badRequest().<EcrActionDto>build();
                     }
                     if (!isActionStartBeforeNextPhase(request, action, null)) {
-                        return ResponseEntity.status(422).<EcrAction>build();
+                        return ResponseEntity.status(422).<EcrActionDto>build();
                     }
                     action.setRequest(request);
                     action.setStage(actionStage);
                     action.setDurationOverridden(true);
                     if (!isValidPreviousDependency(action, action.getDependsOnActionId(), actionStage)) {
-                        return ResponseEntity.status(422).<EcrAction>build();
+                        return ResponseEntity.status(422).<EcrActionDto>build();
                     }
                     if (isDone(action) && !isDependencyCompleted(action)) {
-                        return ResponseEntity.badRequest().<EcrAction>build();
+                        return ResponseEntity.badRequest().<EcrActionDto>build();
                     }
                     action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
                     if (isDone(action) && !accessControlService.canCompleteAction(user, action)) {
-                        return ResponseEntity.status(403).<EcrAction>build();
+                        return ResponseEntity.status(403).<EcrActionDto>build();
                     }
-                    action.setValidatorRole(action.getValidator());
-                    action.setValidator(action.getValidator());
+                    String validatorRole = action.getValidator();
+                    action.setValidatorRole(validatorRole);
+                    action.setValidator(assigneeResolver.resolveOptional(request, validatorRole));
+                    if (isDone(action)) {
+                        freezeActionAssignees(action);
+                    }
                     syncFinalizationDate(action, action);
-                    EcrAction saved;
-                    saved = actionRepository.save(action);
+                    EcrAction saved = actionRepository.save(action);
                     if (!admin && pilot) {
                         suggestionRepository.save(suggestionFor(saved, requestLabel(request), displayName(user), request.isNewVersion()));
                     }
                     planningService.recalculateRequest(request);
-                    return ResponseEntity.created(URI.create("/api/actions/" + saved.getId())).body(enrichAction(saved));
+                    return ResponseEntity.created(URI.create("/api/actions/" + saved.getId())).body(toDto(enrichAction(saved)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @PutMapping("/actions/{id}")
     @Transactional
-    public ResponseEntity<EcrAction> update(@PathVariable Long id, @Valid @RequestBody EcrAction updatedAction,
-                                            @RequestAttribute("authenticatedUser") AppUser user) {
+    @SuppressWarnings("java:S3776")
+    public ResponseEntity<EcrActionDto> update(@PathVariable Long id, @Valid @RequestBody EcrActionDto updatedActionDto,
+                                            @RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
+        EcrAction updatedAction = updatedActionDto.toEntity();
         return actionRepository.findById(id)
                 .filter(this::canMutateAction)
                 .filter(action -> accessControlService.canManageAction(user, action) || canUpdateDuration(user, action))
@@ -187,7 +207,7 @@ public class EcrActionController {
                     Integer previousDuration = action.getWorkDurationDays();
                     LocalDate previousEndDate = action.getEndDate();
                     if (completingAction && !accessControlService.canCompleteAction(user, action)) {
-                        return ResponseEntity.status(403).<EcrAction>build();
+                        return ResponseEntity.status(403).<EcrActionDto>build();
                     }
                     if (!accessControlService.isAdmin(user)) {
                         if (!accessControlService.canManageAction(user, action) && canUpdateDuration(user, action)) {
@@ -196,27 +216,28 @@ public class EcrActionController {
                         return updateActionProgress(action, updatedAction, user);
                     }
                     if (isReopeningAction(action, updatedAction) && !isActionInCurrentPhase(action)) {
-                        return ResponseEntity.badRequest().<EcrAction>build();
+                        return ResponseEntity.badRequest().<EcrActionDto>build();
                     }
                     if (!isActionStartBeforeNextPhase(action.getRequest(), updatedAction, action.getId())) {
-                        return ResponseEntity.status(422).<EcrAction>build();
+                        return ResponseEntity.status(422).<EcrActionDto>build();
                     }
                     action.setTitle(updatedAction.getTitle());
                     action.setDescription(updatedAction.getDescription());
                     action.setTopicRisk(updatedAction.getTopicRisk());
                     action.setResponsible(assigneeResolver.resolve(action.getRequest(), updatedAction.getResponsible()));
-                    action.setValidatorRole(updatedAction.getValidatorRole() == null || updatedAction.getValidatorRole().trim().isEmpty() ? updatedAction.getValidator() : updatedAction.getValidatorRole());
-                    action.setValidator(updatedAction.getValidator());
+                    String validatorRole = updatedAction.getValidatorRole() == null || updatedAction.getValidatorRole().trim().isEmpty() ? updatedAction.getValidator() : updatedAction.getValidatorRole();
+                    action.setValidatorRole(validatorRole);
+                    action.setValidator(assigneeResolver.resolveOptional(action.getRequest(), validatorRole));
                     action.setCriticality(updatedAction.getCriticality());
                     action.setExpectedEvidence(updatedAction.getExpectedEvidence());
                     action.setEvidenceRequired(updatedAction.isEvidenceRequired());
                     action.setEvidence(updatedAction.getEvidence());
                     action.setProofDocument(updatedAction.getProofDocument());
                     if (isDone(updatedAction) && requiresEvidence(updatedAction) && !hasEvidence(action)) {
-                        return ResponseEntity.badRequest().<EcrAction>build();
+                        return ResponseEntity.badRequest().<EcrActionDto>build();
                     }
                     if (isDone(updatedAction) && !isDependencyCompleted(action)) {
-                        return ResponseEntity.badRequest().<EcrAction>build();
+                        return ResponseEntity.badRequest().<EcrActionDto>build();
                     }
                     action.setChecked(updatedAction.isChecked());
                     action.setDeadline(updatedAction.getDeadline());
@@ -229,17 +250,20 @@ public class EcrActionController {
                     action.setDurationOverridden(action.isDurationOverridden() || !Objects.equals(defaultDuration(previousDuration), defaultDuration(updatedAction.getWorkDurationDays())));
                     EcrStage updatedStage = updatedAction.getStage() == null ? action.getStage() : updatedAction.getStage();
                     if (!isValidPreviousDependency(action, updatedAction.getDependsOnActionId(), updatedStage)) {
-                        return ResponseEntity.status(422).<EcrAction>build();
+                        return ResponseEntity.status(422).<EcrActionDto>build();
                     }
                     action.setDependsOnActionId(updatedAction.getDependsOnActionId());
                     action.setDependencyAnchor(updatedAction.getDependencyAnchor());
                     action.setStage(updatedStage);
                     if (isDone(updatedAction) && !isDependencyCompleted(action)) {
-                        return ResponseEntity.badRequest().<EcrAction>build();
+                        return ResponseEntity.badRequest().<EcrActionDto>build();
                     }
                     action.setStatus(updatedAction.getStatus());
                     action.setClosedDate(updatedAction.getClosedDate());
                     syncFinalizationDate(action, updatedAction);
+                    if (isDone(action)) {
+                        freezeActionAssignees(action);
+                    }
                     syncValidationAfterProgressChange(action);
                     action.setComment(updatedAction.getComment());
                     action.setDossierReview(updatedAction.getDossierReview());
@@ -248,12 +272,15 @@ public class EcrActionController {
                     if (completingAction) {
                         recordActionCompleted(user, saved);
                     }
-                    return ResponseEntity.ok(enrichAction(saved));
+                    return ResponseEntity.ok(toDto(enrichAction(saved)));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
 
-    private ResponseEntity<EcrAction> updateActionProgress(EcrAction action, EcrAction updatedAction, AppUser user) {
+    private ResponseEntity<EcrActionDto> updateActionProgress(EcrAction action, EcrAction updatedAction, AppUser user) {
+        if (updatedAction == null) {
+            return ResponseEntity.badRequest().build();
+        }
         boolean completingAction = isCompletingAction(action, updatedAction);
         Integer previousDuration = action.getWorkDurationDays();
         LocalDate previousEndDate = action.getEndDate();
@@ -277,16 +304,19 @@ public class EcrActionController {
             action.setDurationOverridden(action.isDurationOverridden() || !Objects.equals(defaultDuration(previousDuration), defaultDuration(updatedAction.getWorkDurationDays())));
         }
         syncFinalizationDate(action, updatedAction);
+        if (isDone(action)) {
+            freezeActionAssignees(action);
+        }
         syncValidationAfterProgressChange(action);
         EcrAction saved = actionRepository.save(action);
         recalculateAfterActionChange(saved, previousDuration, previousEndDate);
         if (completingAction) {
             recordActionCompleted(user, saved);
         }
-        return ResponseEntity.ok(enrichAction(saved));
+        return ResponseEntity.ok(toDto(enrichAction(saved)));
     }
 
-    private ResponseEntity<EcrAction> updateActionDuration(EcrAction action, EcrAction updatedAction) {
+    private ResponseEntity<EcrActionDto> updateActionDuration(EcrAction action, EcrAction updatedAction) {
         if (!canChangeDuration(action)) {
             return ResponseEntity.badRequest().build();
         }
@@ -296,7 +326,7 @@ public class EcrActionController {
         action.setDurationOverridden(true);
         EcrAction saved = actionRepository.save(action);
         planningService.recalculateAfterDurationChange(saved, previousDuration, previousEndDate);
-        return ResponseEntity.ok(enrichAction(saved));
+        return ResponseEntity.ok(toDto(enrichAction(saved)));
     }
 
     private void recalculateAfterActionChange(EcrAction saved, Integer previousDuration, LocalDate previousEndDate) {
@@ -308,8 +338,9 @@ public class EcrActionController {
     }
 
     @PostMapping(value = "/actions/{id}/evidence", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<EcrAction> uploadEvidence(@PathVariable Long id, @RequestParam("file") MultipartFile file,
-                                                    @RequestAttribute("authenticatedUser") AppUser user) {
+    public ResponseEntity<EcrActionDto> uploadEvidence(@PathVariable Long id, @RequestParam("file") MultipartFile file,
+                                                    @RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
         if (file.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
@@ -333,14 +364,15 @@ public class EcrActionController {
                     action.setEvidencePublicId(asset.getPublicId());
                     action.setEvidenceResourceType(asset.getResourceType());
                     action.setEvidence(asset.getFileName());
-                    return ResponseEntity.ok(enrichAction(actionRepository.save(action)));
+                    return ResponseEntity.ok(toDto(enrichAction(actionRepository.save(action))));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
 
     @PostMapping("/actions/{id}/evidence-link")
-    public ResponseEntity<EcrAction> addEvidenceLink(@PathVariable Long id, @RequestBody LinkPayload payload,
-                                                     @RequestAttribute("authenticatedUser") AppUser user) {
+    public ResponseEntity<EcrActionDto> addEvidenceLink(@PathVariable Long id, @RequestBody LinkPayload payload,
+                                                     @RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
         String url = normalizeSharedLink(payload == null ? null : payload.getUrl());
         if (url == null) {
             return ResponseEntity.badRequest().build();
@@ -365,14 +397,15 @@ public class EcrActionController {
                     action.setEvidencePublicId(null);
                     action.setEvidenceResourceType("link");
                     action.setEvidence(actionAsset.getFileName());
-                    return ResponseEntity.ok(enrichAction(actionRepository.save(action)));
+                    return ResponseEntity.ok(toDto(enrichAction(actionRepository.save(action))));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
 
     @PostMapping(value = "/actions/{id}/proof-document", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<EcrAction> uploadProofDocument(@PathVariable Long id, @RequestParam("file") MultipartFile file,
-                                                         @RequestAttribute("authenticatedUser") AppUser user) {
+    public ResponseEntity<EcrActionDto> uploadProofDocument(@PathVariable Long id, @RequestParam("file") MultipartFile file,
+                                                         @RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
         if (file.isEmpty()) {
             return ResponseEntity.badRequest().build();
         }
@@ -399,14 +432,15 @@ public class EcrActionController {
                     action.setEvidenceRequired(true);
                     EcrAction saved = actionRepository.save(action);
                     syncPendingSuggestionProofDocument(saved);
-                    return ResponseEntity.ok(enrichAction(saved));
+                    return ResponseEntity.ok(toDto(enrichAction(saved)));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
 
     @PostMapping("/actions/{id}/proof-document-link")
-    public ResponseEntity<EcrAction> addProofDocumentLink(@PathVariable Long id, @RequestBody LinkPayload payload,
-                                                          @RequestAttribute("authenticatedUser") AppUser user) {
+    public ResponseEntity<EcrActionDto> addProofDocumentLink(@PathVariable Long id, @RequestBody LinkPayload payload,
+                                                          @RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
         String url = normalizeSharedLink(payload == null ? null : payload.getUrl());
         if (url == null) {
             return ResponseEntity.badRequest().build();
@@ -434,14 +468,14 @@ public class EcrActionController {
                     action.setEvidenceRequired(true);
                     EcrAction saved = actionRepository.save(action);
                     syncPendingSuggestionProofDocument(saved);
-                    return ResponseEntity.ok(enrichAction(saved));
+                    return ResponseEntity.ok(toDto(enrichAction(saved)));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
 
     @GetMapping("/actions/{id}/evidence")
-    public ResponseEntity<?> downloadEvidence(@PathVariable Long id) {
-        return actionRepository.findById(id).<ResponseEntity<?>>map(action -> {
+    public ResponseEntity<Object> downloadEvidence(@PathVariable Long id) {
+        return actionRepository.findById(id).<ResponseEntity<Object>>map(action -> {
             if (isExternalLink(action.getEvidenceFileUrl(), action.getEvidencePublicId(), action.getEvidenceResourceType())) {
                 return ResponseEntity.status(302).location(URI.create(action.getEvidenceFileUrl())).build();
             }
@@ -453,7 +487,7 @@ public class EcrActionController {
                             .body(asset.getData());
             }
             return evidenceRepository.findById(id)
-                    .<ResponseEntity<?>>map(evidence -> ResponseEntity.ok()
+                    .<ResponseEntity<Object>>map(evidence -> ResponseEntity.ok()
                             .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(action.getEvidenceFileName(), action.getEvidenceContentType()))
                             .contentType(MediaType.parseMediaType(action.getEvidenceContentType() == null ? MediaType.APPLICATION_OCTET_STREAM_VALUE : action.getEvidenceContentType()))
                             .body(evidence.getData()))
@@ -462,8 +496,8 @@ public class EcrActionController {
     }
 
     @GetMapping("/actions/{id}/proof-document")
-    public ResponseEntity<?> downloadProofDocument(@PathVariable Long id) {
-        return actionRepository.findById(id).<ResponseEntity<?>>map(action -> {
+    public ResponseEntity<Object> downloadProofDocument(@PathVariable Long id) {
+        return actionRepository.findById(id).<ResponseEntity<Object>>map(action -> {
             if (action.getProofDocumentFileUrl() == null || action.getProofDocumentFileUrl().trim().isEmpty()) {
                 return ResponseEntity.notFound().build();
             }
@@ -485,9 +519,9 @@ public class EcrActionController {
     }
 
     @GetMapping("/action-proof-documents/{proofDocumentId}/download")
-    public ResponseEntity<?> downloadActionProofDocument(@PathVariable Long proofDocumentId) {
+    public ResponseEntity<Object> downloadActionProofDocument(@PathVariable Long proofDocumentId) {
         return proofDocumentRepository.findById(proofDocumentId)
-                .<ResponseEntity<?>>map(proofDocument -> {
+                .<ResponseEntity<Object>>map(proofDocument -> {
                     if (isExternalLink(proofDocument.getFileUrl(), proofDocument.getPublicId(), proofDocument.getResourceType())) {
                         return ResponseEntity.status(302).location(URI.create(proofDocument.getFileUrl())).build();
                     }
@@ -508,8 +542,9 @@ public class EcrActionController {
 
     @DeleteMapping("/actions/{id}/proof-document")
     @Transactional
-    public ResponseEntity<EcrAction> deleteProofDocument(@PathVariable Long id,
-                                                         @RequestAttribute("authenticatedUser") AppUser user) {
+    public ResponseEntity<EcrActionDto> deleteProofDocument(@PathVariable Long id,
+                                                         @RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
         return actionRepository.findById(id)
                 .filter(action -> accessControlService.canManageAction(user, action) && canMutateAction(action))
                 .map(action -> {
@@ -518,15 +553,16 @@ public class EcrActionController {
                             .forEach(proofDocument -> storageService.deleteQuietly(proofDocument.getPublicId(), proofDocument.getResourceType()));
                     proofDocumentRepository.deleteByAction_Id(id);
                     clearProofDocument(action);
-                    return ResponseEntity.ok(enrichAction(actionRepository.save(action)));
+                    return ResponseEntity.ok(toDto(enrichAction(actionRepository.save(action))));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
 
     @DeleteMapping("/action-proof-documents/{proofDocumentId}")
     @Transactional
-    public ResponseEntity<EcrAction> deleteActionProofDocument(@PathVariable Long proofDocumentId,
-                                                               @RequestAttribute("authenticatedUser") AppUser user) {
+    public ResponseEntity<EcrActionDto> deleteActionProofDocument(@PathVariable Long proofDocumentId,
+                                                               @RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
         return proofDocumentRepository.findById(proofDocumentId)
                 .filter(proofDocument -> accessControlService.canManageAction(user, proofDocument.getAction()) && canMutateAction(proofDocument.getAction()))
                 .map(proofDocument -> {
@@ -535,15 +571,15 @@ public class EcrActionController {
                     proofDocumentRepository.delete(proofDocument);
                     proofDocumentRepository.flush();
                     syncLatestProofDocumentMetadata(action);
-                    return ResponseEntity.ok(enrichAction(actionRepository.save(action)));
+                    return ResponseEntity.ok(toDto(enrichAction(actionRepository.save(action))));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
 
     @GetMapping("/action-assets/{assetId}/download")
-    public ResponseEntity<?> downloadActionAsset(@PathVariable Long assetId) {
+    public ResponseEntity<Object> downloadActionAsset(@PathVariable Long assetId) {
         return assetRepository.findById(assetId)
-                .<ResponseEntity<?>>map(actionAsset -> {
+                .<ResponseEntity<Object>>map(actionAsset -> {
                     if (isExternalLink(actionAsset.getFileUrl(), actionAsset.getPublicId(), actionAsset.getResourceType())) {
                         return ResponseEntity.status(302).location(URI.create(actionAsset.getFileUrl())).build();
                     }
@@ -562,8 +598,9 @@ public class EcrActionController {
 
     @DeleteMapping("/action-assets/{assetId}")
     @Transactional
-    public ResponseEntity<EcrAction> deleteActionAsset(@PathVariable Long assetId,
-                                                       @RequestAttribute("authenticatedUser") AppUser user) {
+    public ResponseEntity<EcrActionDto> deleteActionAsset(@PathVariable Long assetId,
+                                                       @RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
         return assetRepository.findById(assetId)
                 .filter(asset -> accessControlService.canManageAction(user, asset.getAction()) && canMutateAction(asset.getAction()))
                 .map(asset -> {
@@ -572,14 +609,15 @@ public class EcrActionController {
                     assetRepository.delete(asset);
                     assetRepository.flush();
                     syncLatestEvidenceMetadata(action);
-                    return ResponseEntity.ok(enrichAction(actionRepository.save(action)));
+                    return ResponseEntity.ok(toDto(enrichAction(actionRepository.save(action))));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
 
     @DeleteMapping("/actions/{id}")
     @Transactional
-    public ResponseEntity<Void> delete(@PathVariable Long id, @RequestAttribute("authenticatedUser") AppUser user) {
+    public ResponseEntity<Void> delete(@PathVariable Long id, @RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
         return actionRepository.findById(id).map(action -> {
             if (!canDeleteAction(user, action)) {
                 return ResponseEntity.status(403).<Void>build();
@@ -611,8 +649,7 @@ public class EcrActionController {
         if (accessControlService.canManageAction(user, action)) {
             return true;
         }
-        return accessControlService.isRequestPilot(user, action == null ? null : action.getRequest())
-                && canDeleteActionState(action);
+        return accessControlService.isRequestPilot(user, action.getRequest());
     }
 
     private boolean canDeleteActionState(EcrAction action) {
@@ -672,7 +709,23 @@ public class EcrActionController {
         if (stage == null) {
             return true;
         }
+        if (request != null && request.getCurrentStage() == EcrStage.CANCELLED) {
+            return isStageInCancelledHistory(request, stage);
+        }
         return stage == request.getCurrentStage() || isPhaseApproved(request.getId(), stage);
+    }
+
+    private boolean isStageInCancelledHistory(com.gestionplanning.ecr.EcrRequest request, EcrStage stage) {
+        if (request == null || stage == null || request.getCurrentStage() != EcrStage.CANCELLED) {
+            return false;
+        }
+        if (stage == EcrStage.CANCELLED) {
+            return true;
+        }
+        List<EcrStage> stages = EcrStage.allowedStages(request.isNewVersion());
+        int cancelledFromIndex = stages.indexOf(request.getCancelledFromStage());
+        int stageIndex = stages.indexOf(stage);
+        return cancelledFromIndex >= 0 && stageIndex >= 0 && stageIndex <= cancelledFromIndex;
     }
 
     private boolean canUpdateDuration(AppUser user, EcrAction action) {
@@ -776,7 +829,10 @@ public class EcrActionController {
     }
 
     private boolean isDone(EcrAction action) {
-        return action != null && (action.isChecked() || action.getStatus() == ActionStatus.DONE || action.getStatus() == ActionStatus.DONE_LATE);
+        if (action == null) {
+            return false;
+        }
+        return action.isChecked() || action.getStatus() == ActionStatus.DONE || action.getStatus() == ActionStatus.DONE_LATE;
     }
 
     private boolean isReopeningAction(EcrAction currentAction, EcrAction updatedAction) {
@@ -806,6 +862,9 @@ public class EcrActionController {
     }
 
     private boolean isDependencyBeforeAction(EcrAction dependency, EcrAction action) {
+        if (dependency == null) {
+            return false;
+        }
         if (action.getId() == null) {
             return true;
         }
@@ -868,7 +927,7 @@ public class EcrActionController {
     }
 
     private LocalDate estimatedStartForNewLocalAction(com.gestionplanning.ecr.EcrRequest request, EcrStage stage, List<EcrAction> requestActions) {
-        LocalDate fallbackStart = request.getReceptionDate() == null ? LocalDate.now() : request.getReceptionDate();
+        LocalDate fallbackStart = request.getReceptionDate() == null ? LocalDate.now(ZoneId.systemDefault()) : request.getReceptionDate();
         List<EcrStage> stages = EcrStage.allowedStages(request.isNewVersion());
         LocalDate phaseStart = fallbackStart;
         for (EcrStage currentStage : stages) {
@@ -910,7 +969,7 @@ public class EcrActionController {
                 "ACTION_TERMINEE",
                 "modification",
                 modificationName,
-                "Action marquée terminée: " + actionTitle + " - Modification: " + modificationName + " - Projet: " + projectName
+                "Action marquée terminée: " + actionTitle + MODIFICATION_DETAIL_SEPARATOR + modificationName + " - Projet: " + projectName
         );
     }
 
@@ -980,14 +1039,34 @@ public class EcrActionController {
     }
 
     private void syncFinalizationDate(EcrAction target, EcrAction source) {
+        if (target == null || source == null) {
+            return;
+        }
         if (isDone(target)) {
-            target.setFinalizationDate(source.getFinalizationDate() == null ? LocalDateTime.now() : source.getFinalizationDate());
+            target.setFinalizationDate(source.getFinalizationDate() == null ? LocalDateTime.now(ZoneId.systemDefault()) : source.getFinalizationDate());
         } else {
             target.setFinalizationDate(null);
         }
     }
 
+    private void freezeActionAssignees(EcrAction action) {
+        if (action == null || action.getRequest() == null) {
+            return;
+        }
+        if (hasText(action.getResponsible())) {
+            action.setResponsible(assigneeResolver.resolve(action.getRequest(), action.getResponsible()));
+        }
+        String validatorRole = hasText(action.getValidatorRole()) ? action.getValidatorRole() : action.getValidator();
+        if (hasText(validatorRole)) {
+            action.setValidatorRole(validatorRole);
+            action.setValidator(assigneeResolver.resolveOptional(action.getRequest(), validatorRole));
+        }
+    }
+
     private void syncValidationAfterProgressChange(EcrAction action) {
+        if (action == null) {
+            return;
+        }
         if (isDone(action)) {
             return;
         }
@@ -1012,11 +1091,42 @@ public class EcrActionController {
                 .collect(Collectors.toList());
     }
 
+    private List<EcrActionDto> toDtos(List<EcrAction> actions) {
+        return actions.stream()
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
+    private EcrActionDto toDto(EcrAction action) {
+        return EcrActionDto.from(action);
+    }
+
     private EcrAction enrichAction(EcrAction action) {
         if (action != null) {
-            action.setValidatorDisplayName(assigneeResolver.displayFor(action.getRequest(), action.getValidatorRole(), action.getValidator()));
+            action.setValidatorDisplayName(historicalAction(action)
+                    ? firstText(action.getValidationReviewedBy(), action.getValidator(), assigneeResolver.displayFor(action.getRequest(), action.getValidatorRole(), action.getValidator()))
+                    : assigneeResolver.displayFor(action.getRequest(), action.getValidatorRole(), action.getValidator()));
         }
         return action;
+    }
+
+    private boolean historicalAction(EcrAction action) {
+        if (action == null) {
+            return false;
+        }
+        return isDone(action) || action.getValidationStatus() == ActionValidationStatus.APPROVED;
+    }
+
+    private String firstText(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (hasText(value)) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     private List<EcrAction> visibleActionsForUser(List<EcrAction> actions, AppUser user) {
@@ -1031,22 +1141,21 @@ public class EcrActionController {
             changed = false;
             Set<Long> currentVisibleIds = new HashSet<>(visibleIds);
             for (EcrAction action : enrichedActions) {
-                Long actionId = action.getId();
-                Long dependencyId = action.getDependsOnActionId();
-                if (actionId == null || dependencyId == null) {
-                    continue;
-                }
-                if (currentVisibleIds.contains(actionId) && visibleIds.add(dependencyId)) {
-                    changed = true;
-                }
-                if (currentVisibleIds.contains(dependencyId) && visibleIds.add(actionId)) {
-                    changed = true;
-                }
+                changed = expandVisibleActionLinks(action, currentVisibleIds, visibleIds) || changed;
             }
         } while (changed);
         return enrichedActions.stream()
                 .filter(action -> action.getId() != null && visibleIds.contains(action.getId()))
                 .collect(Collectors.toList());
+    }
+
+    private boolean expandVisibleActionLinks(EcrAction action, Set<Long> currentVisibleIds, Set<Long> visibleIds) {
+        Long actionId = action.getId();
+        Long dependencyId = action.getDependsOnActionId();
+        if (actionId == null || dependencyId == null) {
+            return false;
+        }
+        return currentVisibleIds.contains(actionId) && visibleIds.add(dependencyId);
     }
 
     private String safeFileName(String fileName) {
@@ -1063,7 +1172,7 @@ public class EcrActionController {
         return disposition + "; filename=\"" + safeFileName(fileName) + "\"";
     }
 
-    private ResponseEntity<String> cloudinaryDownloadError(CloudinaryStorageService.DownloadException exception) {
+    private ResponseEntity<Object> cloudinaryDownloadError(CloudinaryStorageService.DownloadException exception) {
         String message = exception.isNotFound()
                 ? "Fichier introuvable dans Cloudinary. Il a peut-être été supprimé ou déplacé."
                 : "Téléchargement impossible depuis Cloudinary. Réessayez plus tard ou vérifiez la configuration Cloudinary.";

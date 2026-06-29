@@ -1,6 +1,7 @@
 package com.gestionplanning.action;
 
 import com.gestionplanning.auth.AccessControlService;
+import com.gestionplanning.auth.AuthenticatedUserService;
 import com.gestionplanning.user.AppUser;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -8,8 +9,10 @@ import org.springframework.web.bind.annotation.*;
 import java.net.URI;
 import java.text.Normalizer;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/action-standard-suggestions")
@@ -17,34 +20,41 @@ public class ActionStandardSuggestionController {
     private final ActionStandardSuggestionRepository suggestionRepository;
     private final ActionPlanningRuleRepository ruleRepository;
     private final AccessControlService accessControlService;
+    private final AuthenticatedUserService authenticatedUserService;
 
     public ActionStandardSuggestionController(ActionStandardSuggestionRepository suggestionRepository,
                                               ActionPlanningRuleRepository ruleRepository,
-                                              AccessControlService accessControlService) {
+                                              AccessControlService accessControlService,
+                                              AuthenticatedUserService authenticatedUserService) {
         this.suggestionRepository = suggestionRepository;
         this.ruleRepository = ruleRepository;
         this.accessControlService = accessControlService;
+        this.authenticatedUserService = authenticatedUserService;
     }
 
     @GetMapping
-    public ResponseEntity<List<ActionStandardSuggestion>> list(@RequestAttribute("authenticatedUser") AppUser user) {
+    public ResponseEntity<List<ActionStandardSuggestionDto>> list(@RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
         if (!accessControlService.isAdmin(user)) {
-            return ResponseEntity.status(403).<List<ActionStandardSuggestion>>build();
+            return ResponseEntity.status(403).<List<ActionStandardSuggestionDto>>build();
         }
-        return ResponseEntity.ok(suggestionRepository.findByStatusOrderByCreatedAtDescIdDesc(ActionStandardSuggestionStatus.PENDING));
+        return ResponseEntity.ok(suggestionRepository.findByStatusOrderByCreatedAtDescIdDesc(ActionStandardSuggestionStatus.PENDING).stream()
+                .map(ActionStandardSuggestionDto::from)
+                .collect(Collectors.toList()));
     }
 
     @PostMapping("/{id}/add-to-defaults")
-    public ResponseEntity<ActionPlanningRule> addToDefaults(@PathVariable Long id,
-                                                            @RequestAttribute("authenticatedUser") AppUser user) {
+    public ResponseEntity<ActionPlanningRuleDto> addToDefaults(@PathVariable Long id,
+                                                               @RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
         if (!accessControlService.isAdmin(user)) {
-            return ResponseEntity.status(403).<ActionPlanningRule>build();
+            return ResponseEntity.status(403).<ActionPlanningRuleDto>build();
         }
         return suggestionRepository.findById(id)
                 .filter(suggestion -> suggestion.getStatus() == ActionStandardSuggestionStatus.PENDING)
                 .map(suggestion -> {
                     if (standardActionExists(suggestion)) {
-                        return ResponseEntity.status(409).<ActionPlanningRule>build();
+                        return ResponseEntity.status(409).<ActionPlanningRuleDto>build();
                     }
                     ActionPlanningRule rule = new ActionPlanningRule();
                     rule.setStage(suggestion.getStage());
@@ -69,28 +79,29 @@ public class ActionStandardSuggestionController {
                     ActionPlanningRule savedRule = ruleRepository.save(rule);
                     suggestion.setStatus(ActionStandardSuggestionStatus.ADDED_TO_DEFAULTS);
                     suggestion.setReviewedBy(displayName(user));
-                    suggestion.setReviewedAt(LocalDateTime.now());
+                    suggestion.setReviewedAt(LocalDateTime.now(ZoneId.systemDefault()));
                     suggestionRepository.save(suggestion);
-                    return ResponseEntity.created(URI.create("/api/action-planning-rules/" + savedRule.getId())).body(savedRule);
+                    return ResponseEntity.created(URI.create("/api/action-planning-rules/" + savedRule.getId())).body(ActionPlanningRuleDto.from(savedRule));
                 })
-                .orElse(ResponseEntity.status(404).<ActionPlanningRule>build());
+                .orElse(ResponseEntity.status(404).<ActionPlanningRuleDto>build());
     }
 
     @PostMapping("/{id}/ignore")
-    public ResponseEntity<ActionStandardSuggestion> ignore(@PathVariable Long id,
-                                                           @RequestAttribute("authenticatedUser") AppUser user) {
+    public ResponseEntity<ActionStandardSuggestionDto> ignore(@PathVariable Long id,
+                                                              @RequestAttribute("authenticatedUserId") Long userId) {
+        AppUser user = authenticatedUserService.require(userId);
         if (!accessControlService.isAdmin(user)) {
-            return ResponseEntity.status(403).<ActionStandardSuggestion>build();
+            return ResponseEntity.status(403).<ActionStandardSuggestionDto>build();
         }
         return suggestionRepository.findById(id)
                 .filter(suggestion -> suggestion.getStatus() == ActionStandardSuggestionStatus.PENDING)
                 .map(suggestion -> {
                     suggestion.setStatus(ActionStandardSuggestionStatus.IGNORED);
                     suggestion.setReviewedBy(displayName(user));
-                    suggestion.setReviewedAt(LocalDateTime.now());
-                    return ResponseEntity.ok(suggestionRepository.save(suggestion));
+                    suggestion.setReviewedAt(LocalDateTime.now(ZoneId.systemDefault()));
+                    return ResponseEntity.ok(ActionStandardSuggestionDto.from(suggestionRepository.save(suggestion)));
                 })
-                .orElse(ResponseEntity.status(404).<ActionStandardSuggestion>build());
+                .orElse(ResponseEntity.status(404).<ActionStandardSuggestionDto>build());
     }
 
     private boolean standardActionExists(ActionStandardSuggestion suggestion) {

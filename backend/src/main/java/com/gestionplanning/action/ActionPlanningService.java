@@ -6,6 +6,7 @@ import com.gestionplanning.ecr.EcrStage;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -43,34 +44,11 @@ public class ActionPlanningService {
         Map<String, ActionPlanningRule> rules = ruleRepository.findAll().stream()
                 .filter(rule -> request.isNewVersion() ? rule.isAppliesToNewProject() : rule.isAppliesToModification())
                 .collect(Collectors.toMap(this::ruleKey, Function.identity(), (first, second) -> second));
-        LocalDate fallbackStart = request.getReceptionDate() == null ? LocalDate.now() : request.getReceptionDate();
+        LocalDate fallbackStart = request.getReceptionDate() == null ? LocalDate.now(ZoneId.systemDefault()) : request.getReceptionDate();
 
         LocalDate nextPhaseStart = fallbackStart;
         for (EcrStage stage : EcrStage.allowedStages(request.isNewVersion())) {
-            List<EcrAction> stageActions = actions.stream()
-                    .filter(action -> action.getStage() == stage)
-                    .filter(action -> !action.isRoutineAction())
-                    .sorted(this::compareActionsForPlanning)
-                    .collect(Collectors.toList());
-            if (stageActions.isEmpty()) {
-                continue;
-            }
-            LocalDate actionStart = nextPhaseStart;
-            for (EcrAction action : stageActions) {
-                action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
-                if (action.getValidatorRole() == null || action.getValidatorRole().trim().isEmpty()) {
-                    action.setValidatorRole(action.getValidator());
-                }
-                action.setWorkDurationDays(durationFor(action, rules.get(actionKey(action))));
-                shiftActionTo(action, actionStart);
-                actionStart = action.getEndDate() == null ? actionStart : action.getEndDate().plusDays(1);
-            }
-            nextPhaseStart = stageActions.stream()
-                    .map(EcrAction::getEndDate)
-                    .filter(Objects::nonNull)
-                    .max(LocalDate::compareTo)
-                    .map(date -> date.plusDays(1))
-                    .orElse(nextPhaseStart);
+            nextPhaseStart = recalculateStage(request, actions, rules, stage, nextPhaseStart);
         }
 
         List<EcrAction> plannedActions = actions.stream()
@@ -89,7 +67,7 @@ public class ActionPlanningService {
                 .filter(rule -> rule.getStage() == EcrStage.CANCELLED)
                 .filter(rule -> request.isNewVersion() ? rule.isAppliesToNewProject() : rule.isAppliesToModification())
                 .collect(Collectors.toMap(this::ruleKey, Function.identity(), (first, second) -> second));
-        LocalDate actionStart = (request.getCancelledDate() == null ? LocalDate.now() : request.getCancelledDate()).plusDays(1);
+        LocalDate actionStart = (request.getCancelledDate() == null ? LocalDate.now(ZoneId.systemDefault()) : request.getCancelledDate()).plusDays(1);
 
         List<EcrAction> cancelledActions = actions.stream()
                 .filter(action -> action.getStage() == EcrStage.CANCELLED)
@@ -97,18 +75,81 @@ public class ActionPlanningService {
                 .sorted(this::compareActionsForPlanning)
                 .collect(Collectors.toList());
         for (EcrAction action : cancelledActions) {
-            action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
-            if (action.getValidatorRole() == null || action.getValidatorRole().trim().isEmpty()) {
-                action.setValidatorRole(action.getValidator());
+            if (action != null) {
+                recalculateCancelledAction(request, rules, actionStart, action);
+                actionStart = action.getEndDate() == null ? actionStart : action.getEndDate().plusDays(1);
             }
-            action.setWorkDurationDays(durationFor(action, rules.get(actionKey(action))));
-            shiftActionTo(action, actionStart);
-            actionStart = action.getEndDate() == null ? actionStart : action.getEndDate().plusDays(1);
         }
 
         refreshActionStatuses(actions);
         actionRepository.saveAll(actions);
         requestRepository.save(request);
+    }
+
+    private void recalculateCancelledAction(EcrRequest request, Map<String, ActionPlanningRule> rules, LocalDate actionStart, EcrAction action) {
+        resolveOpenActionAssignees(request, action);
+        action.setWorkDurationDays(durationFor(action, rules.get(actionKey(action))));
+        shiftActionTo(action, actionStart);
+    }
+
+    private LocalDate recalculateStage(EcrRequest request, List<EcrAction> actions, Map<String, ActionPlanningRule> rules,
+                                       EcrStage stage, LocalDate nextPhaseStart) {
+        List<EcrAction> stageActions = actions.stream()
+                .filter(action -> action.getStage() == stage)
+                .filter(action -> !action.isRoutineAction())
+                .sorted(this::compareActionsForPlanning)
+                .collect(Collectors.toList());
+        if (stageActions.isEmpty()) {
+            return nextPhaseStart;
+        }
+        LocalDate actionStart = nextPhaseStart;
+        for (EcrAction action : stageActions) {
+            actionStart = recalculateAction(request, rules, actionStart, action);
+        }
+        return stageActions.stream()
+                .map(EcrAction::getEndDate)
+                .filter(Objects::nonNull)
+                .max(LocalDate::compareTo)
+                .map(date -> date.plusDays(1))
+                .orElse(nextPhaseStart);
+    }
+
+    private LocalDate recalculateAction(EcrRequest request, Map<String, ActionPlanningRule> rules, LocalDate actionStart, EcrAction action) {
+        if (action == null) {
+            return actionStart;
+        }
+        resolveOpenActionAssignees(request, action);
+        action.setWorkDurationDays(durationFor(action, rules.get(actionKey(action))));
+        shiftActionTo(action, actionStart);
+        return action.getEndDate() == null ? actionStart : action.getEndDate().plusDays(1);
+    }
+
+    private void resolveOpenActionAssignees(EcrRequest request, EcrAction action) {
+        if (action == null) {
+            return;
+        }
+        if (isDone(action) || isValidationApproved(action)) {
+            return;
+        }
+        action.setResponsible(assigneeResolver.resolve(request, action.getResponsible()));
+        if (action.getValidatorRole() == null || action.getValidatorRole().trim().isEmpty()) {
+            action.setValidatorRole(action.getValidator());
+        }
+        action.setValidator(assigneeResolver.resolveOptional(request, action.getValidatorRole()));
+    }
+
+    private boolean isValidationApproved(EcrAction action) {
+        if (action == null) {
+            return false;
+        }
+        return "APPROVED".equals(String.valueOf(action.getValidationStatus()));
+    }
+
+    private boolean isDone(EcrAction action) {
+        if (action == null) {
+            return false;
+        }
+        return action.isChecked() || action.getStatus() == ActionStatus.DONE || action.getStatus() == ActionStatus.DONE_LATE;
     }
 
     public void recalculateAfterDurationChange(EcrAction changedAction, Integer previousDuration) {
@@ -144,10 +185,9 @@ public class ActionPlanningService {
         if (deltaDays != 0) {
             List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(changedAction.getRequest().getId());
             for (EcrAction action : actions) {
-                if (Objects.equals(action.getId(), changedAction.getId()) || action.getStartDate() == null) {
-                    continue;
-                }
-                if (action.getStartDate().isAfter(effectivePreviousEndDate)) {
+                if (!Objects.equals(action.getId(), changedAction.getId())
+                        && action.getStartDate() != null
+                        && action.getStartDate().isAfter(effectivePreviousEndDate)) {
                     shiftActionBy(action, deltaDays);
                 }
             }
@@ -157,14 +197,14 @@ public class ActionPlanningService {
     }
 
     public void refreshActionStatuses(List<EcrAction> actions) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(ZoneId.systemDefault());
         for (EcrAction action : actions) {
             refreshActionStatus(action, today);
         }
     }
 
     public void refreshActionStatus(EcrAction action) {
-        refreshActionStatus(action, LocalDate.now());
+        refreshActionStatus(action, LocalDate.now(ZoneId.systemDefault()));
     }
 
     private void refreshActionStatus(EcrAction action, LocalDate today) {
@@ -263,19 +303,17 @@ public class ActionPlanningService {
                 .collect(Collectors.toList());
         List<EcrStage> allowedStages = EcrStage.allowedStages(request.isNewVersion());
         for (EcrAction routineAction : actions) {
-            if (!routineAction.isRoutineAction() || routineAction.getStage() == EcrStage.CANCELLED) {
-                continue;
+            if (routineAction.isRoutineAction() && routineAction.getStage() != EcrStage.CANCELLED) {
+                EcrStage stage = stageForRoutineDate(request, routineAction.getStartDate(), baseActions, allowedStages);
+                if (stage != null && routineAction.getStage() != stage) {
+                    routineAction.setStage(stage);
+                    routineAction.setValidationStatus(null);
+                    routineAction.setValidationRequestedAt(null);
+                    routineAction.setValidationReviewedAt(null);
+                    routineAction.setValidationReviewedBy(null);
+                    routineAction.setValidationRefusalReason(null);
+                }
             }
-            EcrStage stage = stageForRoutineDate(request, routineAction.getStartDate(), baseActions, allowedStages);
-            if (stage == null || routineAction.getStage() == stage) {
-                continue;
-            }
-            routineAction.setStage(stage);
-            routineAction.setValidationStatus(null);
-            routineAction.setValidationRequestedAt(null);
-            routineAction.setValidationReviewedAt(null);
-            routineAction.setValidationReviewedBy(null);
-            routineAction.setValidationRefusalReason(null);
         }
     }
 
@@ -286,16 +324,12 @@ public class ActionPlanningService {
         EcrStage selectedStage = allowedStages.get(0);
         LocalDate selectedStart = phaseStartDate(request, selectedStage, baseActions);
         for (EcrStage stage : allowedStages) {
-            if (stage == EcrStage.CANCELLED) {
-                continue;
-            }
-            LocalDate stageStart = phaseStartDate(request, stage, baseActions);
-            if (stageStart == null || stageStart.isAfter(date)) {
-                continue;
-            }
-            if (selectedStart == null || stageStart.isAfter(selectedStart)) {
-                selectedStage = stage;
-                selectedStart = stageStart;
+            if (stage != EcrStage.CANCELLED) {
+                LocalDate stageStart = phaseStartDate(request, stage, baseActions);
+                if (stageStart != null && !stageStart.isAfter(date) && (selectedStart == null || stageStart.isAfter(selectedStart))) {
+                    selectedStage = stage;
+                    selectedStart = stageStart;
+                }
             }
         }
         return selectedStage;
@@ -311,7 +345,7 @@ public class ActionPlanningService {
         if (phaseStart != null) {
             return phaseStart;
         }
-        return request.getReceptionDate() == null ? LocalDate.now() : request.getReceptionDate();
+        return request.getReceptionDate() == null ? LocalDate.now(ZoneId.systemDefault()) : request.getReceptionDate();
     }
 
     private String ruleKey(ActionPlanningRule rule) {

@@ -4,6 +4,7 @@ import com.gestionplanning.user.AppUser;
 
 import javax.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "user_presence")
@@ -20,7 +21,7 @@ public class UserPresence {
     private boolean online;
 
     @Column(nullable = false)
-    private LocalDateTime lastSeenAt = LocalDateTime.now();
+    private LocalDateTime lastSeenAt = LocalDateTime.now(ZoneId.systemDefault());
 
     public Long getId() { return id; }
     public AppUser getUser() { return user; }

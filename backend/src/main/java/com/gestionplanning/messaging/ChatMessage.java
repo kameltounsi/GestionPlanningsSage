@@ -5,6 +5,7 @@ import com.gestionplanning.user.AppUser;
 
 import javax.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "chat_message")
@@ -39,12 +40,12 @@ public class ChatMessage {
     private String attachmentResourceType;
 
     @Column(nullable = false, updatable = false)
-    private LocalDateTime createdAt = LocalDateTime.now();
+    private LocalDateTime createdAt = LocalDateTime.now(ZoneId.systemDefault());
     private LocalDateTime readAt;
 
     @PrePersist
     public void beforeCreate() {
-        createdAt = LocalDateTime.now();
+        createdAt = LocalDateTime.now(ZoneId.systemDefault());
     }
 
     public Long getId() { return id; }

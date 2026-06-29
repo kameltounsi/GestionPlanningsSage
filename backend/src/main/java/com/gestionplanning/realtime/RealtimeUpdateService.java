@@ -11,6 +11,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 @Service
 public class RealtimeUpdateService {
+    private static final String SENDER_ID = "senderId";
+
     private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
     private final RealtimeWebSocketHandler webSocketHandler;
 
@@ -35,7 +37,7 @@ public class RealtimeUpdateService {
     public void publishChatMessage(Long messageId, Long senderId, Long recipientId) {
         java.util.Map<String, String> payload = new java.util.LinkedHashMap<>();
         payload.put("messageId", messageId == null ? "" : String.valueOf(messageId));
-        payload.put("senderId", senderId == null ? "" : String.valueOf(senderId));
+        payload.put(SENDER_ID, senderId == null ? "" : String.valueOf(senderId));
         payload.put("recipientId", recipientId == null ? "" : String.valueOf(recipientId));
         broadcast("chat-message", payload);
     }
@@ -43,7 +45,7 @@ public class RealtimeUpdateService {
     public void publishChatGroupMessage(Long messageId, Long senderId, Long groupId) {
         java.util.Map<String, String> payload = new java.util.LinkedHashMap<>();
         payload.put("messageId", messageId == null ? "" : String.valueOf(messageId));
-        payload.put("senderId", senderId == null ? "" : String.valueOf(senderId));
+        payload.put(SENDER_ID, senderId == null ? "" : String.valueOf(senderId));
         payload.put("groupId", groupId == null ? "" : String.valueOf(groupId));
         broadcast("chat-group-message", payload);
     }
@@ -56,7 +58,7 @@ public class RealtimeUpdateService {
 
     public void publishChatTyping(Long senderId, String senderName, String targetType, Long targetId, boolean active) {
         java.util.Map<String, String> payload = new java.util.LinkedHashMap<>();
-        payload.put("senderId", senderId == null ? "" : String.valueOf(senderId));
+        payload.put(SENDER_ID, senderId == null ? "" : String.valueOf(senderId));
         payload.put("senderName", senderName == null ? "" : senderName);
         payload.put("targetType", targetType == null ? "" : targetType);
         payload.put("targetId", targetId == null ? "" : String.valueOf(targetId));

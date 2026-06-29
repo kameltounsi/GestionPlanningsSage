@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import javax.persistence.*;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "phase_validation_request")
@@ -26,7 +27,7 @@ public class PhaseValidationRequest {
     private PhaseValidationStatus status = PhaseValidationStatus.PENDING;
 
     private String requestedBy;
-    private LocalDateTime requestedAt = LocalDateTime.now();
+    private LocalDateTime requestedAt = LocalDateTime.now(ZoneId.systemDefault());
     private String reviewedBy;
     private LocalDateTime reviewedAt;
 

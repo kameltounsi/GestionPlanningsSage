@@ -13,6 +13,7 @@ import javax.validation.Valid;
 import java.net.URI;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/users")
@@ -32,13 +33,16 @@ public class AppUserController {
     }
 
     @GetMapping
-    public List<AppUser> list() {
-        return userRepository.findAll();
+    public List<AppUserDto> list() {
+        return userRepository.findAll().stream()
+                .map(this::toDto)
+                .collect(Collectors.toList());
     }
 
     @PostMapping
     @Transactional
-    public ResponseEntity<AppUser> create(@Valid @RequestBody AppUser user) {
+    public ResponseEntity<AppUserDto> create(@Valid @RequestBody AppUserDto userDto) {
+        AppUser user = toEntity(userDto);
         normalize(user);
         if (user.getUsername() == null || user.getUsername().trim().isEmpty()
                 || invalidPhone(user.getPhone())
@@ -51,12 +55,14 @@ public class AppUserController {
         user.setPassword(passwordService.encode(user.getPassword()));
         AppUser saved = userRepository.save(user);
         accountMailService.sendAccountCreatedEmail(saved, initialPassword);
-        return ResponseEntity.created(URI.create("/api/users/" + saved.getId())).body(saved);
+        return ResponseEntity.created(URI.create("/api/users/" + saved.getId())).body(toDto(saved));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<AppUser> update(@PathVariable Long id, @RequestBody AppUser updatedUser,
-                                          @RequestAttribute("authenticatedUser") AppUser authenticatedUser) {
+    public ResponseEntity<AppUserDto> update(@PathVariable Long id, @RequestBody AppUserDto updatedUserDto,
+                                             @RequestAttribute("authenticatedUser") Object authenticatedUserAttribute) {
+                                                 AppUser authenticatedUser = (AppUser) authenticatedUserAttribute;
+        AppUser updatedUser = toEntity(updatedUserDto);
         return userRepository.findById(id)
                 .map(user -> {
                     normalize(updatedUser);
@@ -67,10 +73,10 @@ public class AppUserController {
                             || hasDuplicateUsername(id, updatedUser.getUsername())
                             || hasDuplicateEmail(id, updatedUser.getEmail())
                             || invalidChefAssignment(updatedUser, id)) {
-                        return ResponseEntity.badRequest().<AppUser>build();
+                        return ResponseEntity.badRequest().<AppUserDto>build();
                     }
                     if (hasRequestedPassword(updatedUser) && !canChangeOwnPassword(authenticatedUser, id)) {
-                        return ResponseEntity.status(403).<AppUser>build();
+                        return ResponseEntity.status(403).<AppUserDto>build();
                     }
                     user.setFullName(updatedUser.getFullName());
                     user.setUsername(updatedUser.getUsername());
@@ -84,19 +90,22 @@ public class AppUserController {
                     user.setChef2(updatedUser.getChef2());
                     user.setRole(updatedUser.getRole());
                     user.setEnabled(updatedUser.isEnabled());
-                    return ResponseEntity.ok(userRepository.save(user));
+                    return ResponseEntity.ok(toDto(userRepository.save(user)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/me")
-    public ResponseEntity<AppUser> currentUser(@RequestAttribute(value = "authenticatedUser", required = false) AppUser user) {
-        return user == null ? ResponseEntity.status(401).build() : ResponseEntity.ok(user);
+    public ResponseEntity<AppUserDto> currentUser(@RequestAttribute(value = "authenticatedUser", required = false) Object userAttribute) {
+        AppUser user = (AppUser) userAttribute;
+        return user == null ? ResponseEntity.status(401).build() : ResponseEntity.ok(toDto(user));
     }
 
     @PutMapping("/{id}/profile")
-    public ResponseEntity<AppUser> updateProfile(@PathVariable Long id, @RequestBody AppUser updatedUser,
-                                                 @RequestAttribute("authenticatedUser") AppUser authenticatedUser) {
+    public ResponseEntity<AppUserDto> updateProfile(@PathVariable Long id, @RequestBody AppUserDto updatedUserDto,
+                                                    @RequestAttribute("authenticatedUser") Object authenticatedUserAttribute) {
+                                                        AppUser authenticatedUser = (AppUser) authenticatedUserAttribute;
+        AppUser updatedUser = toEntity(updatedUserDto);
         if (!canUpdateProfile(authenticatedUser, id)) {
             return ResponseEntity.status(403).build();
         }
@@ -105,21 +114,22 @@ public class AppUserController {
                     updatedUser.setUsername(updatedUser.getUsername() == null ? user.getUsername() : normalizedText(updatedUser.getUsername()));
                     updatedUser.setEmail(updatedUser.getEmail() == null ? user.getEmail() : normalizedText(updatedUser.getEmail()));
                     if (invalidPhone(updatedUser.getPhone()) || hasDuplicateUsername(id, updatedUser.getUsername()) || hasDuplicateEmail(id, updatedUser.getEmail())) {
-                        return ResponseEntity.badRequest().<AppUser>build();
+                        return ResponseEntity.badRequest().<AppUserDto>build();
                     }
                     user.setFullName(requiredOrExisting(updatedUser.getFullName(), user.getFullName()));
                     user.setUsername(updatedUser.getUsername());
                     user.setJobTitle(updatedUser.getJobTitle());
                     user.setEmail(updatedUser.getEmail());
                     user.setPhone(updatedUser.getPhone());
-                    return ResponseEntity.ok(userRepository.save(user));
+                    return ResponseEntity.ok(toDto(userRepository.save(user)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @PutMapping("/{id}/password")
-    public ResponseEntity<AppUser> changePassword(@PathVariable Long id, @RequestBody PasswordChangeRequest request,
-                                                  @RequestAttribute("authenticatedUser") AppUser authenticatedUser) {
+    public ResponseEntity<AppUserDto> changePassword(@PathVariable Long id, @RequestBody PasswordChangeRequest request,
+                                                     @RequestAttribute("authenticatedUser") Object authenticatedUserAttribute) {
+                                                         AppUser authenticatedUser = (AppUser) authenticatedUserAttribute;
         if (!canChangeOwnPassword(authenticatedUser, id)) {
             return ResponseEntity.status(403).build();
         }
@@ -129,14 +139,15 @@ public class AppUserController {
         return userRepository.findById(id)
                 .map(user -> {
                     user.setPassword(passwordService.encode(request.getPassword()));
-                    return ResponseEntity.ok(userRepository.save(user));
+                    return ResponseEntity.ok(toDto(userRepository.save(user)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping("/{id}/photo")
-    public ResponseEntity<AppUser> uploadPhoto(@PathVariable Long id, @RequestParam("file") MultipartFile file,
-                                               @RequestAttribute("authenticatedUser") AppUser authenticatedUser) {
+    public ResponseEntity<AppUserDto> uploadPhoto(@PathVariable Long id, @RequestParam("file") MultipartFile file,
+                                                  @RequestAttribute("authenticatedUser") Object authenticatedUserAttribute) {
+                                                      AppUser authenticatedUser = (AppUser) authenticatedUserAttribute;
         if (!canUpdateProfile(authenticatedUser, id)) {
             return ResponseEntity.status(403).build();
         }
@@ -155,7 +166,7 @@ public class AppUserController {
                     user.setProfilePhotoUrl(asset.getUrl());
                     user.setProfilePhotoPublicId(asset.getPublicId());
                     user.setProfilePhotoResourceType(asset.getResourceType());
-                    return ResponseEntity.ok(userRepository.save(user));
+                    return ResponseEntity.ok(toDto(userRepository.save(user)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -167,6 +178,45 @@ public class AppUserController {
         }
         userRepository.deleteById(id);
         return ResponseEntity.noContent().build();
+    }
+
+    private AppUser toEntity(AppUserDto dto) {
+        AppUser user = new AppUser();
+        if (dto == null) {
+            return user;
+        }
+        user.setFullName(dto.getFullName());
+        user.setUsername(dto.getUsername());
+        user.setJobTitle(dto.getJobTitle());
+        user.setEmail(dto.getEmail());
+        user.setPassword(dto.getPassword());
+        user.setPhone(dto.getPhone());
+        user.setChef1(dto.getChef1());
+        user.setChef2(dto.getChef2());
+        user.setRole(dto.getRole());
+        user.setEnabled(dto.isEnabled());
+        return user;
+    }
+
+    private AppUserDto toDto(AppUser user) {
+        AppUserDto dto = new AppUserDto();
+        dto.setId(user.getId());
+        dto.setFullName(user.getFullName());
+        dto.setUsername(user.getUsername());
+        dto.setJobTitle(user.getJobTitle());
+        dto.setEmail(user.getEmail());
+        dto.setPhone(user.getPhone());
+        dto.setChef1(user.getChef1());
+        dto.setChef2(user.getChef2());
+        dto.setProfilePhotoFileName(user.getProfilePhotoFileName());
+        dto.setProfilePhotoContentType(user.getProfilePhotoContentType());
+        dto.setProfilePhotoFileSize(user.getProfilePhotoFileSize());
+        dto.setProfilePhotoUrl(user.getProfilePhotoUrl());
+        dto.setRole(user.getRole());
+        dto.setEnabled(user.isEnabled());
+        dto.setCreatedAt(user.getCreatedAt());
+        dto.setUpdatedAt(user.getUpdatedAt());
+        return dto;
     }
 
     private void normalize(AppUser user) {

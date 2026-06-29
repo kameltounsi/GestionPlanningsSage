@@ -59,5 +59,65 @@ services:
     ports:
       - "3000:80"
 
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: gestion-planning-prometheus
+    restart: unless-stopped
+    depends_on:
+      - backend
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: gestion-planning-grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "${GRAFANA_PORT:-3002}:3000"
+
+  sonar-db:
+    image: postgres:16
+    container_name: gestion-planning-sonar-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${SONAR_POSTGRES_DB:-sonarqube}
+      POSTGRES_USER: ${SONAR_POSTGRES_USER:-sonarqube}
+      POSTGRES_PASSWORD: ${SONAR_POSTGRES_PASSWORD:-sonarqube}
+    volumes:
+      - sonar-db-data:/var/lib/postgresql/data
+
+  sonarqube:
+    image: sonarqube:community
+    container_name: gestion-planning-sonarqube
+    restart: unless-stopped
+    depends_on:
+      - sonar-db
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://sonar-db:5432/${SONAR_POSTGRES_DB:-sonarqube}
+      SONAR_JDBC_USERNAME: ${SONAR_POSTGRES_USER:-sonarqube}
+      SONAR_JDBC_PASSWORD: ${SONAR_POSTGRES_PASSWORD:-sonarqube}
+    volumes:
+      - sonarqube-data:/opt/sonarqube/data
+      - sonarqube-extensions:/opt/sonarqube/extensions
+      - sonarqube-logs:/opt/sonarqube/logs
+    ports:
+      - "${SONARQUBE_PORT:-9000}:9000"
+
 volumes:
   planning-data:
+  grafana-data:
+  sonar-db-data:
+  sonarqube-data:
+  sonarqube-extensions:
+  sonarqube-logs:

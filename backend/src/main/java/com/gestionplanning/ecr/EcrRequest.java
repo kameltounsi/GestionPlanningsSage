@@ -7,11 +7,14 @@ import javax.persistence.*;
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
 @Entity
 public class EcrRequest {
+    private static final String NOT_PROVIDED = "Non renseigne";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -43,6 +46,7 @@ public class EcrRequest {
     @NotBlank
     @Column(nullable = false)
     private String pilot;
+    private String previousPilot;
     @Column(length = 3000)
     private String modificationReason;
     @Column(length = 5000)
@@ -190,6 +194,14 @@ public class EcrRequest {
 
     public void setPilot(String pilot) {
         this.pilot = pilot;
+    }
+
+    public String getPreviousPilot() {
+        return previousPilot;
+    }
+
+    public void setPreviousPilot(String previousPilot) {
+        this.previousPilot = previousPilot;
     }
 
     public String getModificationReason() {
@@ -639,19 +651,19 @@ public class EcrRequest {
             modificationNumber = "LEGACY-ECR-" + id;
         }
         if (isBlank(client)) {
-            client = "Non renseigne";
+            client = NOT_PROVIDED;
         }
         if (isBlank(product)) {
-            product = "Non renseigne";
+            product = NOT_PROVIDED;
         }
         if (isBlank(modificationProject)) {
-            modificationProject = "Non renseigne";
+            modificationProject = NOT_PROVIDED;
         }
         if (receptionDate == null) {
-            receptionDate = LocalDate.now();
+            receptionDate = LocalDate.now(ZoneId.systemDefault());
         }
         if (isBlank(pilot)) {
-            pilot = "Non renseigne";
+            pilot = NOT_PROVIDED;
         }
     }
 

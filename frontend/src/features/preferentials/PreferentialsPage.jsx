@@ -74,6 +74,19 @@ function includeCurrentOption(options, currentValue) {
   return uniqueSorted([...options, currentValue]);
 }
 
+function parseMultiValue(value) {
+  return String(value || "")
+    .split(/[,;\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function toggleMultiValue(value, option, checked) {
+  const selected = parseMultiValue(value);
+  const nextValues = checked ? uniqueSorted([...selected, option]) : selected.filter((item) => item !== option);
+  return nextValues.join("; ");
+}
+
 function normalizeSearchText(value) {
   return String(value || "")
     .normalize("NFD")
@@ -657,6 +670,10 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
 }
 
 function FinishedProductDialog({ clientNames, editing, form, productNames, projectNames, saving, onClose, onSubmit, setForm }) {
+  const selectedProducts = parseMultiValue(form.product);
+  const displayedProductNames = includeCurrentOption(productNames, form.product).flatMap((product) => parseMultiValue(product));
+  const productOptions = uniqueSorted([...productNames, ...displayedProductNames]);
+
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <form
@@ -703,13 +720,24 @@ function FinishedProductDialog({ clientNames, editing, form, productNames, proje
             Customer PN
             <input value={form.customerPn} onChange={(event) => setForm((current) => ({ ...current, customerPn: event.target.value }))} />
           </label>
-          <label>
-            Produit
-            <select required value={form.product} onChange={(event) => setForm((current) => ({ ...current, product: event.target.value }))}>
-              <option value="">Selectionner un produit</option>
-              {includeCurrentOption(productNames, form.product).map((product) => <option key={product} value={product}>{product}</option>)}
-            </select>
-          </label>
+          <fieldset className="project-team-field">
+            <legend>Produits</legend>
+            <div className="project-team-list">
+              {productOptions.map((product) => (
+                <label className="project-team-option" key={product}>
+                  <input
+                    checked={selectedProducts.includes(product)}
+                    type="checkbox"
+                    onChange={(event) => setForm((current) => ({ ...current, product: toggleMultiValue(current.product, product, event.target.checked) }))}
+                  />
+                  <span><strong>{product}</strong></span>
+                </label>
+              ))}
+            </div>
+            <p className={selectedProducts.length > 0 ? "form-hint" : "form-hint project-team-warning"}>
+              {selectedProducts.length} produit{selectedProducts.length > 1 ? "s" : ""} selectionne{selectedProducts.length > 1 ? "s" : ""}.
+            </p>
+          </fieldset>
           <label>
             Indice coiffe
             <input value={form.coiffeIndex} onChange={(event) => setForm((current) => ({ ...current, coiffeIndex: event.target.value }))} />

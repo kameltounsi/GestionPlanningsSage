@@ -18,6 +18,7 @@ public class AppUserDto {
     private String email;
 
     private String password;
+    @NotBlank
     private String phone;
     private String chef1;
     private String chef2;

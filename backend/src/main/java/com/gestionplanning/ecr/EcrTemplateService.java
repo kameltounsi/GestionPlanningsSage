@@ -87,6 +87,10 @@ public class EcrTemplateService {
             return;
         }
         if (actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId()).isEmpty()) {
+            if (hasSuppressedActions(request)) {
+                ensureMissingActionsFor(request);
+                return;
+            }
             createActionsFor(request, new ArrayList<>());
             return;
         }
@@ -102,9 +106,11 @@ public class EcrTemplateService {
         Set<String> existingKeys = existingActions.stream()
                 .map(this::actionKey)
                 .collect(Collectors.toCollection(HashSet::new));
+        Set<String> suppressedKeys = suppressedActionKeys(request);
         List<ActionPlanningRule> rules = ruleRepository.findAllByOrderByStageAscActionTitleAsc().stream()
                 .filter(rule -> EcrStage.isAllowed(rule.getStage(), request.isNewVersion()))
                 .filter(rule -> appliesToRequest(rule, request))
+                .filter(rule -> !suppressedKeys.contains(ruleKey(rule)))
                 .collect(Collectors.toList());
 
         syncExistingActionsFromRules(request, existingActions, rules.stream()
@@ -136,10 +142,12 @@ public class EcrTemplateService {
         Set<String> existingKeys = existingActions.stream()
                 .map(this::actionKey)
                 .collect(Collectors.toCollection(HashSet::new));
+        Set<String> suppressedKeys = suppressedActionKeys(request);
         List<ActionPlanningRule> rules = ruleRepository.findAllByOrderByStageAscActionTitleAsc().stream()
                 .filter(rule -> rule.getStage() == stage)
                 .filter(rule -> EcrStage.isAllowed(rule.getStage(), request.isNewVersion()))
                 .filter(rule -> appliesToRequest(rule, request))
+                .filter(rule -> !suppressedKeys.contains(ruleKey(rule)))
                 .collect(Collectors.toList());
 
         syncExistingActionsFromRules(request, existingActions, rules.stream()
@@ -286,6 +294,9 @@ public class EcrTemplateService {
         if (!EcrStage.isAllowed(updatedRule.getStage(), request.isNewVersion()) || !appliesToRequest(updatedRule, request)) {
             return;
         }
+        if (suppressedActionKeys(request).contains(ruleKey(updatedRule))) {
+            return;
+        }
         String previousKey = previousRule == null ? ruleKey(updatedRule) : ruleKey(previousRule);
         String currentKey = ruleKey(updatedRule);
         List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId());
@@ -378,9 +389,11 @@ public class EcrTemplateService {
     }
 
     private List<ActionPlanningRule> rulesFor(EcrRequest request) {
+        Set<String> suppressedKeys = suppressedActionKeys(request);
         return ruleRepository.findAllByOrderByStageAscActionTitleAsc().stream()
                 .filter(rule -> EcrStage.isAllowed(rule.getStage(), request.isNewVersion()))
                 .filter(rule -> appliesToRequest(rule, request))
+                .filter(rule -> !suppressedKeys.contains(ruleKey(rule)))
                 .collect(Collectors.toList());
     }
 
@@ -390,6 +403,21 @@ public class EcrTemplateService {
 
     private String actionKey(EcrAction action) {
         return key(action.getStage().name(), action.getTitle());
+    }
+
+    public void suppressActionFor(EcrRequest request, EcrAction action) {
+        if (request == null || action == null) {
+            return;
+        }
+        request.suppressActionKey(actionKey(action));
+    }
+
+    private boolean hasSuppressedActions(EcrRequest request) {
+        return request != null && request.getSuppressedActionKeys() != null && !request.getSuppressedActionKeys().isEmpty();
+    }
+
+    private Set<String> suppressedActionKeys(EcrRequest request) {
+        return request == null || request.getSuppressedActionKeys() == null ? new HashSet<>() : request.getSuppressedActionKeys();
     }
 
     private String key(String stage, String title) {

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 public class DefaultUserInitializer implements CommandLineRunner {
     private static final String DEFAULT_ADMIN_USERNAME = "fchelbi";
     private static final String DEFAULT_ADMIN_EMAIL = "f.chalbi@sagetunisia.com";
+    private static final String DEFAULT_ADMIN_PHONE = "+21600000000";
     private static final String DEFAULT_ADMIN_INITIAL_SECRET = DEFAULT_ADMIN_USERNAME;
 
     private final AppUserRepository userRepository;
@@ -34,6 +35,7 @@ public class DefaultUserInitializer implements CommandLineRunner {
         user.setUsername(DEFAULT_ADMIN_USERNAME);
         user.setJobTitle(valueOrDefault(user.getJobTitle(), "Engineering Manager"));
         user.setEmail(DEFAULT_ADMIN_EMAIL);
+        user.setPhone(valueOrDefault(user.getPhone(), DEFAULT_ADMIN_PHONE));
         if (created[0] || user.getPassword() == null || user.getPassword().trim().isEmpty()) {
             user.setPassword(passwordService.encode(DEFAULT_ADMIN_INITIAL_SECRET));
         }

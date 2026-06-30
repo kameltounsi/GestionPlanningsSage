@@ -161,9 +161,14 @@ import { userRoleLabel, userToForm } from "./utils/users";
 import "./styles.css";
 
 const swalButtons = {
+  showCloseButton: true,
   confirmButtonColor: "#2563eb",
   cancelButtonColor: "#64748b"
 };
+
+const AppSwal = Swal.mixin({
+  showCloseButton: true
+});
 
 const pageTitles = {
   dashboard: "Tableau de bord",
@@ -216,7 +221,7 @@ const visibleAuditActionTypes = [
 ];
 
 function successToast(title) {
-  return Swal.fire({
+  return AppSwal.fire({
     title,
     icon: "success",
     timer: 1500,
@@ -248,7 +253,7 @@ function friendlyErrorMessage(message) {
 }
 
 function errorAlert(message) {
-  return Swal.fire({
+  return AppSwal.fire({
     title: "Erreur",
     text: friendlyErrorMessage(message),
     icon: "error",
@@ -258,7 +263,7 @@ function errorAlert(message) {
 }
 
 function warningAlert(title, message) {
-  return Swal.fire({
+  return AppSwal.fire({
     title,
     text: message,
     icon: "warning",
@@ -306,7 +311,7 @@ function stopTypingSound() {
 }
 
 function confirmDelete(title, text) {
-  return Swal.fire({
+  return AppSwal.fire({
     title,
     text,
     icon: "warning",
@@ -1767,12 +1772,13 @@ function canManageActionAssignmentForUser(user, action) {
     .some((value) => normalizeRoleToken(value) === responsible);
 }
 
-function isActionPilotForUser(user, action) {
+function isActionPilotForUser(user, action, request = action?.request, projects = []) {
   const responsible = normalizeRoleToken(action?.responsible);
   if (!responsible) return false;
-  return [user?.jobTitle, user?.fullName, user?.username, user?.email, user?.role]
+  const directMatch = [user?.jobTitle, user?.fullName, user?.username, user?.email, user?.role]
     .filter(Boolean)
     .some((value) => normalizeRoleToken(value) === responsible);
+  return directMatch || userMatchesProjectRoleAssignment(user, request, responsible, projects);
 }
 
 function canValidateActionForUser(user, action) {
@@ -1793,17 +1799,17 @@ function isActionAwaitingValidation(action, phaseValidation) {
   return phaseValidation?.status === "PENDING" && action?.validationStatus === "PENDING";
 }
 
-function canRequestRejectedActionValidationForUser(user, action, request) {
+function canRequestRejectedActionValidationForUser(user, action, request, projects = []) {
   return action?.validationStatus === "REJECTED"
     && isActionDone(action)
-    && (isRequestPilot(user, request) || isActionPilotForUser(user, action));
+    && (isRequestPilot(user, request, projects) || isActionPilotForUser(user, action, request, projects));
 }
 
-function canToggleActionForUser(user, action, request, phaseValidations = []) {
+function canToggleActionForUser(user, action, request, phaseValidations = [], projects = []) {
   if (isTerminalRequest(request)) return false;
   if (request?.currentStage === "CANCELLED" && action?.stage !== "CANCELLED") return false;
   if (isActionPhaseApproved(action, phaseValidations)) return false;
-  if (!isActionPilotForUser(user, action)) return false;
+  if (!isActionPilotForUser(user, action, request, projects)) return false;
   return !isActionDone(action) || action?.stage === request?.currentStage;
 }
 
@@ -1811,21 +1817,20 @@ function isActionPhaseApproved(action, phaseValidations = []) {
   return phaseValidations.find((validation) => validation.stage === action?.stage)?.status === "APPROVED";
 }
 
-function canDeleteActionInPhase(action, phaseValidations = []) {
-  if (!isActionPhaseApproved(action, phaseValidations)) return true;
-  return !isActionDone(action) && action?.validationStatus !== "APPROVED";
+function canDeleteActionInPhase(action) {
+  return !isActionDone(action);
 }
 
-function canDeleteActionForUser(user, action, request, phaseValidations = []) {
+function canDeleteActionForUser(user, action, request, phaseValidations = [], projects = []) {
   if (isTerminalRequest(request)) return false;
   if (request?.currentStage === "CANCELLED" && action?.stage !== "CANCELLED") return false;
-  if (!canDeleteActionInPhase(action, phaseValidations)) return false;
+  if (!canDeleteActionInPhase(action)) return false;
   if (isAdminUser(user)) return true;
-  return isRequestPilot(user, request) || canManageActionAssignmentForUser(user, action);
+  return isActionPilotForUser(user, action, request, projects);
 }
 
-function canEditActionDurationForUser(user, action, request, phaseValidations = []) {
-  if (!isRequestPilot(user, request)) return false;
+function canEditActionDurationForUser(user, action, request, phaseValidations = [], projects = []) {
+  if (!isRequestPilot(user, request, projects)) return false;
   if (request?.currentStage === "CLOSED") return false;
   if (request?.currentStage === "CANCELLED" && action?.stage !== "CANCELLED") return false;
   return !isActionPhaseApproved(action, phaseValidations);
@@ -1876,12 +1881,24 @@ function blockingActionLabel(action, actions = []) {
   return dependency?.title ? `${prefix}: ${dependency.title}` : prefix;
 }
 
-function isRequestPilot(user, request) {
+function isRequestPilot(user, request, projects = []) {
   const pilot = normalizeRoleToken(request?.pilot);
   if (!pilot) return false;
-  return [user?.fullName, user?.username, user?.email, user?.jobTitle, user?.role]
+  const directMatch = [user?.fullName, user?.username, user?.email, user?.jobTitle, user?.role]
     .filter(Boolean)
     .some((value) => normalizeRoleToken(value) === pilot);
+  if (directMatch) return true;
+  return userMatchesProjectRoleAssignment(user, request, pilot, projects);
+}
+
+function userMatchesProjectRoleAssignment(user, request, assignment, projects = []) {
+  const token = normalizeRoleToken(assignment).replaceAll("_", " ");
+  if (!token || !user) return false;
+  const project = projectForRequest(request, projects);
+  return parseProjectTeamEntries(project?.projectTeam).some((entry) =>
+    userMatchesAssignment(user, entry.name)
+    && entry.roles.some((role) => normalizeRoleToken(role).replaceAll("_", " ") === token)
+  );
 }
 
 function userMatchesAssignment(user, assignment) {
@@ -1905,10 +1922,30 @@ function isActionParticipantForUser(user, action) {
     || userMatchesAssignment(user, action?.validatorDisplayName);
 }
 
-function isRequestParticipantForUser(user, request, actions = []) {
+function actionStageForRequest(action, request) {
+  return action?.stage || request?.currentStage || "FEASIBILITY_VALIDATION";
+}
+
+function activeStageActionsForUser(user, request, actions = []) {
+  return stageActionsForUser(user, request, actions, request?.currentStage);
+}
+
+function stageActionsForUser(user, request, actions = [], stage = request?.currentStage) {
+  if (!request || isAdminUser(user)) return actions;
+  const selectedStageKey = stage || request.currentStage;
+  return actions.filter((action) =>
+    actionStageForRequest(action, request) === selectedStageKey
+    && isActionParticipantForUser(user, action)
+  );
+}
+
+function hasActiveStageActionForUser(user, request, actions = []) {
+  return activeStageActionsForUser(user, request, actions).length > 0;
+}
+
+function isRequestParticipantForUser(user, request, actions = [], projects = []) {
   if (isAdminUser(user)) return true;
-  return isRequestPilot(user, request)
-    || actions.some((action) => isActionParticipantForUser(user, action));
+  return hasActiveStageActionForUser(user, request, actions);
 }
 
 function firstActionParticipantStage(user, actions = []) {
@@ -1927,7 +1964,7 @@ function isValidEmail(value) {
 
 function isValidPhone(value) {
   const text = String(value || "").trim();
-  return !text || /^\+?[0-9\s().-]{8,20}$/.test(text);
+  return /^\+?[0-9\s().-]{8,20}$/.test(text);
 }
 
 function App() {
@@ -2044,7 +2081,7 @@ function App() {
     const canAdmin = isAdminUser(currentUser);
     return requests.filter((request) => {
       if (!requestMatchesView(request, requestArchiveView, canAdmin)) return false;
-      if (!canAdmin && !isRequestParticipantForUser(currentUser, request, actionsByRequestId[request.id] || [])) return false;
+      if (!canAdmin && !hasActiveStageActionForUser(currentUser, request, actionsByRequestId[request.id] || [])) return false;
       const matchesProject = !projectFilter || request.modificationProject === projectFilter;
       const matchesType = !requestTypeFilter
         || (requestTypeFilter === "new-project" ? Boolean(request.newVersion) : !request.newVersion);
@@ -2053,7 +2090,7 @@ function App() {
         .some((value) => normalizeSearchText(value).includes(normalized));
       return matchesProject && matchesType && matchesSearch;
     });
-  }, [actionsByRequestId, currentUser, requests, query, projectFilter, requestArchiveView, requestTypeFilter]);
+  }, [actionsByRequestId, currentUser, projects, requests, query, projectFilter, requestArchiveView, requestTypeFilter]);
 
   const requestSearchSuggestions = useMemo(() => {
     const normalized = normalizeSearchText(query);
@@ -2077,7 +2114,7 @@ function App() {
     if (!currentUser || filteredRequests.length === 0) return;
     if (selectedId && filteredRequests.some((request) => request.id === selectedId)) return;
     const nextRequest = filteredRequests[0];
-    const participantStage = firstActionParticipantStage(currentUser, actionsByRequestId[nextRequest.id] || []);
+    const participantStage = isAdminUser(currentUser) ? firstActionParticipantStage(currentUser, actionsByRequestId[nextRequest.id] || []) : null;
     setSelectedId(nextRequest.id);
     setSelectedStage(safeStage(participantStage || nextRequest.currentStage, Boolean(nextRequest.newVersion)));
   }, [actionsByRequestId, currentUser, filteredRequests, selectedId]);
@@ -2301,7 +2338,7 @@ function App() {
         }
         playActionSuggestionSound();
         const firstAlert = alerts[0];
-        Swal.fire({
+        AppSwal.fire({
           toast: true,
           position: "top-end",
           icon: firstAlert.alertType === "J_PLUS_1" ? "error" : "warning",
@@ -2325,7 +2362,7 @@ function App() {
         playActionSuggestionSound();
         const firstAlert = alerts[0];
         const request = requests.find((item) => item.id === firstAlert.requestId);
-        Swal.fire({
+        AppSwal.fire({
           toast: true,
           position: "top-end",
           icon: "success",
@@ -2529,7 +2566,7 @@ function App() {
       setChatNotificationCount((count) => count + 1);
     }
     playActionSuggestionSound();
-    Swal.fire({
+    AppSwal.fire({
       toast: true,
       position: "top-end",
       icon: "info",
@@ -3037,7 +3074,7 @@ function App() {
       warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. La revue dossier est en lecture seule.");
       return Promise.reject(new Error("Modification terminale."));
     }
-    if (!isAdminUser(currentUser) && !isRequestPilot(currentUser, request)) {
+    if (!isAdminUser(currentUser) && !isRequestPilot(currentUser, request, projects)) {
       warningAlert("Lecture seule", "Seul le pilote de la modification ou l'admin peut modifier la revue dossier.");
       return Promise.reject(new Error("Revue dossier en lecture seule."));
     }
@@ -3065,35 +3102,7 @@ function App() {
 
   function handleStageChange(stage) {
     if (!selectedRequest) return;
-    if (isTerminalRequest(selectedRequest)) {
-      warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. La phase ne peut plus être modifiée.");
-      return;
-    }
-    if (!isAdminUser(currentUser)) {
-      warningAlert("Action reservee", "Seul l'admin peut rouvrir ou modifier la phase courante.");
-      return;
-    }
-    if (stage === selectedRequest.currentStage) {
-      setSelectedStage(stage);
-      return;
-    }
-    const latestValidation = phaseValidations.find((validation) => validation.stage === stage);
-    if (stage !== selectedRequest.currentStage && latestValidation?.status === "APPROVED") {
-      setSelectedStage(stage);
-      warningAlert("Phase validée", "Utilisez le bouton Rouvrir la phase pour remettre cette phase en phase courante.");
-      return;
-    }
     setSelectedStage(stage);
-    updateEcrStage(selectedRequest.id, stage)
-      .then((updatedRequest) => {
-        setRequests((items) => items.map((item) => (item.id === updatedRequest.id ? updatedRequest : item)));
-        return refreshSelectedData(updatedRequest.id, safeStage(updatedRequest.currentStage, Boolean(updatedRequest.newVersion)));
-      })
-      .catch(() => {
-        const message = "Impossible de sauvegarder l'etape ECR.";
-        setError(message);
-        errorAlert(message);
-      });
   }
 
   function handleReopenPhase(validation) {
@@ -3124,7 +3133,7 @@ function App() {
       warningAlert("Modification cloturee", "C'est une modification cloturee et vous ne pouvez plus la modifier.");
     }
     setSelectedId(request.id);
-    const participantStage = firstActionParticipantStage(currentUser, actionsByRequestId[request.id] || []);
+    const participantStage = isAdminUser(currentUser) ? firstActionParticipantStage(currentUser, actionsByRequestId[request.id] || []) : null;
     setSelectedStage(safeStage(stageOverride || participantStage || request.currentStage, Boolean(request.newVersion)));
     setShowCreateForm(false);
     setShowEditForm(false);
@@ -3144,7 +3153,7 @@ function App() {
           const selectedStillVisible = requestData.some((item) => item.id === selectedId && requestMatchesView(item, view, canAdmin));
           if (!selectedStillVisible) {
             const nextRequest = requestData.find((item) => requestMatchesView(item, view, canAdmin)) || null;
-            const participantStage = nextRequest ? firstActionParticipantStage(currentUser, actionsByRequestId[nextRequest.id] || []) : null;
+            const participantStage = nextRequest && isAdminUser(currentUser) ? firstActionParticipantStage(currentUser, actionsByRequestId[nextRequest.id] || []) : null;
             setSelectedId(nextRequest?.id ?? null);
             setSelectedStage(nextRequest ? safeStage(participantStage || nextRequest.currentStage, Boolean(nextRequest.newVersion)) : "FEASIBILITY_VALIDATION");
           }
@@ -3174,7 +3183,7 @@ function App() {
           setRequests(requestData);
           if (selectedId === request.id && archived && requestArchiveView !== "archived" && requestArchiveView !== "all") {
             const nextRequest = requestData.find((item) => requestMatchesView(item, requestArchiveView, isAdminUser(currentUser))) || null;
-            const participantStage = nextRequest ? firstActionParticipantStage(currentUser, actionsByRequestId[nextRequest.id] || []) : null;
+            const participantStage = nextRequest && isAdminUser(currentUser) ? firstActionParticipantStage(currentUser, actionsByRequestId[nextRequest.id] || []) : null;
             setSelectedId(nextRequest?.id ?? null);
             setSelectedStage(nextRequest ? safeStage(participantStage || nextRequest.currentStage, Boolean(nextRequest.newVersion)) : "FEASIBILITY_VALIDATION");
           }
@@ -3202,7 +3211,7 @@ function App() {
       return;
     }
     const label = requestDisplayName(request);
-    Swal.fire({
+    AppSwal.fire({
       ...swalButtons,
       title: "Annuler la modification ?",
       text: `La modification ${label} passera immediatement en phase Cancelled.`,
@@ -3465,6 +3474,10 @@ function App() {
       warningAlert("Phase validée", "Impossible d'ajouter un asset dans une phase déjà validée. Reouvrez la phase avant de la modifier.");
       return;
     }
+    if (!isActionPilotForUser(currentUser, action, selectedRequest, projects)) {
+      warningAlert("Asset reserve", "Seul le pilote de l'action peut ajouter un asset a son action.");
+      return;
+    }
     setError("");
     uploadActionEvidenceFiles(action.id, files)
         .then(() => refreshSelectedData(selectedId, selectedStage))
@@ -3486,6 +3499,10 @@ function App() {
     }
     if (isActionPhaseApproved(action, phaseValidations)) {
       warningAlert("Phase validée", "Impossible d'ajouter un asset dans une phase déjà validée. Reouvrez la phase avant de la modifier.");
+      return;
+    }
+    if (!isActionPilotForUser(currentUser, action, selectedRequest, projects)) {
+      warningAlert("Asset reserve", "Seul le pilote de l'action peut ajouter un asset a son action.");
       return;
     }
     setError("");
@@ -3544,7 +3561,7 @@ function App() {
       warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. Les actions sont en lecture seule.");
       return;
     }
-    if (!canDeleteActionInPhase(action, phaseValidations)) {
+    if (!canDeleteActionInPhase(action)) {
       warningAlert("Action validée", "Impossible de supprimer une action déjà terminée ou validée. Reouvrez la phase avant de la modifier.");
       return;
     }
@@ -3559,7 +3576,7 @@ function App() {
         })
         .catch((error) => {
           const message = error.message?.includes("403")
-            ? "Suppression impossible: vous devez être admin ou pilote de la modification. Les actions déjà terminées ou validées restent protégées."
+            ? "Suppression impossible: seul l'admin ou le pilote de la modification peut supprimer une action. Les actions déjà terminées ou validées restent protégées."
             : "Suppression de l'action impossible.";
           setError(message);
           errorAlert(message);
@@ -3570,7 +3587,7 @@ function App() {
 
   function handleRequestPhaseValidation() {
     if (!selectedRequest) return;
-    if (!isRequestPilot(currentUser, selectedRequest) && !isProjectLeadForRequest(currentUser, selectedRequest, projects)) {
+    if (!isRequestPilot(currentUser, selectedRequest, projects) && !isProjectLeadForRequest(currentUser, selectedRequest, projects)) {
       warningAlert("Validation reservee", "Seul le pilote ou le chef de projet de la modification peut demander la validation de phase.");
       return;
     }
@@ -3579,7 +3596,7 @@ function App() {
       setSelectedStage(safeStage(selectedRequest.currentStage, Boolean(selectedRequest.newVersion)));
       return;
     }
-    if (actions.length === 0 || actions.some((action) => !isActionDone(action))) {
+    if (actions.some((action) => !isActionDone(action))) {
       warningAlert("Phase non terminée", "Toutes les actions de la phase doivent être terminées avant la demande de validation.");
       return;
     }
@@ -3609,7 +3626,7 @@ function App() {
 
   function handleRequestClosure() {
     if (!selectedRequest) return;
-    if (!isRequestPilot(currentUser, selectedRequest)) {
+    if (!isRequestPilot(currentUser, selectedRequest, projects)) {
       warningAlert("Demande reservee", "Seul le pilote de la modification peut demander la cloture.");
       return;
     }
@@ -3654,7 +3671,7 @@ function App() {
         `<label class="swal-action-choice"><input type="checkbox" value="${escapeHtml(action.title || "")}" /> <span>${escapeHtml(action.title || "-")}</span></label>`
       )).join("")
       : "<p class=\"swal-action-empty\">Aucune action terminée dans cette phase.</p>";
-    Swal.fire({
+    AppSwal.fire({
       title: "Refuser la phase",
       html: `<textarea id="refusal-reason" class="swal2-textarea" placeholder="Raison du refus: manque document, manque action..."></textarea><div class="swal-action-list-title">Actions à revisiter</div><div id="actions-revisit-list" class="swal-action-list">${actionsHtml}</div>`,
       showCancelButton: true,
@@ -3710,7 +3727,7 @@ function App() {
 
   function handleRejectActionValidation(validation, action) {
     if (!selectedRequest || !validation || !action) return;
-    Swal.fire({
+    AppSwal.fire({
       ...swalButtons,
       title: "Refuser l'action ?",
       html: `<textarea id="action-refusal-reason" class="swal2-textarea" placeholder="Motif du refus"></textarea>`,
@@ -4032,7 +4049,7 @@ function App() {
           .slice(0, 8)
           .map((issue) => `Ligne ${issue.rowNumber || "-"}: ${issue.message}`)
           .join("\n");
-        Swal.fire({
+        AppSwal.fire({
           icon: result.createdCount > 0 ? "success" : "info",
           title: "Import produits finis",
           text: [
@@ -4349,14 +4366,14 @@ function App() {
         }
         setUserForm(emptyUserForm);
         setEditingUser(null);
-        successToast(isEdit ? "Utilisateur modifie" : "Utilisateur ajoute");
+        successToast(isEdit ? "Utilisateur modifié" : "Utilisateur ajouté");
         return selectedId ? refreshSelectedData(selectedId, selectedStage) : Promise.resolve();
       })
       .catch((exception) => {
         const detail = exception?.message || "";
         const message = detail && !detail.startsWith("API error")
           ? detail
-          : "Sauvegarde utilisateur impossible. Vérifiez username/email uniques, les champs obligatoires et la configuration SMTP.";
+          : "Sauvegarde utilisateur impossible. Vérifiez username/email/téléphone uniques, les champs obligatoires et la configuration SMTP.";
         setError(message);
         errorAlert(message);
       })
@@ -4380,7 +4397,7 @@ function App() {
             setEditingUser(null);
             setUserForm(emptyUserForm);
           }
-          successToast("Utilisateur supprime");
+          successToast("Utilisateur supprimé");
           return selectedId ? refreshSelectedData(selectedId, selectedStage) : Promise.resolve();
         })
         .catch(() => {
@@ -4401,7 +4418,7 @@ function App() {
         setCurrentUser(savedUser);
         setProfileForm(userToForm(savedUser));
         setUsers((items) => items.map((item) => (item.id === savedUser.id ? savedUser : item)));
-        successToast("Profil mis a jour");
+        successToast("Profil mis à jour");
         return selectedId ? refreshSelectedData(selectedId, selectedStage) : Promise.resolve();
       })
       .catch(() => {
@@ -4426,7 +4443,7 @@ function App() {
     changeUserPassword(currentUser.id, passwordForm.password)
       .then(() => {
         setPasswordForm({ password: "", confirmation: "" });
-        successToast("Mot de passe modifie");
+        successToast("Mot de passe modifié");
       })
       .catch(() => {
         const message = "Changement de mot de passe impossible.";
@@ -4581,7 +4598,7 @@ function App() {
   }
 
   function handleLogout() {
-    Swal.fire({
+    AppSwal.fire({
       title: "Se déconnecter ?",
       text: "Votre session active sera fermée.",
       icon: "question",
@@ -5261,7 +5278,12 @@ function NewModificationPage({ clientOptions, currentUser = null, ecrForm, exist
             <h2 id={titleId}>{mode === "edit" ? "Modifier la modification" : "Nouvelle modification"}</h2>
             <p>{mode === "edit" ? "Mettez à jour les informations de la demande, puis enregistrez pour continuer le suivi." : "Renseignez les informations de base, créez la demande, puis continuez directement le suivi des phases et actions sur cette même page."}</p>
           </div>
-          <span className="stage-pill teal">{mode === "edit" ? "Édition" : "Création assistée"}</span>
+          <div className="form-intro-actions">
+            <span className="stage-pill teal">{mode === "edit" ? "Édition" : "Création assistée"}</span>
+            <button className="ghost-icon" type="button" onClick={onCancel} title="Fermer" aria-label="Fermer">
+              <X size={18} />
+            </button>
+          </div>
         </div>
         <label className="project-type-toggle">
           <input
@@ -5758,7 +5780,7 @@ function includeCurrentOptions(options, currentValues) {
 
 function parseSelectedProducts(value) {
   return String(value || "")
-    .split(/[,;]+/)
+    .split(/[,;\n/]+/)
     .map((product) => product.trim())
     .filter(Boolean);
 }
@@ -5842,7 +5864,9 @@ function finishedProductsForForm(form, references = []) {
   return references
     .filter((reference) => normalizeReferenceValue(reference.client) === client)
     .filter((reference) => normalizeReferenceValue(reference.project) === project)
-    .filter((reference) => selectedProducts.includes(normalizeReferenceValue(reference.product)))
+    .filter((reference) => parseSelectedProducts(reference.product)
+      .map(normalizeReferenceValue)
+      .some((product) => selectedProducts.includes(product)))
     .filter((reference) => finishedProductKey(reference));
 }
 
@@ -6273,32 +6297,32 @@ function ModificationsPage(props) {
   } = props;
   const canAdmin = isAdminUser(currentUser);
   const canValidate = canValidatePhases(currentUser);
-  const canRequestValidation = isRequestPilot(currentUser, selectedRequest)
+  const canRequestValidation = isRequestPilot(currentUser, selectedRequest, projects)
     || isProjectLeadForRequest(currentUser, selectedRequest, projects);
   const requestTerminal = isTerminalRequest(selectedRequest);
   const canManageDossierReview = !requestTerminal && (canAdmin || canRequestValidation);
   const canExportDossierReview = canAdmin || canRequestValidation;
   const canExportGantt = Boolean(selectedRequest);
   const canCancelRequest = !requestTerminal && canAdmin && selectedRequest?.currentStage !== "CANCELLED";
-  const canEditRequest = !requestTerminal && (canAdmin || isRequestPilot(currentUser, selectedRequest));
+  const canEditRequest = !requestTerminal && (canAdmin || isRequestPilot(currentUser, selectedRequest, projects));
   const workflowApproved = allWorkflowStagesApproved(selectedRequest, phaseValidations);
   const canRequestClosure = !requestTerminal && canRequestValidation && workflowApproved && !selectedRequest?.closureRequested;
   const canCloseRequest = !requestTerminal && canAdmin && workflowApproved && selectedRequest?.closureRequested;
   const currentValidation = phaseValidations.find((validation) => validation.stage === selectedStage && validation.status === "PENDING");
   const latestStageValidation = phaseValidations.find((validation) => validation.stage === selectedStage);
-  const visibleActions = actions;
-  const stageActionsDone = actions.length > 0 && actions.every(isActionDone);
+  const visibleActions = canAdmin ? actions : stageActionsForUser(currentUser, selectedRequest, actions, selectedStage);
+  const stageActionsDone = actions.every(isActionDone);
   const isCurrentStage = selectedRequest && selectedStage === selectedRequest.currentStage;
   const authenticatedUserRequests = useMemo(() => {
     const userRequests = canAdmin
       ? [...requests]
-      : requests.filter((request) => !request.archived && isRequestParticipantForUser(currentUser, request, actionsByRequestId[request.id] || []));
+      : requests.filter((request) => !request.archived && hasActiveStageActionForUser(currentUser, request, actionsByRequestId[request.id] || []));
     return userRequests.sort((first, second) => {
       const firstDate = parseDateOnly(first.receptionDate)?.getTime() || 0;
       const secondDate = parseDateOnly(second.receptionDate)?.getTime() || 0;
       return secondDate - firstDate || String(requestDisplayName(first)).localeCompare(String(requestDisplayName(second)), "fr", { sensitivity: "base" });
     });
-  }, [actionsByRequestId, canAdmin, currentUser, requests]);
+  }, [actionsByRequestId, canAdmin, currentUser, projects, requests]);
   const requestStatusOptions = [
     ["all", "Toutes"],
     ["active", "Actives"],
@@ -6313,7 +6337,7 @@ function ModificationsPage(props) {
     }
     setShowCreateForm(false);
     setSelectedId(request.id);
-    const participantStage = firstActionParticipantStage(currentUser, actionsByRequestId[request.id] || []);
+    const participantStage = canAdmin ? firstActionParticipantStage(currentUser, actionsByRequestId[request.id] || []) : null;
     setSelectedStage(safeStage(participantStage || request.currentStage, Boolean(request.newVersion)));
     setDetailsCollapsed(false);
     setListOpen(false);
@@ -6619,7 +6643,7 @@ function ModificationsPage(props) {
                       <button
                         key={key}
                         className={`tab ${stageColorClass(key, Boolean(selectedRequest.newVersion))}${selectedStage === key ? " active" : ""}${closedByCancellation ? " closed" : ""}`}
-                        onClick={() => (canAdmin && !requestTerminal ? handleStageChange(key) : setSelectedStage(key))}
+                        onClick={() => (canAdmin ? handleStageChange(key) : setSelectedStage(key))}
                       >
                         {label}
                       </button>
@@ -6891,7 +6915,7 @@ function PhaseValidationPanel({ canAdmin, canRequestValidation, canValidate, isC
   const phaseApproved = latestValidation?.status === "APPROVED";
   const phaseReopened = latestValidation?.status === "REOPENED";
   const displayedRate = latestValidation?.validationRate ?? validationRate ?? 0;
-  const allActionsValidated = validation && (validation.totalActions || 0) > 0 && (validation.approvedActions || 0) >= (validation.totalActions || 0);
+  const allActionsValidated = validation && ((validation.totalActions || 0) === 0 || (validation.approvedActions || 0) >= (validation.totalActions || 0));
   const statusText = phaseValidationStatusText({
     canRequestValidation,
     isCurrentStage,
@@ -7002,7 +7026,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
   const [expanded, setExpanded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const stageTitle = stageLabel(selectedStage, stageNewProject);
-  const canCreateAction = !readOnly && (canAdmin || isRequestPilot(currentUser, selectedRequest));
+  const canCreateAction = !readOnly && (canAdmin || isRequestPilot(currentUser, selectedRequest, projects));
 
   function openCreateAction() {
     updateActionForm("stage", selectedRequest?.currentStage || selectedStage);
@@ -7154,7 +7178,7 @@ ActionsPanel.propTypes = {
   users: PropTypes.array
 };
 
-function ActionList({ actions, currentUser, expanded = false, phaseValidation, phaseValidations = [], projects = [], readOnly = false, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteAction, handleDeleteActionAsset, handleUploadEvidence, handleAddEvidenceLink, requiresEvidence, saving, selectedRequest, users = [] }) {
+function ActionList({ actions, canAdmin = false, currentUser, expanded = false, phaseValidation, phaseValidations = [], projects = [], readOnly = false, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteAction, handleDeleteActionAsset, handleUploadEvidence, handleAddEvidenceLink, requiresEvidence, saving, selectedRequest, users = [] }) {
   const [durationValues, setDurationValues] = useState({});
   const [assetLinks, setAssetLinks] = useState({});
 
@@ -7192,15 +7216,19 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
     <>
       <div className={expanded ? "action-list expanded" : "action-list"}>
         {actions.length === 0 ? (
-          <EmptyState title="Aucune action pour cette phase" text="Ajoutez une action ou utilisez les actions générées lors de la création ECR." />
+          <EmptyState
+            title="Aucune action pour cette phase"
+            text={canAdmin ? "Ajoutez une action ou utilisez les actions generees lors de la creation ECR." : "Vous n'avez aucune action affectee dans la phase active."}
+          />
         ) : (
           [...actions].sort(compareActionDisplayOrder).map((action, index) => {
             const blockingAction = blockingActionFor(action, actions);
             const isBlocked = Boolean(action.dependsOnActionId && (!blockingAction || !isActionDone(blockingAction)));
-            const canDeleteAction = !readOnly && canDeleteActionForUser(currentUser, action, selectedRequest, phaseValidations);
-            const canEditDuration = !readOnly && canEditActionDurationForUser(currentUser, action, selectedRequest, phaseValidations);
+            const canDeleteAction = !readOnly && canDeleteActionForUser(currentUser, action, selectedRequest, phaseValidations, projects);
+            const canEditDuration = !readOnly && canEditActionDurationForUser(currentUser, action, selectedRequest, phaseValidations, projects);
             const canManageAction = !readOnly && canManageActionForUser(currentUser, action, phaseValidations, selectedRequest);
-            const canToggleAction = !readOnly && canToggleActionForUser(currentUser, action, selectedRequest, phaseValidations);
+            const canAddAsset = !readOnly && !isActionPhaseApproved(action, phaseValidations) && isActionPilotForUser(currentUser, action, selectedRequest, projects);
+            const canToggleAction = !readOnly && canToggleActionForUser(currentUser, action, selectedRequest, phaseValidations, projects);
             const historical = isHistoricalActionDisplay(action);
             const responsibleDisplay = actionParticipantDisplay({
               historical,
@@ -7303,15 +7331,15 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
                       </span>
                     )) : "-"}
                   </strong>
-                  <label className={canManageAction ? "row-upload asset-upload-action" : "row-upload asset-upload-action disabled"} title="Affecter un asset">
+                  <label className={canAddAsset ? "row-upload asset-upload-action" : "row-upload asset-upload-action disabled"} title="Affecter un asset">
                     <Upload size={15} />
-                    <input disabled={saving || !canManageAction} multiple type="file" onChange={(event) => {
+                    <input disabled={saving || !canAddAsset} multiple type="file" onChange={(event) => {
                       const selectedFiles = Array.from(event.currentTarget.files || []);
                       handleUploadEvidence(action, selectedFiles);
                       event.currentTarget.value = "";
                     }} />
                   </label>
-                  {canManageAction && (
+                  {canAddAsset && (
                     <span className="asset-link-inputs compact-asset-link-inputs">
                       <input
                         disabled={saving}
@@ -7363,7 +7391,7 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
                         </button>
                       </span>
                     )}
-                    {!readOnly && canRequestRejectedActionValidationForUser(currentUser, action, selectedRequest) && phaseValidation?.status === "PENDING" && (
+                    {!readOnly && canRequestRejectedActionValidationForUser(currentUser, action, selectedRequest, projects) && phaseValidation?.status === "PENDING" && (
                       <button className="primary-action compact-action action-validation-button" disabled={saving} type="button" onClick={() => handleRequestActionValidation(phaseValidation, action)}>
                         <CheckCircle2 size={14} />
                         Redemander validation
@@ -7385,6 +7413,7 @@ function ActionList({ actions, currentUser, expanded = false, phaseValidation, p
 
 ActionList.propTypes = {
   actions: PropTypes.array.isRequired,
+  canAdmin: PropTypes.bool,
   currentUser: PropTypes.object,
   expanded: PropTypes.bool,
   phaseValidation: PropTypes.object,

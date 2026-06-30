@@ -95,20 +95,20 @@ function auditFriendlyDetail(log) {
   if (storedDetail) return storedDetail;
   const target = auditTargetHint(log);
   const labels = {
-    CREATION_MODIFICATION: `Nouvelle demande creee${target ? `: ${target}` : ""}.`,
-    MODIFICATION_MODIFICATION: `Demande mise a jour${target ? `: ${target}` : ""}.`,
-    ANNULATION_MODIFICATION: `Demande annulee${target ? `: ${target}` : ""}.`,
-    VALIDATION_PHASE: `Phase validee${target ? ` pour ${target}` : ""}.`,
+    CREATION_MODIFICATION: `Nouvelle demande créée${target ? `: ${target}` : ""}.`,
+    MODIFICATION_MODIFICATION: `Demande mise à jour${target ? `: ${target}` : ""}.`,
+    ANNULATION_MODIFICATION: `Demande annulée${target ? `: ${target}` : ""}.`,
+    VALIDATION_PHASE: `Phase validée${target ? ` pour ${target}` : ""}.`,
     REOUVERTURE_PHASE: `Phase rouverte${target ? ` pour ${target}` : ""}.`,
-    ACTION_TERMINEE: `Action terminee${target ? `: ${target}` : ""}.`,
-    VALIDATION_ACTION: `Action validee${target ? `: ${target}` : ""}.`,
-    REFUS_VALIDATION_ACTION: `Action refusee${target ? `: ${target}` : ""}.`,
-    AJOUT_CLIENT: "Nouveau client ajoute au referentiel.",
-    AJOUT_PRODUIT: "Nouveau produit ajoute au referentiel.",
-    AJOUT_PROJET: "Nouveau projet ajoute.",
-    MODIFICATION_PROJET_EQUIPE: `Projet ou equipe mis a jour${target ? `: ${target}` : ""}.`
+    ACTION_TERMINEE: `Action terminée${target ? `: ${target}` : ""}.`,
+    VALIDATION_ACTION: `Action validée${target ? `: ${target}` : ""}.`,
+    REFUS_VALIDATION_ACTION: `Action refusée${target ? `: ${target}` : ""}.`,
+    AJOUT_CLIENT: "Nouveau client ajoute au référentiel.",
+    AJOUT_PRODUIT: "Nouveau produit ajouté au référentiel.",
+    AJOUT_PROJET: "Nouveau projet ajouté.",
+    MODIFICATION_PROJET_EQUIPE: `Projet ou équipe mis à jour${target ? `: ${target}` : ""}.`
   };
-  return labels[log.actionType] || "Un changement important a ete effectue.";
+  return labels[log.actionType] || "Un changement important a été effectué.";
 }
 
 function auditTargetSummary(log) {

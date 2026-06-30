@@ -345,7 +345,7 @@ public class EcrActionController {
             return ResponseEntity.badRequest().build();
         }
         return actionRepository.findById(id)
-                .filter(action -> accessControlService.canManageAction(user, action) && canMutateAction(action))
+                .filter(action -> accessControlService.canCompleteAction(user, action) && canMutateAction(action))
                 .map(action -> {
                     StoredAsset asset = storageService.upload(file, "gestion-planning/actions/" + id);
                     EcrActionAsset actionAsset = new EcrActionAsset();
@@ -378,7 +378,7 @@ public class EcrActionController {
             return ResponseEntity.badRequest().build();
         }
         return actionRepository.findById(id)
-                .filter(action -> accessControlService.canManageAction(user, action) && canMutateAction(action))
+                .filter(action -> accessControlService.canCompleteAction(user, action) && canMutateAction(action))
                 .map(action -> {
                     String label = normalizeText(payload.getName());
                     EcrActionAsset actionAsset = new EcrActionAsset();
@@ -623,6 +623,10 @@ public class EcrActionController {
                 return ResponseEntity.status(403).<Void>build();
             }
             Long requestId = action.getRequestId();
+            templateService.suppressActionFor(action.getRequest(), action);
+            if (action.getRequest() != null) {
+                requestRepository.save(action.getRequest());
+            }
             assetRepository.findByAction_IdOrderByUploadedAtDescIdDesc(id)
                     .forEach(asset -> storageService.deleteQuietly(asset.getPublicId(), asset.getResourceType()));
             storageService.deleteQuietly(action.getEvidencePublicId(), action.getEvidenceResourceType());
@@ -646,10 +650,7 @@ public class EcrActionController {
         if (accessControlService.isAdmin(user)) {
             return true;
         }
-        if (accessControlService.canManageAction(user, action)) {
-            return true;
-        }
-        return accessControlService.isRequestPilot(user, action.getRequest());
+        return accessControlService.canCompleteAction(user, action);
     }
 
     private boolean canDeleteActionState(EcrAction action) {
@@ -659,10 +660,7 @@ public class EcrActionController {
         if (action.getRequest().getCurrentStage() == EcrStage.CANCELLED && action.getStage() != EcrStage.CANCELLED) {
             return false;
         }
-        if (!isActionPhaseApproved(action)) {
-            return true;
-        }
-        return !isDone(action) && action.getValidationStatus() != ActionValidationStatus.APPROVED;
+        return !isDone(action);
     }
 
     private boolean canMutateAction(EcrAction action) {

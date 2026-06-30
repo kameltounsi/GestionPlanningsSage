@@ -318,7 +318,7 @@ public class PhaseValidationController {
 
     private boolean allStageActionsDone(Long requestId, EcrStage stage) {
         List<EcrAction> actions = phaseActions(requestId, stage);
-        return !actions.isEmpty() && actions.stream().allMatch(this::isDone);
+        return actions.stream().allMatch(this::isDone);
     }
 
     private boolean isApprovedStage(Long requestId, EcrStage stage) {
@@ -370,7 +370,7 @@ public class PhaseValidationController {
         if (enriched == null) {
             return false;
         }
-        return enriched.getTotalActions() > 0 && enriched.getApprovedActions() >= enriched.getTotalActions();
+        return enriched.getTotalActions() == 0 || enriched.getApprovedActions() >= enriched.getTotalActions();
     }
 
     private List<PhaseValidationRequest> enrichValidations(List<PhaseValidationRequest> validations) {

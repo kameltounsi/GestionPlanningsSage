@@ -31,6 +31,7 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -172,7 +173,7 @@ public class FinishedProductReferenceController {
         finishedProduct.setPartNumber(finishedProduct.getPartNumber().trim());
         finishedProduct.setDesignation(trimToNull(finishedProduct.getDesignation()));
         finishedProduct.setCustomerPn(trimToNull(finishedProduct.getCustomerPn()));
-        finishedProduct.setProduct(finishedProduct.getProduct().trim());
+        finishedProduct.setProduct(normalizeProductList(finishedProduct.getProduct()));
         finishedProduct.setCoiffeIndex(trimToNull(finishedProduct.getCoiffeIndex()));
         finishedProduct.setDrawingIndex(trimToNull(finishedProduct.getDrawingIndex()));
         finishedProduct.setReducedCode(finishedProduct.getReducedCode().trim());
@@ -182,7 +183,7 @@ public class FinishedProductReferenceController {
     private boolean linkedReferencesExist(FinishedProductReference finishedProduct) {
         return clientRepository.existsByName(finishedProduct.getClient())
                 && projectRepository.existsById(finishedProduct.getProject())
-                && productRepository.existsByName(finishedProduct.getProduct());
+                && productsExist(finishedProduct.getProduct());
     }
 
     private String uniquenessError(FinishedProductReference finishedProduct, Long currentId) {
@@ -322,7 +323,7 @@ public class FinishedProductReferenceController {
         String client = resolveReference("client", cellText(row, clientColumn, formatter), clients, rowErrors);
         String project = resolveReference("projet", cellText(row, projectColumn, formatter), projects, rowErrors);
         String partNumber = cellText(row, partNumberColumn, formatter);
-        String product = resolveReference("produit", cellText(row, productColumn, formatter), products, rowErrors);
+        String product = resolveProductReferences(cellText(row, productColumn, formatter), products, rowErrors);
         String reducedCode = cellText(row, reducedCodeColumn, formatter);
         validateImportKeys(partNumber, reducedCode, existingPartNumbers, existingReducedCodes, filePartNumbers, fileReducedCodes, rowErrors);
 
@@ -465,6 +466,58 @@ public class FinishedProductReferenceController {
             rowErrors.add(label + " inexistant: " + value);
         }
         return officialValue;
+    }
+
+    private String resolveProductReferences(String value, Map<String, String> products, List<String> rowErrors) {
+        List<String> productNames = productList(value);
+        if (productNames.isEmpty()) {
+            rowErrors.add("produit obligatoire");
+            return null;
+        }
+        List<String> officialProducts = new ArrayList<>();
+        for (String productName : productNames) {
+            String officialValue = products.get(normalizedKey(productName));
+            if (officialValue == null) {
+                rowErrors.add("produit inexistant: " + productName);
+            } else if (!officialProducts.contains(officialValue)) {
+                officialProducts.add(officialValue);
+            }
+        }
+        return officialProducts.isEmpty() ? null : String.join("; ", officialProducts);
+    }
+
+    private boolean productsExist(String value) {
+        List<String> productNames = productList(value);
+        if (productNames.isEmpty()) {
+            return false;
+        }
+        Map<String, String> products = productNameByKey();
+        for (String productName : productNames) {
+            if (!products.containsKey(normalizedKey(productName))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String normalizeProductList(String value) {
+        List<String> productNames = productList(value);
+        return productNames.isEmpty() ? null : String.join("; ", productNames);
+    }
+
+    private List<String> productList(String value) {
+        Set<String> products = new LinkedHashSet<>();
+        String text = trimToNull(value);
+        if (text == null) {
+            return new ArrayList<>();
+        }
+        for (String product : text.split("[,;/\\r\\n]+")) {
+            String trimmed = trimToNull(product);
+            if (trimmed != null) {
+                products.add(trimmed);
+            }
+        }
+        return new ArrayList<>(products);
     }
 
     private String cellText(Row row, Integer columnIndex, DataFormatter formatter) {

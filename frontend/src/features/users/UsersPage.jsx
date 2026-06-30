@@ -257,7 +257,7 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
         <div className="form-intro">
           <div>
             <h2 id="user-dialog-title">{editingUser ? "Modifier l'utilisateur" : "Ajouter un utilisateur"}</h2>
-            <p>Le username et l'email doivent rester uniques. En édition, renseignez le mot de passe seulement pour le remplacer.</p>
+            <p>Le username, l'email et le téléphone doivent rester uniques. En édition, renseignez le mot de passe seulement pour le remplacer.</p>
           </div>
           <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
             <X size={18} />
@@ -308,7 +308,7 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
           </label>
           <label>
             Telephone
-            <input autoComplete="tel" disabled={!canAdmin} inputMode="tel" pattern="\\+?[0-9\\s().-]{8,20}" value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
+            <input autoComplete="tel" required disabled={!canAdmin} inputMode="tel" pattern="\\+?[0-9\\s().-]{8,20}" value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} />
           </label>
           <label>
             Chef 1

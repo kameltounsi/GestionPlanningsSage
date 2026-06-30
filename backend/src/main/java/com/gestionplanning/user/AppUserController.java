@@ -48,6 +48,7 @@ public class AppUserController {
                 || invalidPhone(user.getPhone())
                 || userRepository.existsByUsername(user.getUsername())
                 || userRepository.existsByEmail(user.getEmail())
+                || userRepository.existsByPhone(user.getPhone())
                 || invalidChefAssignment(user, null)) {
             return ResponseEntity.badRequest().build();
         }
@@ -72,6 +73,7 @@ public class AppUserController {
                             || invalidPhone(updatedUser.getPhone())
                             || hasDuplicateUsername(id, updatedUser.getUsername())
                             || hasDuplicateEmail(id, updatedUser.getEmail())
+                            || hasDuplicatePhone(id, updatedUser.getPhone())
                             || invalidChefAssignment(updatedUser, id)) {
                         return ResponseEntity.badRequest().<AppUserDto>build();
                     }
@@ -113,7 +115,8 @@ public class AppUserController {
                 .map(user -> {
                     updatedUser.setUsername(updatedUser.getUsername() == null ? user.getUsername() : normalizedText(updatedUser.getUsername()));
                     updatedUser.setEmail(updatedUser.getEmail() == null ? user.getEmail() : normalizedText(updatedUser.getEmail()));
-                    if (invalidPhone(updatedUser.getPhone()) || hasDuplicateUsername(id, updatedUser.getUsername()) || hasDuplicateEmail(id, updatedUser.getEmail())) {
+                    updatedUser.setPhone(updatedUser.getPhone() == null ? user.getPhone() : updatedUser.getPhone().trim());
+                    if (invalidPhone(updatedUser.getPhone()) || hasDuplicateUsername(id, updatedUser.getUsername()) || hasDuplicateEmail(id, updatedUser.getEmail()) || hasDuplicatePhone(id, updatedUser.getPhone())) {
                         return ResponseEntity.badRequest().<AppUserDto>build();
                     }
                     user.setFullName(requiredOrExisting(updatedUser.getFullName(), user.getFullName()));
@@ -222,6 +225,7 @@ public class AppUserController {
     private void normalize(AppUser user) {
         user.setUsername(normalizedText(user.getUsername()));
         user.setEmail(normalizedText(user.getEmail()));
+        user.setPhone(user.getPhone() == null ? null : user.getPhone().trim());
         user.setChef1(normalizedText(user.getChef1()));
         user.setChef2(normalizedText(user.getChef2()));
         user.setRole(user.getRole() == null || user.getRole().trim().isEmpty() ? UserRole.CHEF_DE_PROJET.name() : user.getRole().trim());
@@ -243,8 +247,12 @@ public class AppUserController {
         return email != null && userRepository.findByEmail(email).map(user -> !user.getId().equals(id)).orElse(false);
     }
 
+    private boolean hasDuplicatePhone(Long id, String phone) {
+        return phone != null && userRepository.findByPhone(phone).map(user -> !user.getId().equals(id)).orElse(false);
+    }
+
     private boolean invalidPhone(String phone) {
-        return phone != null && !phone.trim().isEmpty() && !phone.trim().matches("\\+?[0-9\\s().-]{8,20}");
+        return phone == null || phone.trim().isEmpty() || !phone.trim().matches("\\+?[0-9\\s().-]{8,20}");
     }
 
     private boolean invalidChefAssignment(AppUser user, Long userId) {

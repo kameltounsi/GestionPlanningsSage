@@ -96,8 +96,7 @@ public class AccessControlService {
         if (user == null || request == null) {
             return false;
         }
-        String pilot = normalize(request.getPilot());
-        return !pilot.isEmpty() && matchesUser(user, pilot);
+        return matchesRequestAssignment(user, request, request.getPilot());
     }
 
     public boolean canSeeAllActions(AppUser user, EcrRequest request) {

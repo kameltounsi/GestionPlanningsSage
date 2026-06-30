@@ -9,7 +9,9 @@ import javax.validation.constraints.NotNull;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Entity
 public class EcrRequest {
@@ -116,6 +118,12 @@ public class EcrRequest {
     @OneToMany(mappedBy = "request", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnore
     private List<ChecklistItem> checklistItems = new ArrayList<>();
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "ecr_request_suppressed_action", joinColumns = @JoinColumn(name = "request_id"))
+    @Column(name = "action_key", nullable = false, length = 1200)
+    @JsonIgnore
+    private Set<String> suppressedActionKeys = new HashSet<>();
 
     @Transient
     private List<EcrAction> initialActions = new ArrayList<>();
@@ -638,6 +646,20 @@ public class EcrRequest {
 
     public void setInitialActions(List<EcrAction> initialActions) {
         this.initialActions = initialActions == null ? new ArrayList<>() : initialActions;
+    }
+
+    public Set<String> getSuppressedActionKeys() {
+        return suppressedActionKeys;
+    }
+
+    public void setSuppressedActionKeys(Set<String> suppressedActionKeys) {
+        this.suppressedActionKeys = suppressedActionKeys == null ? new HashSet<>() : suppressedActionKeys;
+    }
+
+    public void suppressActionKey(String actionKey) {
+        if (actionKey != null && !actionKey.trim().isEmpty()) {
+            suppressedActionKeys.add(actionKey);
+        }
     }
 
     public void addChecklistItem(ChecklistItem item) {

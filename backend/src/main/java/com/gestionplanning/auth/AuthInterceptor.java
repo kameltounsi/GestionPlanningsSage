@@ -106,6 +106,6 @@ public class AuthInterceptor implements HandlerInterceptor {
         if (path.matches("/api/action-planning-rules(/.*)?")) {
             return true;
         }
-        return HttpMethod.DELETE.matches(method) && path.matches("/api/actions/\\d+");
+        return false;
     }
 }

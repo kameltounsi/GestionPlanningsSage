@@ -33,6 +33,8 @@ public class AppUser {
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
 
+    @NotBlank
+    @Column(nullable = false, unique = true)
     private String phone;
 
     private String chef1;

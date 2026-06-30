@@ -56,7 +56,7 @@ export function ProfilePage({ currentUser, passwordForm, profileForm, saving, on
             </label>
             <label>
               Telephone
-              <input value={profileForm.phone} onChange={(event) => setProfileForm((form) => ({ ...form, phone: event.target.value }))} />
+              <input required autoComplete="tel" inputMode="tel" pattern="\\+?[0-9\\s().-]{8,20}" value={profileForm.phone} onChange={(event) => setProfileForm((form) => ({ ...form, phone: event.target.value }))} />
             </label>
           </div>
           <div className="button-row">

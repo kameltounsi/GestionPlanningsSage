@@ -2901,6 +2901,13 @@ textarea {
   justify-content: space-between;
 }
 
+.form-intro-actions {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
 .form-page label {
   color: #344054;
   display: grid;

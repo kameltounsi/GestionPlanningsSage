@@ -40,7 +40,7 @@ public class FinishedProductReference {
     private String customerPn;
 
     @NotBlank
-    @Column(nullable = false, length = 160)
+    @Column(nullable = false, length = 500)
     private String product;
 
     @Column(length = 80)

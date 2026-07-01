@@ -14,10 +14,12 @@ import javax.mail.MessagingException;
 import javax.mail.PasswordAuthentication;
 import javax.mail.Session;
 import javax.mail.Transport;
+import javax.activation.DataHandler;
 import javax.mail.internet.MimeMessage;
 import javax.mail.internet.InternetAddress;
 import javax.mail.internet.MimeBodyPart;
 import javax.mail.internet.MimeMultipart;
+import javax.mail.util.ByteArrayDataSource;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.Properties;
@@ -432,6 +434,52 @@ public class AccountMailService {
         sendMessage(to, null, subject, plainText, html, logContext);
     }
 
+    public void sendModificationProgressExcelEmail(EcrRequest request, Collection<AppUser> recipients, byte[] excelContent, String filename) {
+        if (!alertMailEnabled) {
+            throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");
+        }
+        if (request == null) {
+            return;
+        }
+        if (recipients == null || recipients.isEmpty()) {
+            throw new MailDeliveryException("Aucun admin/chef de projet destinataire pour le dossier Excel.");
+        }
+        if (excelContent == null || excelContent.length == 0) {
+            throw new MailDeliveryException("Le dossier Excel est vide.");
+        }
+        String to = recipients.stream()
+                .map(AppUser::getEmail)
+                .filter(email -> !isBlank(email))
+                .distinct()
+                .collect(Collectors.joining(","));
+        if (isBlank(to)) {
+            throw new MailDeliveryException("Les destinataires n'ont pas d'adresse email renseignee.");
+        }
+        if (!isMailConfigured()) {
+            LOGGER.error("Weekly progress email skipped because SMTP configuration is incomplete.");
+            throw new MailDeliveryException("Configuration SMTP incomplete: SPRING_MAIL_USERNAME et SPRING_MAIL_PASSWORD sont obligatoires.");
+        }
+        String modificationName = modificationName(request);
+        String title = "Avancement hebdomadaire - " + value(modificationName);
+        String text = "Bonjour,\n\nVeuillez trouver ci-joint le dossier Excel mis a jour avec l'avancement actuel de la modification "
+                + value(modificationName)
+                + TEXT_PROJECT_LINE + value(request.getModificationProject())
+                + "\nClient : " + value(request.getClient())
+                + "\nProduit : " + value(request.getProduct())
+                + TEXT_LINK_LINE + value(applicationUrl);
+        String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
+                + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
+                + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
+                + "<div style=\"background:#111827;color:#ffffff;padding:24px 30px;\"><div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#bfdbfe;\">Gestion Planning Sage</div>"
+                + "<h1 style=\"margin:10px 0 0;font-size:24px;\">Avancement hebdomadaire</h1></div>"
+                + "<div style=\"padding:26px 30px;font-size:15px;line-height:1.7;\">"
+                + "<p>Veuillez trouver ci-joint le dossier Excel mis a jour avec l'avancement actuel de la modification <strong>" + escape(value(modificationName)) + "</strong>.</p>"
+                + "<p><strong>Projet :</strong> " + escape(value(request.getModificationProject())) + HTML_CLIENT_FIELD + escape(value(request.getClient())) + HTML_PRODUCT_FIELD + escape(value(request.getProduct())) + "</p>"
+                + "<div style=\"text-align:center;margin:28px 0 8px;\"><a href=\"" + escapeAttribute(applicationUrl) + "\" style=\"display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:700;\">Ouvrir Gestion Planning</a></div>"
+                + "</div></div></div></body></html>";
+        sendMessageWithAttachment(to, title, text, html, excelContent, filename, "weekly modification progress");
+    }
+
     private void sendMessage(String to, Collection<AppUser> ccRecipients, String subject, String plainText, String html, String logContext) {
         try {
             MimeMessage message = new MimeMessage(mailSession());
@@ -449,6 +497,42 @@ public class AccountMailService {
             LOGGER.error("Unable to send {} email to {}", logContext, to, exception);
             throw new MailDeliveryException("Échec d'envoi email: " + rootMessage(exception), exception);
         }
+    }
+
+    private void sendMessageWithAttachment(String to, String subject, String plainText, String html, byte[] attachment,
+                                           String filename, String logContext) {
+        try {
+            MimeMessage message = new MimeMessage(mailSession());
+            message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(to));
+            message.setFrom(new InternetAddress(fromAddress));
+            message.setSubject(subject, EMAIL_CHARSET);
+
+            MimeMultipart mixed = new MimeMultipart("mixed");
+
+            MimeBodyPart contentPart = new MimeBodyPart();
+            contentPart.setContent(buildContent(plainText, html));
+            mixed.addBodyPart(contentPart);
+
+            MimeBodyPart attachmentPart = new MimeBodyPart();
+            ByteArrayDataSource source = new ByteArrayDataSource(attachment, attachmentContentType(filename));
+            attachmentPart.setDataHandler(new DataHandler(source));
+            attachmentPart.setFileName(isBlank(filename) ? "dossier-avancement.xlsx" : filename);
+            mixed.addBodyPart(attachmentPart);
+
+            message.setContent(mixed);
+            Transport.send(message);
+            LOGGER.info("{} email sent to {} with attachment {}", logContext, to, filename);
+        } catch (MessagingException | RuntimeException exception) {
+            LOGGER.error("Unable to send {} email to {}", logContext, to, exception);
+            throw new MailDeliveryException("Echec d'envoi email: " + rootMessage(exception), exception);
+        }
+    }
+
+    private String attachmentContentType(String filename) {
+        if (filename != null && filename.toLowerCase().endsWith(".xls")) {
+            return "application/vnd.ms-excel; charset=UTF-8";
+        }
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     }
 
     private String ccAddresses(Collection<AppUser> ccRecipients, String to) {

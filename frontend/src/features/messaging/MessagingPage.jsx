@@ -1,5 +1,5 @@
 import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Image as ImageIcon, MessageCircle, Paperclip, Pencil, Plus, Search, Send, Smile, Square, Volume2, X } from "lucide-react";
+import { Bot, Image as ImageIcon, Mic, MessageCircle, Paperclip, Pencil, Plus, Search, Send, Smile, Square, Volume2, X } from "lucide-react";
 import { chatAttachmentUrl } from "../../api";
 import { EmptyState } from "../../components/common/EmptyState";
 import { PageHeader } from "../../components/common/PageHeader";
@@ -105,6 +105,19 @@ function isImageAsset(contentType, url) {
   return type.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(path);
 }
 
+function isAudioAsset(contentType, url) {
+  const type = String(contentType || "").toLowerCase();
+  const path = String(url || "").toLowerCase();
+  return type.startsWith("audio/") || /\.(webm|mp3|m4a|ogg|wav|aac)$/.test(path);
+}
+
+function formatRecordingDuration(seconds = 0) {
+  const safeSeconds = Math.max(0, Number(seconds) || 0);
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainingSeconds = safeSeconds % 60;
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
 export function ChatFloatingButton({ count = 0, onClick }) {
   return (
     <button className="chat-floating-button" type="button" title="Messagerie rapide" onClick={onClick}>
@@ -162,11 +175,17 @@ export function QuickChatPanel({
   typingNotice,
   users = [],
   onClearFile,
+  onCancelVoiceRecording,
   onClose,
   onDraftChange,
   onFileChange,
+  onStartVoiceRecording,
+  onStopVoiceRecording,
   onSelectUser,
-  onSend
+  onSend,
+  recordingDuration = 0,
+  recordingSupported = true,
+  recordingVoice = false
 }) {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [arabicKeyboardOpen, setArabicKeyboardOpen] = useState(false);
@@ -280,16 +299,36 @@ export function QuickChatPanel({
                     <Paperclip size={18} />
                     <input ref={fileInputRef} type="file" onChange={onFileChange} />
                   </label>
+                  {recordingSupported && (
+                    <button
+                      className={recordingVoice ? "icon-button chat-voice-button recording" : "icon-button chat-voice-button"}
+                      disabled={sending}
+                      type="button"
+                      title={recordingVoice ? "Arreter l'enregistrement vocal" : "Enregistrer un message vocal"}
+                      onClick={recordingVoice ? onStopVoiceRecording : onStartVoiceRecording}
+                    >
+                      {recordingVoice ? <Square size={17} /> : <Mic size={18} />}
+                    </button>
+                  )}
+                  {recordingVoice && (
+                    <span className="chat-recording-chip">
+                      <span />
+                      {formatRecordingDuration(recordingDuration)}
+                      <button type="button" title="Annuler l'enregistrement" onClick={onCancelVoiceRecording}>
+                        <X size={14} />
+                      </button>
+                    </span>
+                  )}
                   {file && (
                     <span className="chat-file-chip">
-                      <Paperclip size={14} />
+                      {isAudioAsset(file.type, file.name) ? <Mic size={14} /> : <Paperclip size={14} />}
                       {file.name}
                       <button type="button" title="Retirer le fichier" onClick={onClearFile}>
                         <X size={14} />
                       </button>
                     </span>
                   )}
-                  <button className="primary-action chat-send-button" type="submit" disabled={sending || (!draft.trim() && !file)}>
+                  <button className="primary-action chat-send-button" type="submit" disabled={sending || recordingVoice || (!draft.trim() && !file)}>
                     <Send size={16} />
                   </button>
                 </div>
@@ -318,6 +357,7 @@ export function MessagingPage({
   typingNotice,
   users = [],
   onClearFile,
+  onCancelVoiceRecording,
   onAddGroupMember,
   onCreateGroup,
   onDraftChange,
@@ -326,7 +366,12 @@ export function MessagingPage({
   onGroupProjectChange,
   onRefresh,
   onSelectUser,
+  onStartVoiceRecording,
+  onStopVoiceRecording,
   onSend,
+  recordingDuration = 0,
+  recordingSupported = true,
+  recordingVoice = false,
   setGroupFormOpen,
   setGroupName,
   setGroupProjectName
@@ -578,16 +623,36 @@ export function MessagingPage({
                     <Paperclip size={18} />
                     <input ref={fileInputRef} type="file" onChange={onFileChange} />
                   </label>
+                  {recordingSupported && (
+                    <button
+                      className={recordingVoice ? "icon-button chat-voice-button recording" : "icon-button chat-voice-button"}
+                      disabled={sending}
+                      type="button"
+                      title={recordingVoice ? "Arreter l'enregistrement vocal" : "Enregistrer un message vocal"}
+                      onClick={recordingVoice ? onStopVoiceRecording : onStartVoiceRecording}
+                    >
+                      {recordingVoice ? <Square size={17} /> : <Mic size={18} />}
+                    </button>
+                  )}
+                  {recordingVoice && (
+                    <span className="chat-recording-chip">
+                      <span />
+                      {formatRecordingDuration(recordingDuration)}
+                      <button type="button" title="Annuler l'enregistrement" onClick={onCancelVoiceRecording}>
+                        <X size={14} />
+                      </button>
+                    </span>
+                  )}
                   {file && (
                     <span className="chat-file-chip">
-                      <Paperclip size={14} />
+                      {isAudioAsset(file.type, file.name) ? <Mic size={14} /> : <Paperclip size={14} />}
                       {file.name}
                       <button type="button" title="Retirer le fichier" onClick={onClearFile}>
                         <X size={14} />
                       </button>
                     </span>
                   )}
-                  <button className="primary-action chat-send-button" type="submit" disabled={sending || (!draft.trim() && !file)}>
+                  <button className="primary-action chat-send-button" type="submit" disabled={sending || recordingVoice || (!draft.trim() && !file)}>
                     <Send size={16} />
                     {sending ? "Envoi..." : "Envoyer"}
                   </button>
@@ -640,6 +705,23 @@ function UserAvatar({ user, small = false }) {
 function ChatAttachment({ message }) {
   const href = chatAttachmentUrl(message.id);
   const isImage = isImageAsset(message.attachmentContentType, message.attachmentFileName);
+  const isAudio = isAudioAsset(message.attachmentContentType, message.attachmentFileName);
+  if (isAudio) {
+    return (
+      <div className="chat-attachment audio">
+        <div>
+          <Mic size={17} />
+          <span>
+            <strong>{message.attachmentFileName || "Message vocal"}</strong>
+            {message.attachmentFileSize ? <small>{formatFileSize(message.attachmentFileSize)}</small> : null}
+          </span>
+        </div>
+        <audio controls preload="metadata" src={href}>
+          <a href={href} target="_blank" rel="noreferrer">Ecouter le message vocal</a>
+        </audio>
+      </div>
+    );
+  }
   return (
     <a className={isImage ? "chat-attachment image" : "chat-attachment"} href={href} target="_blank" rel="noreferrer">
       {isImage ? (

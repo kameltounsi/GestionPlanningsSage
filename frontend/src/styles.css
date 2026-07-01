@@ -1009,9 +1009,9 @@ textarea {
 .dashboard-gauge-arc {
   background:
     conic-gradient(from 270deg at 50% 100%,
-      #9bdc54 0deg 60deg,
+      #e11d48 0deg 60deg,
       #facc15 60deg 126deg,
-      #e11d48 126deg 180deg,
+      #9bdc54 126deg 180deg,
       transparent 180deg 360deg);
   border-radius: 150px 150px 0 0;
   height: 78px;
@@ -2175,6 +2175,26 @@ textarea {
   color: rgba(255, 255, 255, 0.7);
 }
 
+.chat-attachment.audio {
+  align-items: stretch;
+  display: grid;
+  gap: 8px;
+  max-width: min(330px, 100%);
+}
+
+.chat-attachment.audio > div {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-attachment.audio audio {
+  height: 34px;
+  max-width: 100%;
+  width: 280px;
+}
+
 .chat-composer {
   border-top: 1px solid var(--line);
   display: grid;
@@ -2307,6 +2327,49 @@ textarea {
   inset: 0;
   opacity: 0;
   position: absolute;
+}
+
+.chat-voice-button.recording {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
+.chat-recording-chip {
+  align-items: center;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  color: #9a3412;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 7px;
+  min-height: 38px;
+  padding: 7px 9px;
+}
+
+.chat-recording-chip > span {
+  animation: recordingPulse 1s infinite;
+  background: #dc2626;
+  border-radius: 999px;
+  height: 8px;
+  width: 8px;
+}
+
+.chat-recording-chip button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  padding: 0;
+}
+
+@keyframes recordingPulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
 }
 
 .chat-file-chip {
@@ -5722,6 +5785,16 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   color: var(--blue);
   font-weight: 700;
   text-decoration: none;
+}
+
+.local-file-reference {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
 }
 
 .file-link:hover {

@@ -66,6 +66,10 @@ public class AccessControlService {
                 .anyMatch(action -> isActionParticipant(user, action));
     }
 
+    public boolean canCreateRequest(AppUser user, EcrRequest request) {
+        return isAdmin(user) || isProjectLeadForRequest(user, request);
+    }
+
     public boolean canValidateRequest(AppUser user, EcrRequest request) {
         return isAdmin(user) || hasApplicationRole(user, UserRole.MANAGER) && canAccessRequest(user, request);
     }
@@ -279,7 +283,7 @@ public class AccessControlService {
                         || entry.roles.stream().anyMatch(role -> role.equals(normalize(UserRole.CHEF_DE_PROJET.name())) || role.equals(normalize(roleLabel(UserRole.CHEF_DE_PROJET))))));
     }
 
-    private boolean isProjectLeadForRequest(AppUser user, EcrRequest request) {
+    public boolean isProjectLeadForRequest(AppUser user, EcrRequest request) {
         if (user == null || request == null || request.getModificationProject() == null) {
             return false;
         }

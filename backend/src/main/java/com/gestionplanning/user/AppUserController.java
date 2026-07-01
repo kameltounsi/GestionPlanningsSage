@@ -41,16 +41,12 @@ public class AppUserController {
 
     @PostMapping
     @Transactional
-    public ResponseEntity<AppUserDto> create(@Valid @RequestBody AppUserDto userDto) {
+    public ResponseEntity<Object> create(@Valid @RequestBody AppUserDto userDto) {
         AppUser user = toEntity(userDto);
         normalize(user);
-        if (user.getUsername() == null || user.getUsername().trim().isEmpty()
-                || invalidPhone(user.getPhone())
-                || userRepository.existsByUsername(user.getUsername())
-                || userRepository.existsByEmail(user.getEmail())
-                || userRepository.existsByPhone(user.getPhone())
-                || invalidChefAssignment(user, null)) {
-            return ResponseEntity.badRequest().build();
+        String validationError = validateUser(user, null);
+        if (validationError != null) {
+            return userValidationError(validationError);
         }
         String initialPassword = user.getPassword();
         user.setPassword(passwordService.encode(user.getPassword()));
@@ -60,25 +56,19 @@ public class AppUserController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<AppUserDto> update(@PathVariable Long id, @RequestBody AppUserDto updatedUserDto,
+    public ResponseEntity<Object> update(@PathVariable Long id, @RequestBody AppUserDto updatedUserDto,
                                              @RequestAttribute("authenticatedUser") Object authenticatedUserAttribute) {
                                                  AppUser authenticatedUser = (AppUser) authenticatedUserAttribute;
         AppUser updatedUser = toEntity(updatedUserDto);
         return userRepository.findById(id)
                 .map(user -> {
                     normalize(updatedUser);
-                    if (updatedUser.getFullName() == null || updatedUser.getFullName().trim().isEmpty()
-                            || updatedUser.getUsername() == null || updatedUser.getUsername().trim().isEmpty()
-                            || updatedUser.getEmail() == null || updatedUser.getEmail().trim().isEmpty()
-                            || invalidPhone(updatedUser.getPhone())
-                            || hasDuplicateUsername(id, updatedUser.getUsername())
-                            || hasDuplicateEmail(id, updatedUser.getEmail())
-                            || hasDuplicatePhone(id, updatedUser.getPhone())
-                            || invalidChefAssignment(updatedUser, id)) {
-                        return ResponseEntity.badRequest().<AppUserDto>build();
+                    String validationError = validateUser(updatedUser, id);
+                    if (validationError != null) {
+                        return userValidationError(validationError);
                     }
                     if (hasRequestedPassword(updatedUser) && !canChangeOwnPassword(authenticatedUser, id)) {
-                        return ResponseEntity.status(403).<AppUserDto>build();
+                        return ResponseEntity.status(403).<Object>build();
                     }
                     user.setFullName(updatedUser.getFullName());
                     user.setUsername(updatedUser.getUsername());
@@ -92,9 +82,9 @@ public class AppUserController {
                     user.setChef2(updatedUser.getChef2());
                     user.setRole(updatedUser.getRole());
                     user.setEnabled(updatedUser.isEnabled());
-                    return ResponseEntity.ok(toDto(userRepository.save(user)));
+                    return ResponseEntity.ok((Object) toDto(userRepository.save(user)));
                 })
-                .orElse(ResponseEntity.notFound().build());
+                .orElse(ResponseEntity.status(404).<Object>build());
     }
 
     @GetMapping("/me")
@@ -249,6 +239,40 @@ public class AppUserController {
 
     private boolean hasDuplicatePhone(Long id, String phone) {
         return phone != null && userRepository.findByPhone(phone).map(user -> !user.getId().equals(id)).orElse(false);
+    }
+
+    private ResponseEntity<Object> userValidationError(String message) {
+        return ResponseEntity.badRequest()
+                .header("Content-Type", "text/plain; charset=UTF-8")
+                .body(message);
+    }
+
+    private String validateUser(AppUser user, Long id) {
+        if (user.getFullName() == null || user.getFullName().trim().isEmpty()) {
+            return "Le nom complet est obligatoire.";
+        }
+        if (user.getUsername() == null || user.getUsername().trim().isEmpty()) {
+            return "Le username est obligatoire.";
+        }
+        if (user.getEmail() == null || user.getEmail().trim().isEmpty()) {
+            return "L'email est obligatoire.";
+        }
+        if (invalidPhone(user.getPhone())) {
+            return "Le numero de telephone est invalide ou manquant.";
+        }
+        if (hasDuplicateUsername(id, user.getUsername())) {
+            return "Ce username existe deja. Choisissez un autre username.";
+        }
+        if (hasDuplicateEmail(id, user.getEmail())) {
+            return "Cet email existe deja. Choisissez une autre adresse email.";
+        }
+        if (hasDuplicatePhone(id, user.getPhone())) {
+            return "Ce numero de telephone existe deja. Choisissez un autre numero.";
+        }
+        if (invalidChefAssignment(user, id)) {
+            return "Chef 1 ou Chef 2 est invalide. Selectionnez des chefs existants, ou le nouvel utilisateur lui-meme si necessaire.";
+        }
+        return null;
     }
 
     private boolean invalidPhone(String phone) {

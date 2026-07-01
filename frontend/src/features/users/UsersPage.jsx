@@ -76,7 +76,11 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
   }
 
   function submitDialog(event) {
-    onSubmit(event);
+    const result = onSubmit(event);
+    if (result && typeof result.then === "function") {
+      result.then(() => setDialogOpen(false)).catch(() => {});
+      return;
+    }
     setDialogOpen(false);
   }
 

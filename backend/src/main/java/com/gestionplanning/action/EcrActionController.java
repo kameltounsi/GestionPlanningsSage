@@ -384,7 +384,7 @@ public class EcrActionController {
                     EcrActionAsset actionAsset = new EcrActionAsset();
                     actionAsset.setAction(action);
                     actionAsset.setFileName(label == null ? url : label);
-                    actionAsset.setContentType("text/uri-list");
+                    actionAsset.setContentType(MediaType.TEXT_PLAIN_VALUE);
                     actionAsset.setFileSize(null);
                     actionAsset.setFileUrl(url);
                     actionAsset.setPublicId(null);
@@ -452,7 +452,7 @@ public class EcrActionController {
                     EcrActionProofDocument proofDocument = new EcrActionProofDocument();
                     proofDocument.setAction(action);
                     proofDocument.setFileName(label == null ? url : label);
-                    proofDocument.setContentType("text/uri-list");
+                    proofDocument.setContentType(MediaType.TEXT_PLAIN_VALUE);
                     proofDocument.setFileSize(null);
                     proofDocument.setFileUrl(url);
                     proofDocument.setPublicId(null);
@@ -479,6 +479,9 @@ public class EcrActionController {
             if (isExternalLink(action.getEvidenceFileUrl(), action.getEvidencePublicId(), action.getEvidenceResourceType())) {
                 return ResponseEntity.status(302).location(URI.create(action.getEvidenceFileUrl())).build();
             }
+            if (isSharedReference(action.getEvidenceFileUrl(), action.getEvidencePublicId(), action.getEvidenceResourceType())) {
+                return sharedReferenceResponse(action.getEvidenceFileName(), action.getEvidenceFileUrl());
+            }
             if (action.getEvidenceFileUrl() != null && !action.getEvidenceFileUrl().trim().isEmpty()) {
                 DownloadedAsset asset = storageService.download(action.getEvidencePublicId(), action.getEvidenceResourceType(), action.getEvidenceFileUrl(), action.getEvidenceContentType());
                 return ResponseEntity.ok()
@@ -504,6 +507,9 @@ public class EcrActionController {
             if (isExternalLink(action.getProofDocumentFileUrl(), action.getProofDocumentPublicId(), action.getProofDocumentResourceType())) {
                 return ResponseEntity.status(302).location(URI.create(action.getProofDocumentFileUrl())).build();
             }
+            if (isSharedReference(action.getProofDocumentFileUrl(), action.getProofDocumentPublicId(), action.getProofDocumentResourceType())) {
+                return sharedReferenceResponse(action.getProofDocumentFileName(), action.getProofDocumentFileUrl());
+            }
             try {
                 DownloadedAsset asset = storageService.download(action.getProofDocumentPublicId(), action.getProofDocumentResourceType(), action.getProofDocumentFileUrl(), action.getProofDocumentContentType());
                 return ResponseEntity.ok()
@@ -524,6 +530,9 @@ public class EcrActionController {
                 .<ResponseEntity<Object>>map(proofDocument -> {
                     if (isExternalLink(proofDocument.getFileUrl(), proofDocument.getPublicId(), proofDocument.getResourceType())) {
                         return ResponseEntity.status(302).location(URI.create(proofDocument.getFileUrl())).build();
+                    }
+                    if (isSharedReference(proofDocument.getFileUrl(), proofDocument.getPublicId(), proofDocument.getResourceType())) {
+                        return sharedReferenceResponse(proofDocument.getFileName(), proofDocument.getFileUrl());
                     }
                     try {
                         DownloadedAsset asset = storageService.download(proofDocument.getPublicId(), proofDocument.getResourceType(), proofDocument.getFileUrl(), proofDocument.getContentType());
@@ -582,6 +591,9 @@ public class EcrActionController {
                 .<ResponseEntity<Object>>map(actionAsset -> {
                     if (isExternalLink(actionAsset.getFileUrl(), actionAsset.getPublicId(), actionAsset.getResourceType())) {
                         return ResponseEntity.status(302).location(URI.create(actionAsset.getFileUrl())).build();
+                    }
+                    if (isSharedReference(actionAsset.getFileUrl(), actionAsset.getPublicId(), actionAsset.getResourceType())) {
+                        return sharedReferenceResponse(actionAsset.getFileName(), actionAsset.getFileUrl());
                     }
                     try {
                         DownloadedAsset asset = storageService.download(actionAsset.getPublicId(), actionAsset.getResourceType(), actionAsset.getFileUrl(), actionAsset.getContentType());
@@ -1179,17 +1191,15 @@ public class EcrActionController {
                 .body(message);
     }
 
+    private ResponseEntity<Object> sharedReferenceResponse(String fileName, String value) {
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(fileName, MediaType.TEXT_PLAIN_VALUE))
+                .contentType(MediaType.TEXT_PLAIN)
+                .body(value);
+    }
+
     private String normalizeSharedLink(String value) {
-        String url = normalizeText(value);
-        if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) {
-            return null;
-        }
-        try {
-            URI.create(url);
-            return url;
-        } catch (IllegalArgumentException exception) {
-            return null;
-        }
+        return normalizeText(value);
     }
 
     private String normalizeText(String value) {
@@ -1201,9 +1211,28 @@ public class EcrActionController {
     }
 
     private boolean isExternalLink(String fileUrl, String publicId, String resourceType) {
+        return isHttpSharedLink(fileUrl)
+                && (publicId == null || publicId.trim().isEmpty())
+                && "link".equalsIgnoreCase(String.valueOf(resourceType));
+    }
+
+    private boolean isSharedReference(String fileUrl, String publicId, String resourceType) {
         return normalizeSharedLink(fileUrl) != null
                 && (publicId == null || publicId.trim().isEmpty())
                 && "link".equalsIgnoreCase(String.valueOf(resourceType));
+    }
+
+    private boolean isHttpSharedLink(String value) {
+        String url = normalizeText(value);
+        if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) {
+            return false;
+        }
+        try {
+            URI.create(url);
+            return true;
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 
     public static class LinkPayload {

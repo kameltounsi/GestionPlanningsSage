@@ -125,6 +125,9 @@ public class EcrRequestController {
                                                  AppUser user = (AppUser) userAttribute;
         EcrRequest request = requestDto.toEntity();
         normalizeRequestFields(request);
+        if (!accessControlService.canCreateRequest(user, request)) {
+            return ResponseEntity.status(403).build();
+        }
         if (requestRepository.existsByModificationNumberIgnoreCase(request.getModificationNumber())
                 || !finishedProductsSelectionValid(request)) {
             return ResponseEntity.badRequest().build();
@@ -186,8 +189,6 @@ public class EcrRequestController {
                     }
                     request.setModificationReason(updatedRequest.getModificationReason());
                     request.setModificationDetail(updatedRequest.getModificationDetail());
-                    request.setBeforePhoto(updatedRequest.getBeforePhoto());
-                    request.setAfterPhoto(updatedRequest.getAfterPhoto());
                     request.setMixability(updatedRequest.getMixability());
                     request.setDossierReview(updatedRequest.getDossierReview());
                     request.setTechnicalFile(updatedRequest.getTechnicalFile());
@@ -225,11 +226,16 @@ public class EcrRequestController {
     }
 
     @PostMapping(value = "/{id}/images/{type}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<EcrRequestDto> uploadImage(@PathVariable Long id, @PathVariable String type, @RequestParam("file") MultipartFile file) {
-        if (file.isEmpty() || file.getContentType() == null) {
+    public ResponseEntity<EcrRequestDto> uploadImage(@PathVariable Long id, @PathVariable String type, @RequestParam("file") MultipartFile file,
+                                                     @RequestAttribute("authenticatedUser") Object userAttribute) {
+        AppUser user = (AppUser) userAttribute;
+        if (file.isEmpty() || file.getContentType() == null || !file.getContentType().toLowerCase(Locale.ROOT).startsWith("image/")) {
             return ResponseEntity.badRequest().build();
         }
         return requestRepository.findById(id)
+                .filter(request -> accessControlService.isAdmin(user)
+                        || accessControlService.isRequestPilot(user, request)
+                        || accessControlService.isProjectLeadForRequest(user, request))
                 .map(request -> {
                     if (isTerminalRequest(request)) {
                         return ResponseEntity.status(403).<EcrRequestDto>build();

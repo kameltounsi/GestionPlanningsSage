@@ -1708,13 +1708,22 @@ function canValidatePhases(user) {
   return isAdminUser(user) || hasApplicationRole(user, "MANAGER", "Manager");
 }
 
-function isProjectLeadForAnyProject(user, projects = []) {
-  if (!user) return false;
-  return projects.some((project) => parseProjectTeamEntries(project.projectTeam).some((entry) =>
+function canCreateRequest(user, projects = []) {
+  return isAdminUser(user) || isProjectLeadForAnyProject(user, projects);
+}
+
+function isProjectLeadForProject(user, project) {
+  if (!user || !project) return false;
+  return parseProjectTeamEntries(project.projectTeam).some((entry) =>
     userMatchesAssignment(user, normalizeRoleToken(entry.name))
     && (entry.roles.length === 0 && hasApplicationRole(user, "CHEF_DE_PROJET", "Chef de projet")
       || entry.roles.some((role) => normalizeRoleToken(role).replaceAll("_", " ") === "chef de projet"))
-  ));
+  );
+}
+
+function isProjectLeadForAnyProject(user, projects = []) {
+  if (!user) return false;
+  return projects.some((project) => isProjectLeadForProject(user, project));
 }
 
 function projectForRequest(request, projects = []) {
@@ -1723,12 +1732,7 @@ function projectForRequest(request, projects = []) {
 
 function isProjectLeadForRequest(user, request, projects = []) {
   const project = projectForRequest(request, projects);
-  if (!user || !project) return false;
-  return parseProjectTeamEntries(project.projectTeam).some((entry) =>
-    userMatchesAssignment(user, normalizeRoleToken(entry.name))
-    && (entry.roles.length === 0 && hasApplicationRole(user, "CHEF_DE_PROJET", "Chef de projet")
-      || entry.roles.some((role) => normalizeRoleToken(role).replaceAll("_", " ") === "chef de projet"))
-  );
+  return isProjectLeadForProject(user, project);
 }
 
 function canAccessPreferentialsPage(user, projects = []) {
@@ -1945,7 +1949,7 @@ function hasActiveStageActionForUser(user, request, actions = []) {
 
 function isRequestParticipantForUser(user, request, actions = [], projects = []) {
   if (isAdminUser(user)) return true;
-  return hasActiveStageActionForUser(user, request, actions);
+  return isRequestPilot(user, request, projects) || actions.some((action) => isActionParticipantForUser(user, action));
 }
 
 function firstActionParticipantStage(user, actions = []) {
@@ -1992,6 +1996,8 @@ function App() {
   const [chatDraft, setChatDraft] = useState("");
   const [chatFile, setChatFile] = useState(null);
   const [chatSending, setChatSending] = useState(false);
+  const [chatRecording, setChatRecording] = useState(false);
+  const [chatRecordingDuration, setChatRecordingDuration] = useState(0);
   const [chatGroupFormOpen, setChatGroupFormOpen] = useState(false);
   const [chatGroupName, setChatGroupName] = useState("");
   const [chatGroupProjectName, setChatGroupProjectName] = useState("");
@@ -2042,6 +2048,10 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const chatFileInputRef = useRef(null);
+  const chatRecorderRef = useRef(null);
+  const chatRecordingChunksRef = useRef([]);
+  const chatRecordingTimerRef = useRef(null);
+  const chatRecordingStreamRef = useRef(null);
   const chatTypingSentAt = useRef(0);
   const chatTypingStopTimer = useRef(null);
   const chatTypingClearTimer = useRef(null);
@@ -2081,7 +2091,9 @@ function App() {
     const canAdmin = isAdminUser(currentUser);
     return requests.filter((request) => {
       if (!requestMatchesView(request, requestArchiveView, canAdmin)) return false;
-      if (!canAdmin && !hasActiveStageActionForUser(currentUser, request, actionsByRequestId[request.id] || [])) return false;
+      if (!canAdmin
+        && Object.hasOwn(actionsByRequestId, request.id)
+        && !isRequestParticipantForUser(currentUser, request, actionsByRequestId[request.id] || [], projects)) return false;
       const matchesProject = !projectFilter || request.modificationProject === projectFilter;
       const matchesType = !requestTypeFilter
         || (requestTypeFilter === "new-project" ? Boolean(request.newVersion) : !request.newVersion);
@@ -2187,11 +2199,16 @@ function App() {
   }, [currentUser, requestArchiveView]);
 
   const dashboardStats = useMemo(() => {
-    const visibleRequests = requests.filter((request) => !request.archived);
+    const visibleRequests = requests
+      .filter((request) => !request.archived)
+      .filter((request) => isAdminUser(currentUser)
+        || !Object.hasOwn(actionsByRequestId, request.id)
+        || isRequestParticipantForUser(currentUser, request, actionsByRequestId[request.id] || [], projects));
     const active = visibleRequests.filter(isActiveRequest).length;
     const closed = visibleRequests.filter((request) => request.currentStage === "CLOSED").length;
-    return { active, closed, projects: projects.length, requests: visibleRequests.length };
-  }, [requests, projects]);
+    const visibleProjects = new Set(visibleRequests.map((request) => request.modificationProject).filter(Boolean));
+    return { active, closed, projects: isAdminUser(currentUser) ? projects.length : visibleProjects.size, requests: visibleRequests.length };
+  }, [actionsByRequestId, currentUser, requests, projects]);
 
   const filteredAuditLogs = useMemo(() => {
     const normalized = auditQuery.trim().toLowerCase();
@@ -2455,6 +2472,9 @@ function App() {
 
   function handleChatFileChange(event) {
     const file = event.target.files?.[0] || null;
+    if (chatRecording) {
+      handleCancelVoiceRecording();
+    }
     setChatFile(file);
   }
 
@@ -2463,6 +2483,91 @@ function App() {
     if (chatFileInputRef.current) {
       chatFileInputRef.current.value = "";
     }
+  }
+
+  function cleanupVoiceRecording() {
+    globalThis.clearInterval(chatRecordingTimerRef.current);
+    chatRecordingTimerRef.current = null;
+    chatRecordingStreamRef.current?.getTracks?.().forEach((track) => track.stop());
+    chatRecordingStreamRef.current = null;
+    chatRecorderRef.current = null;
+    chatRecordingChunksRef.current = [];
+    setChatRecording(false);
+    setChatRecordingDuration(0);
+  }
+
+  function voiceFileExtension(type = "") {
+    const normalized = String(type || "").toLowerCase();
+    if (normalized.includes("ogg")) return "ogg";
+    if (normalized.includes("mp4")) return "m4a";
+    if (normalized.includes("mpeg")) return "mp3";
+    if (normalized.includes("wav")) return "wav";
+    return "webm";
+  }
+
+  function handleStartVoiceRecording() {
+    if (chatRecording || chatSending) return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      warningAlert("Micro indisponible", "L'enregistrement vocal n'est pas disponible dans ce navigateur.");
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then((stream) => {
+        const recorder = new MediaRecorder(stream);
+        chatRecordingStreamRef.current = stream;
+        chatRecorderRef.current = recorder;
+        chatRecordingChunksRef.current = [];
+        recorder.ondataavailable = (event) => {
+          if (event.data?.size > 0) {
+            chatRecordingChunksRef.current.push(event.data);
+          }
+        };
+        recorder.onstop = () => {
+          const chunks = chatRecordingChunksRef.current;
+          const type = recorder.mimeType || chunks[0]?.type || "audio/webm";
+          if (chunks.length > 0) {
+            const blob = new Blob(chunks, { type });
+            const extension = voiceFileExtension(type);
+            const timestamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
+            const file = new File([blob], `message-vocal-${timestamp}.${extension}`, { type });
+            setChatFile(file);
+            if (chatFileInputRef.current) {
+              chatFileInputRef.current.value = "";
+            }
+          }
+          cleanupVoiceRecording();
+        };
+        recorder.start();
+        setChatRecording(true);
+        setChatRecordingDuration(0);
+        chatRecordingTimerRef.current = globalThis.setInterval(() => {
+          setChatRecordingDuration((seconds) => seconds + 1);
+        }, 1000);
+      })
+      .catch(() => {
+        warningAlert("Acces micro refuse", "Autorisez l'acces au microphone pour envoyer un message vocal.");
+        cleanupVoiceRecording();
+      });
+  }
+
+  function handleStopVoiceRecording() {
+    const recorder = chatRecorderRef.current;
+    if (!recorder || recorder.state === "inactive") {
+      cleanupVoiceRecording();
+      return;
+    }
+    recorder.stop();
+  }
+
+  function handleCancelVoiceRecording() {
+    const recorder = chatRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.ondataavailable = null;
+      recorder.onstop = cleanupVoiceRecording;
+      recorder.stop();
+      return;
+    }
+    cleanupVoiceRecording();
   }
 
   function handleChatDraftChange(value) {
@@ -2483,6 +2588,10 @@ function App() {
   function handleSendChatMessage(event) {
     event.preventDefault();
     if (!selectedChatUserId || chatSending) return;
+    if (chatRecording) {
+      warningAlert("Enregistrement en cours", "Arretez l'enregistrement vocal avant d'envoyer le message.");
+      return;
+    }
     if (!chatDraft.trim() && !chatFile) {
       warningAlert("Message vide", "Ecrivez un message ou joignez un fichier avant l'envoi.");
       return;
@@ -2494,7 +2603,7 @@ function App() {
     const request = target.type === "group"
       ? sendChatGroupMessage(target.id, chatDraft, chatFile)
       : sendChatMessage(target.id, chatDraft, chatFile);
-    request
+    return request
       .then((message) => {
         setChatMessages((items) => [...items, message]);
         setChatDraft("");
@@ -2621,6 +2730,10 @@ function App() {
         setSelectedId((currentId) => currentId ?? requestData[0]?.id ?? null);
       }));
   }
+
+  useEffect(() => () => {
+    cleanupVoiceRecording();
+  }, []);
   function refreshSelectedData(requestId = selectedId, stage = selectedStage) {
     if (!requestId) return Promise.resolve([]);
     const requestSequence = ++selectedDetailsRequestId.current;
@@ -2964,6 +3077,39 @@ function App() {
     };
   }
 
+  function uploadEcrRequestPhotos(request, form) {
+    let currentRequest = request;
+    const uploadBefore = form.beforePhotoFile
+      ? uploadEcrRequestImage(currentRequest.id, "before", form.beforePhotoFile).then((updatedRequest) => {
+          currentRequest = updatedRequest;
+          return currentRequest;
+        })
+      : Promise.resolve(currentRequest);
+
+    return uploadBefore.then(() => {
+      if (!form.afterPhotoFile) {
+        return currentRequest;
+      }
+      return uploadEcrRequestImage(currentRequest.id, "after", form.afterPhotoFile).then((updatedRequest) => {
+        currentRequest = updatedRequest;
+        return currentRequest;
+      });
+    });
+  }
+
+  function validateEcrPhotoFiles(form) {
+    const invalidFile = [form.beforePhotoFile, form.afterPhotoFile]
+      .filter(Boolean)
+      .find((file) => !String(file.type || "").toLowerCase().startsWith("image/"));
+    if (!invalidFile) {
+      return true;
+    }
+    const message = "Les champs Photo état et Photo devient acceptent uniquement des images.";
+    setError(message);
+    warningAlert("Fichier image requis", message);
+    return false;
+  }
+
   function handleCreateEcr(event) {
     event.preventDefault();
     if (!validateEcrRequiredFields(ecrForm, null, setError, requests)) {
@@ -2978,28 +3124,21 @@ function App() {
     if (!validateFinishedProductsSelection(ecrForm, finishedProductReferences, setError)) {
       return;
     }
+    if (!validateEcrPhotoFiles(ecrForm)) {
+      return;
+    }
     setSaving(true);
     setError("");
     createEcrRequest(buildEcrPayload(ecrForm))
-      .then((savedRequest) => {
-        const uploads = [];
-        if (ecrForm.beforePhotoFile) {
-          uploads.push(uploadEcrRequestImage(savedRequest.id, "before", ecrForm.beforePhotoFile));
-        }
-        if (ecrForm.afterPhotoFile) {
-          uploads.push(uploadEcrRequestImage(savedRequest.id, "after", ecrForm.afterPhotoFile));
-        }
-        return Promise.all(uploads)
-          .then(() => savedRequest)
-          .catch(() => {
-            const message = "Modification créée, mais l'upload d'une image a echoue.";
-            setError(message);
-            warningAlert("Upload incomplet", message);
-            return savedRequest;
-          });
-      })
+      .then((savedRequest) => uploadEcrRequestPhotos(savedRequest, ecrForm))
       .then((savedRequest) => {
         setEcrForm(emptyEcrForm);
+        setRequests((items) => {
+          const nextItems = items.some((item) => item.id === savedRequest.id)
+            ? items.map((item) => (item.id === savedRequest.id ? savedRequest : item))
+            : [savedRequest, ...items];
+          return nextItems;
+        });
         setSelectedId(savedRequest.id);
         setSelectedStage(savedRequest.currentStage);
         setShowCreateForm(false);
@@ -3011,9 +3150,10 @@ function App() {
         );
       })
       .catch(() => {
-        const message = "Création ECR impossible. Créez d'abord le projet, puis vérifiez les champs obligatoires.";
+        const message = "Création ECR impossible. Vérifiez les champs obligatoires et les fichiers photo sélectionnés.";
         setError(message);
         errorAlert(message);
+        throw new Error(message);
       })
       .finally(() => setSaving(false));
   }
@@ -3050,27 +3190,15 @@ function App() {
     if (!validateFinishedProductsSelection(ecrEditForm, finishedProductReferences, setError)) {
       return;
     }
+    if (!validateEcrPhotoFiles(ecrEditForm)) {
+      return;
+    }
     setSaving(true);
     setError("");
     updateEcrRequest(editingEcrRequest.id, buildEcrPayload(ecrEditForm))
+      .then((savedRequest) => uploadEcrRequestPhotos(savedRequest, ecrEditForm))
       .then((savedRequest) => {
-        const uploads = [];
-        if (ecrEditForm.beforePhotoFile) {
-          uploads.push(uploadEcrRequestImage(savedRequest.id, "before", ecrEditForm.beforePhotoFile));
-        }
-        if (ecrEditForm.afterPhotoFile) {
-          uploads.push(uploadEcrRequestImage(savedRequest.id, "after", ecrEditForm.afterPhotoFile));
-        }
-        return Promise.all(uploads)
-          .then(() => savedRequest)
-          .catch(() => {
-            const message = "Modification enregistree, mais l'upload d'une image a echoue.";
-            setError(message);
-            warningAlert("Upload incomplet", message);
-            return savedRequest;
-          });
-      })
-      .then((savedRequest) => {
+        setRequests((items) => items.map((item) => (item.id === savedRequest.id ? savedRequest : item)));
         closeEditEcr();
         setSelectedId(savedRequest.id);
         setSelectedStage(safeStage(savedRequest.currentStage, Boolean(savedRequest.newVersion)));
@@ -3081,7 +3209,7 @@ function App() {
         );
       })
       .catch(() => {
-        const message = "Mise à jour de la modification impossible. Vérifiez les champs obligatoires.";
+        const message = "Mise à jour de la modification impossible. Vérifiez les champs obligatoires et les fichiers photo sélectionnés.";
         setError(message);
         errorAlert(message);
       })
@@ -3885,7 +4013,7 @@ function App() {
         const message = "Sauvegarde client impossible. Vérifiez le nom.";
         setError(message);
         errorAlert(message);
-        throw exception;
+        throw new Error(message);
       })
       .finally(() => setSaving(false));
   }
@@ -3938,7 +4066,7 @@ function App() {
         const message = "Sauvegarde produit impossible. Vérifiez le nom.";
         setError(message);
         errorAlert(message);
-        throw exception;
+        throw new Error(message);
       })
       .finally(() => setSaving(false));
   }
@@ -4012,7 +4140,7 @@ function App() {
         const message = friendlyErrorMessage(exception?.message || "Sauvegarde du produit fini impossible. Vérifiez les clés uniques.");
         setError(message);
         errorAlert(message);
-        throw exception;
+        throw new Error(message);
       })
       .finally(() => setSaving(false));
   }
@@ -4110,7 +4238,7 @@ function App() {
         const message = "Sauvegarde rôle impossible. Vérifiez le nom.";
         setError(message);
         errorAlert(message);
-        throw exception;
+        throw new Error(message);
       })
       .finally(() => setSaving(false));
   }
@@ -4169,7 +4297,7 @@ function App() {
     };
     const isEdit = Boolean(editingPlanningRule);
     const request = isEdit ? updateActionPlanningRule(editingPlanningRule, payload) : createActionPlanningRule(payload);
-    request
+    return request
       .then((savedRule) => {
         const fileUpload = proofDocumentFiles.length === 0 ? Promise.resolve(savedRule) : uploadActionPlanningRuleProofDocumentFiles(savedRule.id, proofDocumentFiles);
         return fileUpload.then((ruleWithFiles) => (hasProofDocumentLink ? uploadActionPlanningRuleProofDocumentLink(ruleWithFiles.id, proofDocumentLink) : ruleWithFiles));
@@ -4189,6 +4317,7 @@ function App() {
         const message = "Sauvegarde règle planning impossible. Vérifiez l'action et la durée.";
         setError(message);
         errorAlert(message);
+        throw new Error(message);
       })
       .finally(() => setSaving(false));
   }
@@ -4345,13 +4474,19 @@ function App() {
       const message = "Affectez Chef 1 et Chef 2 avant d'enregistrer l'utilisateur.";
       setError(message);
       warningAlert("Chefs requis", message);
-      return;
+      return Promise.reject(new Error(message));
     }
     if (!isValidEmail(payload.email)) {
       const message = "Saisissez une adresse email valide, par exemple nom@sagetunisia.com.";
       setError(message);
       warningAlert("Email invalide", message);
-      return;
+      return Promise.reject(new Error(message));
+    }
+    if (!isValidPhone(payload.phone)) {
+      const message = "Saisissez un numero de telephone valide: 8 a 20 caracteres, chiffres, espaces, +, -, points ou parentheses.";
+      setError(message);
+      warningAlert("Telephone invalide", message);
+      return Promise.reject(new Error(message));
     }
     if (!isValidPhone(payload.phone)) {
       const message = "Saisissez un numéro de téléphone valide: 8 à 20 caractères, chiffres, espaces, +, -, points ou parenthèses.";
@@ -4367,7 +4502,7 @@ function App() {
       delete payload.password;
     }
     const request = isEdit ? updateUser(editingUser, payload) : createUser(payload);
-    request
+    return request
       .then((savedUser) => (
         isEdit && nextPassword
           ? changeUserPassword(savedUser.id, nextPassword).then(() => savedUser)
@@ -4396,6 +4531,7 @@ function App() {
           : "Sauvegarde utilisateur impossible. Vérifiez username/email/téléphone uniques, les champs obligatoires et la configuration SMTP.";
         setError(message);
         errorAlert(message);
+        throw new Error(message);
       })
       .finally(() => setSaving(false));
   }
@@ -4813,6 +4949,7 @@ function App() {
             typingNotice={chatTypingNotice}
             users={chatUsers}
             onClearFile={clearChatFile}
+            onCancelVoiceRecording={handleCancelVoiceRecording}
             onAddGroupMember={handleAddChatGroupMember}
             onCreateGroup={handleCreateChatGroup}
             onDraftChange={handleChatDraftChange}
@@ -4821,7 +4958,12 @@ function App() {
             onGroupProjectChange={handleChatGroupProjectChange}
             onRefresh={() => refreshChatData()}
             onSelectUser={handleSelectChatUser}
+            onStartVoiceRecording={handleStartVoiceRecording}
+            onStopVoiceRecording={handleStopVoiceRecording}
             onSend={handleSendChatMessage}
+            recordingDuration={chatRecordingDuration}
+            recordingSupported={Boolean(navigator.mediaDevices?.getUserMedia) && typeof MediaRecorder !== "undefined"}
+            recordingVoice={chatRecording}
             setGroupFormOpen={setChatGroupFormOpen}
             setGroupName={setChatGroupName}
             setGroupProjectName={setChatGroupProjectName}
@@ -5023,17 +5165,24 @@ function App() {
           typingNotice={chatTypingNotice}
           users={chatUsers}
           onClearFile={clearChatFile}
+          onCancelVoiceRecording={handleCancelVoiceRecording}
           onClose={() => setQuickChatOpen(false)}
           onDraftChange={handleChatDraftChange}
           onFileChange={handleChatFileChange}
           onSelectUser={handleSelectChatUser}
+          onStartVoiceRecording={handleStartVoiceRecording}
+          onStopVoiceRecording={handleStopVoiceRecording}
           onSend={handleSendChatMessage}
+          recordingDuration={chatRecordingDuration}
+          recordingSupported={Boolean(navigator.mediaDevices?.getUserMedia) && typeof MediaRecorder !== "undefined"}
+          recordingVoice={chatRecording}
         />
       )}
 
       {showCreateForm && page === "modifications" && (
         <CreateModificationDialog
           clientOptions={clientOptions}
+          currentUser={currentUser}
           ecrForm={ecrForm}
           finishedProductReferences={finishedProductReferences}
           pilots={pilots}
@@ -5187,7 +5336,7 @@ function auditTargetSummary(log) {
   return labels[log.actionType] || auditTargetLabel(log.targetType);
 }
 
-function CreateModificationDialog({ clientOptions, ecrForm, finishedProductReferences, pilots, productOptions, projects, saving, users, onClose, onSubmit, updateEcrForm }) {
+function CreateModificationDialog({ clientOptions, currentUser, ecrForm, finishedProductReferences, pilots, productOptions, projects, saving, users, onClose, onSubmit, updateEcrForm }) {
   return (
     <div className="dialog-backdrop" role="presentation">
       <div
@@ -5198,6 +5347,7 @@ function CreateModificationDialog({ clientOptions, ecrForm, finishedProductRefer
       >
         <NewModificationPage
           clientOptions={clientOptions}
+          currentUser={currentUser}
           ecrForm={ecrForm}
           finishedProductReferences={finishedProductReferences}
           pilots={pilots}
@@ -5250,10 +5400,14 @@ function EditModificationDialog({ clientOptions, currentUser, ecrForm, existingR
 
 function NewModificationPage({ clientOptions, currentUser = null, ecrForm, existingRequest = null, finishedProductReferences = [], mode = "create", pilots, productOptions, projects, saving, submitIcon: SubmitIcon = Plus, submitLabel = "Créer et ouvrir le suivi", users, onCancel, onSubmit, updateEcrForm }) {
   const availableStages = getStages(ecrForm.newVersion);
+  const selectableProjects = mode === "edit" || isAdminUser(currentUser)
+    ? projects
+    : projects.filter((project) => isProjectLeadForProject(currentUser, project));
   const selectedProject = projects.find((project) => project.name === ecrForm.modificationProject);
+  const canUseSelectedProject = mode === "edit" || isAdminUser(currentUser) || isProjectLeadForProject(currentUser, selectedProject);
   const projectTeamMembers = parseProjectTeam(selectedProject?.projectTeam);
-  const projectPilotOptions = projectLeadTeamMembers(selectedProject?.projectTeam, users);
-  const canCreateModification = projects.length > 0 && projectPilotOptions.includes(ecrForm.pilot);
+  const projectPilotOptions = includeCurrentOption(projectLeadTeamMembers(selectedProject?.projectTeam, users), ecrForm.pilot);
+  const canCreateModification = selectableProjects.length > 0 && canUseSelectedProject && projectPilotOptions.includes(ecrForm.pilot);
   const displayedClientOptions = includeCurrentOption(clientOptions, ecrForm.client);
   const selectedProducts = parseSelectedProducts(ecrForm.product);
   const displayedProductOptions = includeCurrentOptions(productOptions, selectedProducts);
@@ -5275,7 +5429,7 @@ function NewModificationPage({ clientOptions, currentUser = null, ecrForm, exist
     canCreateModification,
     finishedProductsRequired,
     form: ecrForm,
-    projects,
+    projects: selectableProjects,
     projectPilotOptions,
     selectedFinishedProducts,
     selectedProducts
@@ -5334,7 +5488,7 @@ function NewModificationPage({ clientOptions, currentUser = null, ecrForm, exist
             <span>Projet</span>
             <select required value={ecrForm.modificationProject} onChange={(event) => updateEcrForm("modificationProject", event.target.value)}>
               <option value="">Sélectionner un projet</option>
-              {projects.map((project) => (
+              {selectableProjects.map((project) => (
                 <option key={project.name} value={project.name}>{project.name}</option>
               ))}
             </select>
@@ -5415,7 +5569,7 @@ function NewModificationPage({ clientOptions, currentUser = null, ecrForm, exist
           </label>
           <label>
             <span>Photo état</span>
-            <input type="file" onChange={(event) => updateEcrForm("beforePhotoFile", event.target.files?.[0] || null)} />
+            <input accept="image/*" type="file" onChange={(event) => updateEcrForm("beforePhotoFile", event.target.files?.[0] || null)} />
             <span className="form-hint">{ecrForm.beforePhotoFile?.name || (currentBeforePhoto ? "Document actuel conservé si aucun fichier n'est choisi" : "Document avant modification")}</span>
             {currentBeforePhoto && (
               <a className="form-image-preview" href={currentBeforeDownloadUrl} target="_blank" rel="noreferrer">
@@ -5426,7 +5580,7 @@ function NewModificationPage({ clientOptions, currentUser = null, ecrForm, exist
           </label>
           <label>
             <span>Photo devient</span>
-            <input type="file" onChange={(event) => updateEcrForm("afterPhotoFile", event.target.files?.[0] || null)} />
+            <input accept="image/*" type="file" onChange={(event) => updateEcrForm("afterPhotoFile", event.target.files?.[0] || null)} />
             <span className="form-hint">{ecrForm.afterPhotoFile?.name || (currentAfterPhoto ? "Document actuel conservé si aucun fichier n'est choisi" : "Document après modification")}</span>
             {currentAfterPhoto && (
               <a className="form-image-preview" href={currentAfterDownloadUrl} target="_blank" rel="noreferrer">
@@ -6105,15 +6259,82 @@ function hasActionProofDocument(action) {
     || actionProofDocuments(action).length > 0;
 }
 
+function isHttpUrl(value) {
+  const text = String(value || "").trim();
+  if (!/^https?:\/\//i.test(text)) return false;
+  try {
+    const url = new URL(text);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isWindowsLocalPath(value) {
+  const text = String(value || "").trim();
+  return /^[a-zA-Z]:[\\/]/.test(text) || /^\\\\[^\\/\s]+[\\/][^\\/\s]+/.test(text);
+}
+
+function sharedReferenceUrl(value, fallbackUrl) {
+  if (isHttpUrl(value)) return value;
+  return fallbackUrl;
+}
+
 function actionAssetUrl(action, asset) {
-  if (asset?.resourceType === "link" && asset.fileUrl) return asset.fileUrl;
+  if (asset?.resourceType === "link" && asset.fileUrl) {
+    return sharedReferenceUrl(asset.fileUrl, actionAssetDownloadUrl(asset.id));
+  }
   return asset?.legacy ? actionEvidenceUrl(action.id) : actionAssetDownloadUrl(asset.id);
 }
 
 function actionProofDocumentItemUrl(action, proofDocument) {
-  if (proofDocument?.resourceType === "link" && proofDocument.fileUrl) return proofDocument.fileUrl;
+  if (proofDocument?.resourceType === "link" && proofDocument.fileUrl) {
+    return sharedReferenceUrl(proofDocument.fileUrl, actionProofDocumentDownloadUrl(proofDocument.id));
+  }
   return proofDocument?.legacy ? actionProofDocumentUrl(action.id) : actionProofDocumentDownloadUrl(proofDocument.id);
 }
+
+function SharedFileReference({ label, reference }) {
+  const localPath = isWindowsLocalPath(reference.value) ? String(reference.value || "").trim() : "";
+  if (localPath) {
+    return (
+      <button className="file-link local-file-reference" type="button" onClick={() => openLocalPathReference(localPath)} title={localPath}>
+        {label}
+      </button>
+    );
+  }
+  if (reference.url) {
+    return (
+      <a className="file-link" href={reference.url} target="_blank" rel="noreferrer">
+        {label}
+      </a>
+    );
+  }
+  return <span className="file-link shared-reference-text" title={reference.value || label}>{label}</span>;
+}
+
+function openLocalPathReference(path) {
+  const text = String(path || "").trim();
+  const showPathAlert = (copied) => AppSwal.fire({
+    icon: copied ? "success" : "info",
+    title: copied ? "Chemin copie" : "Chemin local",
+    html: `<p style="margin:0 0 10px;">Le navigateur bloque l'ouverture directe des fichiers locaux depuis l'application web.</p><p style="margin:0 0 10px;">Collez ce chemin dans l'explorateur Windows :</p><code style="display:block;white-space:normal;word-break:break-all;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">${escapeHtml(text)}</code>`,
+    confirmButtonText: "OK"
+  });
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(() => showPathAlert(true)).catch(() => showPathAlert(false));
+    return;
+  }
+  showPathAlert(false);
+}
+
+SharedFileReference.propTypes = {
+  label: PropTypes.string.isRequired,
+  reference: PropTypes.shape({
+    url: PropTypes.string,
+    value: PropTypes.string
+  }).isRequired
+};
 
 function modificationTypesLabel(request) {
   const types = modificationTypesList(request);
@@ -6336,7 +6557,9 @@ function ModificationsPage(props) {
   const authenticatedUserRequests = useMemo(() => {
     const userRequests = canAdmin
       ? [...requests]
-      : requests.filter((request) => !request.archived && hasActiveStageActionForUser(currentUser, request, actionsByRequestId[request.id] || []));
+      : requests.filter((request) => !request.archived
+        && (!Object.hasOwn(actionsByRequestId, request.id)
+          || isRequestParticipantForUser(currentUser, request, actionsByRequestId[request.id] || [], projects)));
     return userRequests.sort((first, second) => {
       const firstDate = parseDateOnly(first.receptionDate)?.getTime() || 0;
       const secondDate = parseDateOnly(second.receptionDate)?.getTime() || 0;
@@ -6492,7 +6715,7 @@ function ModificationsPage(props) {
         </label>
         <button className="primary-action request-create-action" type="button" onClick={() => {
           setShowCreateForm(true);
-        }} disabled={!canAdmin}>
+        }} disabled={!canCreateRequest(currentUser, projects)}>
           <Plus size={16} />
           Nouvelle ECR
         </button>
@@ -7328,9 +7551,10 @@ function ActionList({ actions, canAdmin = false, currentUser, expanded = false, 
                   <strong className="asset-link-list">
                     {actionProofDocuments(action).length > 0 ? actionProofDocuments(action).map((proofDocument) => (
                       <span className="asset-link-item" key={proofDocument.id || proofDocument.fileName}>
-                        <a className="file-link" href={actionProofDocumentItemUrl(action, proofDocument)} target="_blank" rel="noreferrer">
-                          {proofDocument.fileName || "Element preuve"}
-                        </a>
+                        <SharedFileReference
+                          label={proofDocument.fileName || "Element preuve"}
+                          reference={{ url: actionProofDocumentItemUrl(action, proofDocument), value: proofDocument.fileUrl }}
+                        />
                       </span>
                     )) : "-"}
                   </strong>
@@ -7340,9 +7564,10 @@ function ActionList({ actions, canAdmin = false, currentUser, expanded = false, 
                   <strong className="asset-link-list">
                     {actionAssets(action).length > 0 ? actionAssets(action).map((asset) => (
                       <span className="asset-link-item" key={asset.id || asset.fileName}>
-                        <a className="file-link" href={actionAssetUrl(action, asset)} target="_blank" rel="noreferrer">
-                          {asset.fileName || "Asset"}
-                        </a>
+                        <SharedFileReference
+                          label={asset.fileName || "Asset"}
+                          reference={{ url: actionAssetUrl(action, asset), value: asset.fileUrl }}
+                        />
                         {!asset.legacy && (
                           <button className="ghost-icon asset-delete-action" disabled={saving || !canManageAction} type="button" onClick={() => handleDeleteActionAsset(action, asset)} title="Supprimer l'asset">
                             <Trash2 size={13} />

@@ -21,8 +21,10 @@ function normalizeRoleToken(value) {
 }
 
 function hasApplicationRole(user, code, label) {
-  const role = normalizeRoleToken(user?.role);
-  return role === normalizeRoleToken(code) || role === normalizeRoleToken(label);
+  return String(user?.role || "")
+    .split(/[;,|]+/)
+    .map((role) => normalizeRoleToken(role).replaceAll("_", " "))
+    .some((role) => role === normalizeRoleToken(code).replaceAll("_", " ") || role === normalizeRoleToken(label));
 }
 
 function isAdminUser(user) {
@@ -44,6 +46,39 @@ function userMatchesAssignment(user, assignment) {
   return [user.fullName, user.username, String(user.email || "").split("@")[0]]
     .filter(Boolean)
     .some((value) => normalizeRoleToken(value).split(/\s+/).includes(token));
+}
+
+function parseProjectTeamEntries(projectTeam) {
+  return String(projectTeam || "")
+    .split(/[;\n]+/)
+    .flatMap((entry) => entry.includes("::") ? [entry] : entry.split(","))
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [name, roleText = ""] = entry.split("::");
+      return {
+        name: name.trim(),
+        roles: roleText.split(/[|,]+/).map((role) => role.trim()).filter(Boolean)
+      };
+    })
+    .filter((entry) => entry.name);
+}
+
+function isProjectLeadForProject(user, project) {
+  if (!user || !project) return false;
+  return parseProjectTeamEntries(project.projectTeam).some((entry) =>
+    userMatchesAssignment(user, entry.name)
+    && (entry.roles.length === 0 && hasApplicationRole(user, "CHEF_DE_PROJET", "Chef de projet")
+      || entry.roles.some((role) => normalizeRoleToken(role).replaceAll("_", " ") === "chef de projet"))
+  );
+}
+
+function isProjectLeadForAnyProject(user, projects = []) {
+  return projects.some((project) => isProjectLeadForProject(user, project));
+}
+
+function canCreateRequest(user, projects = []) {
+  return isAdminUser(user) || isProjectLeadForAnyProject(user, projects);
 }
 
 function isRequestPilot(user, request) {
@@ -195,7 +230,8 @@ export function DashboardPage({
   const dashboardRequestIdsKey = dashboardRequestIds.join("|");
   const dashboardRequests = adminView
     ? dashboardCandidateRequests
-    : dashboardCandidateRequests.filter((request) => isRequestParticipantForUser(currentUser, request, dashboardActionsByRequestId[request.id] || []));
+    : dashboardCandidateRequests.filter((request) => !Object.hasOwn(dashboardActionsByRequestId, request.id)
+      || isRequestParticipantForUser(currentUser, request, dashboardActionsByRequestId[request.id] || []));
   const activeRequests = dashboardRequests.filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED");
   const closedRequests = dashboardRequests.filter((request) => request.currentStage === "CLOSED");
   const cancelledRequests = dashboardRequests.filter((request) => request.currentStage === "CANCELLED");
@@ -693,7 +729,7 @@ export function DashboardPage({
             <h2>{adminView ? "Dernières modifications" : "Mes modifications à suivre"}</h2>
             <span>{recentRequests.length} affichée{recentRequests.length > 1 ? "s" : ""}</span>
           </div>
-          <button className="secondary-action" disabled={!adminView} onClick={onCreateRequest}>
+          <button className="secondary-action" disabled={!canCreateRequest(currentUser, projects)} onClick={onCreateRequest}>
             <Plus size={16} />
             Créer ECR
           </button>

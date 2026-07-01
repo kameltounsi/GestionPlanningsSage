@@ -16,7 +16,7 @@ Adresses locales:
 
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:3001/api
-- PostgreSQL cote machine: localhost:5433
+- PostgreSQL cote machine: localhost:5432
 - PostgreSQL cote conteneur backend: postgres:5432
 
 Verifier les services:
@@ -87,10 +87,9 @@ npm run dev
 Pour Docker, le fichier `.env` doit rester oriente conteneurs:
 
 ```env
-VM_HOST=192.168.1.117
-APP_FRONTEND_URL=http://192.168.1.117:3000
+APP_FRONTEND_URL=http://localhost:3000
 VITE_API_BASE_URL=/api
-POSTGRES_HOST_PORT=5433
+POSTGRES_HOST_PORT=5432
 ```
 
 Important:
@@ -98,8 +97,8 @@ Important:
 - Ne mets pas de vrais mots de passe dans `.env.example`.
 - Garde tes vrais secrets uniquement dans `.env` sur la machine de deploiement.
 - Si le backend tourne dans Docker, ne force pas `SPRING_DATASOURCE_URL` dans `.env`: le compose utilise deja `jdbc:postgresql://postgres:5432/plannings`.
-- Si tu lances le backend hors Docker avec PostgreSQL expose par Docker, utilise `jdbc:postgresql://localhost:5433/plannings`.
-- Pour une connexion externe depuis le LAN, utilise `jdbc:postgresql://192.168.1.117:5433/plannings`.
+- Si tu lances le backend hors Docker avec PostgreSQL expose par Docker, utilise `jdbc:postgresql://localhost:5432/plannings`.
+- Pour une connexion externe depuis le LAN/VM, adapte l'IP et le port exposes.
 
 ## 3. Deploiement sur une machine ou VM
 
@@ -129,11 +128,10 @@ nano .env
 Adapter au minimum:
 
 ```env
-VM_HOST=IP_OU_DOMAINE
 POSTGRES_PASSWORD=mot_de_passe_fort
 APP_FRONTEND_URL=http://IP_OU_DOMAINE:3000
 VITE_API_BASE_URL=/api
-POSTGRES_HOST_PORT=5433
+POSTGRES_HOST_PORT=5432
 CLOUDINARY_CLOUD_NAME=...
 CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...
@@ -154,7 +152,7 @@ Ouvrir les ports si le firewall est actif:
 ```bash
 sudo ufw allow 3000
 sudo ufw allow 3001
-sudo ufw allow 5433
+sudo ufw allow 5432
 ```
 
 Verifier:
@@ -228,8 +226,8 @@ docker compose down
 Verifier la connexion PostgreSQL:
 
 - Backend Docker: le compose force `jdbc:postgresql://postgres:5432/plannings`
-- VM / LAN externe: `jdbc:postgresql://192.168.1.117:5433/plannings`
-- Backend local Maven: `jdbc:postgresql://localhost:5433/plannings`
+- VM / LAN externe: `jdbc:postgresql://IP_OU_DOMAINE:5432/plannings`
+- Backend local Maven: `jdbc:postgresql://localhost:5432/plannings`
 
 ### Frontend charge mais API ne repond pas
 

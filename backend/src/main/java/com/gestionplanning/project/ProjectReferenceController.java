@@ -1,6 +1,7 @@
 package com.gestionplanning.project;
 
 import com.gestionplanning.audit.AuditLogService;
+import com.gestionplanning.action.ActionAssigneeResolver;
 import com.gestionplanning.action.ActionStatus;
 import com.gestionplanning.action.EcrAction;
 import com.gestionplanning.action.EcrActionRepository;
@@ -16,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.validation.Valid;
 import java.text.Normalizer;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -33,15 +35,17 @@ public class ProjectReferenceController {
     private final EcrActionRepository actionRepository;
     private final AuditLogService auditLogService;
     private final AccessControlService accessControlService;
+    private final ActionAssigneeResolver assigneeResolver;
 
     public ProjectReferenceController(ProjectReferenceRepository projectRepository, AuditLogService auditLogService,
                                       AccessControlService accessControlService, EcrRequestRepository requestRepository,
-                                      EcrActionRepository actionRepository) {
+                                      EcrActionRepository actionRepository, ActionAssigneeResolver assigneeResolver) {
         this.projectRepository = projectRepository;
         this.requestRepository = requestRepository;
         this.actionRepository = actionRepository;
         this.auditLogService = auditLogService;
         this.accessControlService = accessControlService;
+        this.assigneeResolver = assigneeResolver;
     }
 
     @GetMapping
@@ -84,11 +88,12 @@ public class ProjectReferenceController {
                     if (validationError.isPresent()) {
                         return ResponseEntity.badRequest().<ProjectReferenceDto>build();
                     }
+                    String previousProjectTeam = project.getProjectTeam();
                     String previousProjectLead = projectLeadName(project.getProjectTeam()).orElse(null);
                     String nextProjectLead = projectLeadName(updatedProject.getProjectTeam()).orElse(null);
                     project.setProjectTeam(updatedProject.getProjectTeam());
                     ProjectReference saved = projectRepository.save(project);
-                    syncProjectLeadOnRequests(saved.getName(), previousProjectLead, nextProjectLead);
+                    syncProjectTeamOnRequests(saved.getName(), previousProjectTeam, saved.getProjectTeam(), previousProjectLead, nextProjectLead);
                     auditLogService.recordBusinessEvent(user, "MODIFICATION_PROJET_EQUIPE", "projet", saved.getName(), "Modification du projet ou de son equipe: " + saved.getName());
                     return ResponseEntity.ok(toDto(saved));
                 })
@@ -134,22 +139,25 @@ public class ProjectReferenceController {
         return new ProjectReferenceDto(project.getName(), project.getProjectTeam());
     }
 
-    private void syncProjectLeadOnRequests(String projectName, String previousProjectLead, String nextProjectLead) {
-        if (nextProjectLead == null || nextProjectLead.trim().isEmpty() || normalize(previousProjectLead).equals(normalize(nextProjectLead))) {
+    private void syncProjectTeamOnRequests(String projectName, String previousProjectTeam, String nextProjectTeam,
+                                           String previousProjectLead, String nextProjectLead) {
+        if (nextProjectLead == null || nextProjectLead.trim().isEmpty()) {
             return;
         }
         List<EcrRequest> requests = requestRepository.findByModificationProject(projectName);
         if (requests.isEmpty()) {
             return;
         }
+        List<ProjectTeamEntry> previousEntries = parseTeamEntries(previousProjectTeam);
+        List<ProjectTeamEntry> nextEntries = parseTeamEntries(nextProjectTeam);
         for (EcrRequest request : requests) {
-            if (!isTerminalRequest(request)) {
+            if (!isTerminalRequest(request) && !normalize(previousProjectLead).equals(normalize(nextProjectLead))) {
                 if (!normalize(request.getPilot()).equals(normalize(nextProjectLead))) {
                     request.setPreviousPilot(request.getPilot());
                 }
                 request.setPilot(nextProjectLead);
-                updateOpenActionsForProjectLeadChange(request, previousProjectLead, nextProjectLead);
             }
+            updateOpenActionsForProjectTeamChange(request, previousEntries, nextEntries);
         }
         requestRepository.saveAll(requests);
     }
@@ -162,7 +170,8 @@ public class ProjectReferenceController {
                 || request.isCancelledStatus();
     }
 
-    private void updateOpenActionsForProjectLeadChange(EcrRequest request, String previousProjectLead, String nextProjectLead) {
+    private void updateOpenActionsForProjectTeamChange(EcrRequest request, List<ProjectTeamEntry> previousEntries,
+                                                       List<ProjectTeamEntry> nextEntries) {
         if (request == null || request.getId() == null) {
             return;
         }
@@ -173,13 +182,20 @@ public class ProjectReferenceController {
         boolean changed = false;
         for (EcrAction action : actions) {
             if (action != null && !isHistoricalAction(action)) {
-                if (matchesProjectLeadReference(action.getResponsible(), previousProjectLead)) {
-                    action.setResponsible(nextProjectLead);
+                String nextResponsible = resolveTeamAssignee(request, action.getResponsible(), null, previousEntries, nextEntries);
+                if (hasText(nextResponsible) && !normalize(nextResponsible).equals(normalize(action.getResponsible()))) {
+                    action.setResponsible(nextResponsible);
                     changed = true;
                 }
-                if (matchesProjectLeadReference(action.getValidator(), previousProjectLead)
-                        || matchesProjectLeadReference(action.getValidatorRole(), previousProjectLead)) {
-                    action.setValidator(nextProjectLead);
+
+                String validatorRole = resolveTeamRole(action.getValidatorRole(), action.getValidator(), previousEntries, nextEntries);
+                String nextValidator = assigneeResolver.resolveOptional(request, validatorRole);
+                if (hasText(validatorRole) && !normalize(validatorRole).equals(normalize(action.getValidatorRole()))) {
+                    action.setValidatorRole(validatorRole);
+                    changed = true;
+                }
+                if (hasText(nextValidator) && !normalize(nextValidator).equals(normalize(action.getValidator()))) {
+                    action.setValidator(nextValidator);
                     changed = true;
                 }
             }
@@ -189,6 +205,53 @@ public class ProjectReferenceController {
         }
     }
 
+    private String resolveTeamAssignee(EcrRequest request, String currentAssignee, String fallbackRole,
+                                       List<ProjectTeamEntry> previousEntries, List<ProjectTeamEntry> nextEntries) {
+        String role = resolveTeamRole(currentAssignee, fallbackRole, previousEntries, nextEntries);
+        if (!hasText(role)) {
+            return currentAssignee;
+        }
+        return assigneeResolver.resolve(request, role);
+    }
+
+    private String resolveTeamRole(String currentRoleOrAssignee, String fallbackRoleOrAssignee,
+                                   List<ProjectTeamEntry> previousEntries, List<ProjectTeamEntry> nextEntries) {
+        String current = firstText(currentRoleOrAssignee, fallbackRoleOrAssignee);
+        if (!hasText(current)) {
+            return current;
+        }
+        Optional<String> directRole = rolePresentInTeam(current, nextEntries);
+        if (directRole.isPresent()) {
+            return directRole.get();
+        }
+        return rolesForAssignee(current, previousEntries).stream()
+                .filter(role -> rolePresentInTeam(role, nextEntries).isPresent())
+                .findFirst()
+                .orElse(current);
+    }
+
+    private Optional<String> rolePresentInTeam(String role, List<ProjectTeamEntry> entries) {
+        String normalizedRole = normalize(role);
+        if (normalizedRole.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(entries).orElse(Collections.emptyList()).stream()
+                .flatMap(entry -> entry.roles.stream())
+                .filter(candidate -> normalize(candidate).equals(normalizedRole))
+                .findFirst();
+    }
+
+    private Set<String> rolesForAssignee(String assignee, List<ProjectTeamEntry> entries) {
+        String normalizedAssignee = normalize(assignee);
+        if (normalizedAssignee.isEmpty()) {
+            return Collections.emptySet();
+        }
+        return Optional.ofNullable(entries).orElse(Collections.emptyList()).stream()
+                .filter(entry -> normalize(entry.name).equals(normalizedAssignee))
+                .flatMap(entry -> entry.roles.stream())
+                .collect(Collectors.toSet());
+    }
+
     private boolean isHistoricalAction(EcrAction action) {
         return action != null && (action.isChecked()
                 || action.getStatus() == ActionStatus.DONE
@@ -196,11 +259,20 @@ public class ProjectReferenceController {
                 || "APPROVED".equals(String.valueOf(action.getValidationStatus())));
     }
 
-    private boolean matchesProjectLeadReference(String value, String previousProjectLead) {
-        String normalized = normalize(value);
-        return !normalized.isEmpty()
-                && (normalized.equals(PROJECT_LEAD_ROLE)
-                || normalized.equals(normalize(previousProjectLead)));
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String firstText(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (hasText(value)) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     private Optional<String> projectLeadName(String projectTeam) {

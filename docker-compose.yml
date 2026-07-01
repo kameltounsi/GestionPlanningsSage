@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supersecret}
     ports:
-      - "${POSTGRES_HOST_PORT:-5433}:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - planning-data:/var/lib/postgresql/data
     healthcheck:
@@ -27,7 +27,7 @@ services:
         condition: service_healthy
     environment:
       SERVER_PORT: ${SERVER_PORT:-3001}
-      APP_FRONTEND_URL: ${APP_FRONTEND_URL:-http://${VM_HOST:-192.168.1.117}:3000}
+      APP_FRONTEND_URL: ${APP_FRONTEND_URL:-http://localhost:3000}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-plannings}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-supersecret}
@@ -44,6 +44,9 @@ services:
       SPRING_MAIL_SSL_ENABLE: ${SPRING_MAIL_SSL_ENABLE:-true}
       APP_ACCOUNT_MAIL_ENABLED: ${APP_ACCOUNT_MAIL_ENABLED:-true}
       APP_ALERT_MAIL_ENABLED: ${APP_ALERT_MAIL_ENABLED:-true}
+      APP_WEEKLY_PROGRESS_MAIL_ENABLED: ${APP_WEEKLY_PROGRESS_MAIL_ENABLED:-true}
+      APP_WEEKLY_PROGRESS_MAIL_CRON: ${APP_WEEKLY_PROGRESS_MAIL_CRON:-0 0 8 * * MON}
+      APP_WEEKLY_PROGRESS_MAIL_ZONE: ${APP_WEEKLY_PROGRESS_MAIL_ZONE:-Africa/Tunis}
     ports:
       - "3001:3001"
     healthcheck:

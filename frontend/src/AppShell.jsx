@@ -2585,8 +2585,28 @@ function App() {
   }
 
   function loadInitialData() {
-    return Promise.all([getEcrRequests(), getPilots(), getProjects(), getClientReferences(), getProductReferences(), getFinishedProductReferences(), getRoleReferences(), getActionPlanningRules(), getUsers(), getCurrentUser()])
-      .then(([requestData, pilotData, projectData, clientReferenceData, productReferenceData, finishedProductReferenceData, roleReferenceData, planningRuleData, userData, currentUserData]) => {
+    return getCurrentUser()
+      .then((currentUserData) => Promise.allSettled([
+        getEcrRequests(),
+        getPilots(),
+        getProjects(),
+        getClientReferences(),
+        getProductReferences(),
+        getFinishedProductReferences(),
+        getRoleReferences(),
+        getActionPlanningRules(),
+        getUsers()
+      ]).then((results) => {
+        const valueAt = (index, fallback = []) => results[index]?.status === "fulfilled" ? results[index].value : fallback;
+        const requestData = valueAt(0);
+        const pilotData = valueAt(1);
+        const projectData = valueAt(2);
+        const clientReferenceData = valueAt(3);
+        const productReferenceData = valueAt(4);
+        const finishedProductReferenceData = valueAt(5);
+        const roleReferenceData = valueAt(6);
+        const planningRuleData = valueAt(7);
+        const userData = valueAt(8);
         setRequests(requestData);
         setPilots(pilotData);
         setProjects(projectData);
@@ -2599,7 +2619,7 @@ function App() {
         setCurrentUser(currentUserData);
         setProfileForm(userToForm(currentUserData));
         setSelectedId((currentId) => currentId ?? requestData[0]?.id ?? null);
-      });
+      }));
   }
   function refreshSelectedData(requestId = selectedId, stage = selectedStage) {
     if (!requestId) return Promise.resolve([]);

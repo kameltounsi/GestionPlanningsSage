@@ -32,7 +32,8 @@ function authHeaders() {
 }
 
 async function request(path, options = {}) {
-  const { headers, ...requestOptions } = options;
+  const { clearSessionOnUnauthorized = false, ...fetchOptions } = options;
+  const { headers, ...requestOptions } = fetchOptions;
   const response = await fetch(`${API_BASE}${path}`, {
     ...requestOptions,
     headers: {
@@ -42,7 +43,7 @@ async function request(path, options = {}) {
     }
   });
   if (!response.ok) {
-    if (response.status === 401) {
+    if (response.status === 401 && clearSessionOnUnauthorized) {
       clearSession();
     }
     throw new Error(await errorMessage(response));
@@ -671,7 +672,7 @@ export function getUsers() {
 }
 
 export function getCurrentUser() {
-  return request("/auth/me");
+  return request("/auth/me", { clearSessionOnUnauthorized: true });
 }
 
 export function createUser(payload) {

@@ -16,7 +16,7 @@ Adresses locales:
 
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:3001/api
-- PostgreSQL cote machine: localhost:5432
+- PostgreSQL cote machine: localhost:5433
 - PostgreSQL cote conteneur backend: postgres:5432
 
 Verifier les services:
@@ -87,18 +87,20 @@ npm run dev
 Pour Docker, le fichier `.env` doit rester oriente conteneurs:
 
 ```env
-APP_FRONTEND_URL=http://localhost:3000
+VM_HOST=192.168.1.117
+APP_FRONTEND_URL=http://192.168.1.117:3000
 VITE_API_BASE_URL=/api
-SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/plannings
-POSTGRES_HOST_PORT=5432
+SPRING_DATASOURCE_URL=jdbc:postgresql://192.168.1.117:5433/plannings
+POSTGRES_HOST_PORT=5433
 ```
 
 Important:
 
 - Ne mets pas de vrais mots de passe dans `.env.example`.
 - Garde tes vrais secrets uniquement dans `.env` sur la machine de deploiement.
-- Si tu lances le backend hors Docker, utilise `jdbc:postgresql://localhost:5432/plannings`.
-- Si le backend tourne dans Docker, utilise `jdbc:postgresql://postgres:5432/plannings`.
+- Si tu lances le backend hors Docker avec PostgreSQL expose par Docker, utilise `jdbc:postgresql://localhost:5433/plannings`.
+- Sur la VM, le compose utilise par defaut `jdbc:postgresql://192.168.1.117:5433/plannings`.
+- Si tu veux forcer une connexion interne Docker uniquement, utilise `jdbc:postgresql://postgres:5432/plannings`.
 
 ## 3. Deploiement sur une machine ou VM
 
@@ -128,10 +130,12 @@ nano .env
 Adapter au minimum:
 
 ```env
+VM_HOST=IP_OU_DOMAINE
 POSTGRES_PASSWORD=mot_de_passe_fort
 APP_FRONTEND_URL=http://IP_OU_DOMAINE:3000
 VITE_API_BASE_URL=/api
-SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/plannings
+SPRING_DATASOURCE_URL=jdbc:postgresql://IP_OU_DOMAINE:5433/plannings
+POSTGRES_HOST_PORT=5433
 CLOUDINARY_CLOUD_NAME=...
 CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...
@@ -152,6 +156,7 @@ Ouvrir les ports si le firewall est actif:
 ```bash
 sudo ufw allow 3000
 sudo ufw allow 3001
+sudo ufw allow 5433
 ```
 
 Verifier:
@@ -159,6 +164,13 @@ Verifier:
 ```bash
 docker compose ps
 docker compose logs -f backend
+```
+
+Services optionnels:
+
+```bash
+docker compose --profile monitoring up -d prometheus grafana
+docker compose --profile quality up -d sonar-db sonarqube
 ```
 
 ## 4. Mettre a jour apres des modifications
@@ -218,7 +230,8 @@ docker compose down
 Verifier `SPRING_DATASOURCE_URL`:
 
 - Backend Docker: `jdbc:postgresql://postgres:5432/plannings`
-- Backend local Maven: `jdbc:postgresql://localhost:5432/plannings`
+- VM / LAN: `jdbc:postgresql://192.168.1.117:5433/plannings`
+- Backend local Maven: `jdbc:postgresql://localhost:5433/plannings`
 
 ### Frontend charge mais API ne repond pas
 

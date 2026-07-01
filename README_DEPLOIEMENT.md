@@ -90,7 +90,6 @@ Pour Docker, le fichier `.env` doit rester oriente conteneurs:
 VM_HOST=192.168.1.117
 APP_FRONTEND_URL=http://192.168.1.117:3000
 VITE_API_BASE_URL=/api
-SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/plannings
 POSTGRES_HOST_PORT=5433
 ```
 
@@ -98,7 +97,7 @@ Important:
 
 - Ne mets pas de vrais mots de passe dans `.env.example`.
 - Garde tes vrais secrets uniquement dans `.env` sur la machine de deploiement.
-- Si le backend tourne dans Docker, utilise `jdbc:postgresql://postgres:5432/plannings`.
+- Si le backend tourne dans Docker, ne force pas `SPRING_DATASOURCE_URL` dans `.env`: le compose utilise deja `jdbc:postgresql://postgres:5432/plannings`.
 - Si tu lances le backend hors Docker avec PostgreSQL expose par Docker, utilise `jdbc:postgresql://localhost:5433/plannings`.
 - Pour une connexion externe depuis le LAN, utilise `jdbc:postgresql://192.168.1.117:5433/plannings`.
 
@@ -134,7 +133,6 @@ VM_HOST=IP_OU_DOMAINE
 POSTGRES_PASSWORD=mot_de_passe_fort
 APP_FRONTEND_URL=http://IP_OU_DOMAINE:3000
 VITE_API_BASE_URL=/api
-SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/plannings
 POSTGRES_HOST_PORT=5433
 CLOUDINARY_CLOUD_NAME=...
 CLOUDINARY_API_KEY=...
@@ -227,9 +225,9 @@ docker compose down
 
 ### Backend ne se connecte pas a PostgreSQL
 
-Verifier `SPRING_DATASOURCE_URL`:
+Verifier la connexion PostgreSQL:
 
-- Backend Docker: `jdbc:postgresql://postgres:5432/plannings`
+- Backend Docker: le compose force `jdbc:postgresql://postgres:5432/plannings`
 - VM / LAN externe: `jdbc:postgresql://192.168.1.117:5433/plannings`
 - Backend local Maven: `jdbc:postgresql://localhost:5433/plannings`
 

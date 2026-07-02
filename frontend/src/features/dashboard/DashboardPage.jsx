@@ -295,7 +295,8 @@ export function DashboardPage({
   const openActionRows = dashboardActionRows.filter(({ action, request }) => (
     request.currentStage !== "CLOSED" &&
     request.currentStage !== "CANCELLED" &&
-    !isActionDone(action)
+    !isActionDone(action) &&
+    (adminView || isActionParticipantForUser(currentUser, action))
   ));
   const lateActionRows = openActionRows
     .filter(({ action }) => isDashboardActionLate(action, today))
@@ -831,7 +832,7 @@ function DashboardDrilldownDialog({ dialog, onClose, onOpen }) {
             <button className="dashboard-drilldown-row action" key={`${item.request?.id}-${item.action?.id}`} type="button" onClick={() => onOpen(item)}>
               <span className={isDashboardActionLate(item.action) ? "drilldown-dot late" : "drilldown-dot"} />
               <strong>{item.action?.title || "Action sans titre"}</strong>
-              <small>{requestDisplayName(item.request)} | {item.request?.modificationProject || "-"} | {stageLabel(item.action?.stage, Boolean(item.request?.newVersion))}</small>
+              <small>{requestDisplayName(item.request)} | Pilote: {item.action?.responsible || "-"} | {item.request?.modificationProject || "-"} | {stageLabel(item.action?.stage, Boolean(item.request?.newVersion))}</small>
               <em>{dashboardActionDueDate(item.action) ? formatDateOnly(dashboardActionDueDate(item.action)) : "-"}</em>
             </button>
           )) : items.map((request) => (
@@ -930,7 +931,7 @@ function DashboardActionWatchCard({ title, subtitle, items = [], mode = "late", 
             <button className="dashboard-action-watch-row" key={`${request.id}-${action.id}`} type="button" onClick={() => onOpenRequest(request)}>
               <span className="watch-indicator" />
               <strong>{action.title || "Action sans titre"}</strong>
-              <small>{requestDisplayName(request)} | {request.modificationProject || "-"} | {stageLabel(action.stage, Boolean(request.newVersion))}</small>
+              <small>{requestDisplayName(request)} | Pilote: {action.responsible || "-"} | {request.modificationProject || "-"} | {stageLabel(action.stage, Boolean(request.newVersion))}</small>
               <em>{dueDate ? mode === "late" ? `${Math.abs(dayDelta)} j retard` : `J-${Math.max(0, dayDelta)}` : "-"}</em>
             </button>
           );

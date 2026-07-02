@@ -79,6 +79,14 @@ public class EcrRequestDto {
     private List<EcrActionDto> initialActions = new ArrayList<>();
 
     public static EcrRequestDto from(EcrRequest request) {
+        return from(request, true);
+    }
+
+    public static EcrRequestDto fromListItem(EcrRequest request) {
+        return from(request, false);
+    }
+
+    private static EcrRequestDto from(EcrRequest request, boolean includeChecklistItems) {
         if (request == null) {
             return null;
         }
@@ -147,7 +155,7 @@ public class EcrRequestDto {
         dto.accessLaunch = request.getAccessLaunch();
         dto.accessProjectCancelled = request.getAccessProjectCancelled();
         dto.currentStage = request.getCurrentStage();
-        dto.checklistItems = request.getChecklistItems() == null ? new ArrayList<>() : request.getChecklistItems().stream().map(ChecklistItemDto::from).collect(Collectors.toList());
+        dto.checklistItems = !includeChecklistItems || request.getChecklistItems() == null ? new ArrayList<>() : request.getChecklistItems().stream().map(ChecklistItemDto::from).collect(Collectors.toList());
         dto.initialActions = request.getInitialActions() == null ? new ArrayList<>() : request.getInitialActions().stream().map(EcrActionDto::from).collect(Collectors.toList());
         return dto;
     }

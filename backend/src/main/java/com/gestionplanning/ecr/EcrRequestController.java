@@ -74,9 +74,6 @@ public class EcrRequestController {
                                  @RequestParam(required = false) String view,
                                  @RequestAttribute("authenticatedUser") Object userAttribute) {
                                      AppUser user = (AppUser) userAttribute;
-        requestRepository.findByArchivedFalseOrderByReceptionDateDescIdDesc().stream()
-                .filter(request -> request.getCurrentStage() != EcrStage.CLOSED && request.getCurrentStage() != EcrStage.CANCELLED)
-                .forEach(templateService::ensureMissingActionsFor);
         String normalizedView = normalizeView(view, includeArchived);
         boolean admin = accessControlService.isAdmin(user);
         List<EcrRequest> requests = (admin && ("all".equals(normalizedView) || VIEW_ARCHIVED.equals(normalizedView)))
@@ -85,7 +82,7 @@ public class EcrRequestController {
         return requests.stream()
                 .filter(request -> accessControlService.canAccessRequest(user, request))
                 .filter(request -> matchesView(request, normalizedView, admin))
-                .map(EcrRequestDto::from)
+                .map(EcrRequestDto::fromListItem)
                 .collect(java.util.stream.Collectors.toList());
     }
 

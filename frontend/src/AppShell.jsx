@@ -3301,7 +3301,16 @@ function App() {
     const text = archived
       ? `La modification ${label} ne sera plus affichee dans la liste des modifications actives.`
       : `La modification ${label} reviendra dans la liste des modifications actives.`;
-    confirmDelete(title, text).then((result) => {
+    AppSwal.fire({
+      ...swalButtons,
+      title,
+      text,
+      icon: archived ? "warning" : "question",
+      showCancelButton: true,
+      confirmButtonText: archived ? "Supprimer" : "Recuperer",
+      cancelButtonText: "Annuler",
+      confirmButtonColor: archived ? "#b42318" : "#247857"
+    }).then((result) => {
       if (!result.isConfirmed) return;
       setSaving(true);
       setError("");

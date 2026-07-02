@@ -1952,6 +1952,13 @@ function isRequestParticipantForUser(user, request, actions = [], projects = [])
   return isRequestPilot(user, request, projects) || actions.some((action) => isActionParticipantForUser(user, action));
 }
 
+function canShowRequestForUser(user, request, actionsByRequestId = {}, projects = []) {
+  if (isAdminUser(user)) return true;
+  if (isRequestPilot(user, request, projects)) return true;
+  return Object.hasOwn(actionsByRequestId, request?.id)
+    && isRequestParticipantForUser(user, request, actionsByRequestId[request.id] || [], projects);
+}
+
 function firstActionParticipantStage(user, actions = []) {
   return actions.find((action) => isActionParticipantForUser(user, action))?.stage || null;
 }
@@ -2091,9 +2098,7 @@ function App() {
     const canAdmin = isAdminUser(currentUser);
     return requests.filter((request) => {
       if (!requestMatchesView(request, requestArchiveView, canAdmin)) return false;
-      if (!canAdmin
-        && Object.hasOwn(actionsByRequestId, request.id)
-        && !isRequestParticipantForUser(currentUser, request, actionsByRequestId[request.id] || [], projects)) return false;
+      if (!canAdmin && !canShowRequestForUser(currentUser, request, actionsByRequestId, projects)) return false;
       const matchesProject = !projectFilter || request.modificationProject === projectFilter;
       const matchesType = !requestTypeFilter
         || (requestTypeFilter === "new-project" ? Boolean(request.newVersion) : !request.newVersion);
@@ -2201,9 +2206,7 @@ function App() {
   const dashboardStats = useMemo(() => {
     const visibleRequests = requests
       .filter((request) => !request.archived)
-      .filter((request) => isAdminUser(currentUser)
-        || !Object.hasOwn(actionsByRequestId, request.id)
-        || isRequestParticipantForUser(currentUser, request, actionsByRequestId[request.id] || [], projects));
+      .filter((request) => canShowRequestForUser(currentUser, request, actionsByRequestId, projects));
     const active = visibleRequests.filter(isActiveRequest).length;
     const closed = visibleRequests.filter((request) => request.currentStage === "CLOSED").length;
     const visibleProjects = new Set(visibleRequests.map((request) => request.modificationProject).filter(Boolean));
@@ -2695,8 +2698,13 @@ function App() {
 
   function loadInitialData() {
     return getCurrentUser()
+      .then((currentUserData) => {
+        setCurrentUser(currentUserData);
+        setProfileForm(userToForm(currentUserData));
+        return currentUserData;
+      })
       .then((currentUserData) => Promise.allSettled([
-        getEcrRequests(),
+        getEcrRequests(requestLoadOptions(requestArchiveView, currentUserData)),
         getPilots(),
         getProjects(),
         getClientReferences(),
@@ -2725,8 +2733,6 @@ function App() {
         setRoleReferences(roleReferenceData);
         setPlanningRules(planningRuleData);
         setUsers(userData);
-        setCurrentUser(currentUserData);
-        setProfileForm(userToForm(currentUserData));
         setSelectedId((currentId) => currentId ?? requestData[0]?.id ?? null);
       }));
   }
@@ -4618,10 +4624,19 @@ function App() {
 
   function handleLogin(event) {
     event.preventDefault();
+    let loginSucceeded = false;
     setSaving(true);
+    setLoading(true);
     setError("");
+    setRequests([]);
+    setActions([]);
+    setActionsByRequestId({});
+    setSelectedId(null);
+    setPhaseValidations([]);
+    setChecklist([]);
     login(loginForm.email, loginForm.password)
       .then((session) => {
+        loginSucceeded = true;
         storeSession(session);
         setAuthSession(session);
         setCurrentUser(session.user);
@@ -4635,7 +4650,12 @@ function App() {
         setError(message);
         errorAlert(message);
       })
-      .finally(() => setSaving(false));
+      .finally(() => {
+        setSaving(false);
+        if (!loginSucceeded) {
+          setLoading(false);
+        }
+      });
   }
 
   function resetPasswordRecoveryState() {

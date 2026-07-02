@@ -61,9 +61,11 @@ public class AccessControlService {
         if (isRequestPilot(user, request)) {
             return true;
         }
+        if (isProjectLeadForRequest(user, request)) {
+            return true;
+        }
         return request.getId() != null
-                && actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId()).stream()
-                .anyMatch(action -> isActionParticipant(user, action));
+                && actionRepository.existsParticipantForRequest(request.getId(), userAccessTokens(user));
     }
 
     public boolean canCreateRequest(AppUser user, EcrRequest request) {
@@ -347,6 +349,18 @@ public class AccessControlService {
                 .map(this::normalize)
                 .filter(value -> !value.isEmpty())
                 .collect(Collectors.toSet());
+    }
+
+    private Set<String> userAccessTokens(AppUser user) {
+        if (user == null) {
+            return Collections.emptySet();
+        }
+        Set<String> tokens = userRoleTokens(user);
+        tokens.addAll(Arrays.asList(user.getFullName(), user.getUsername(), user.getEmail(), user.getJobTitle()).stream()
+                .map(this::normalize)
+                .filter(value -> !value.isEmpty())
+                .collect(Collectors.toSet()));
+        return tokens.isEmpty() ? Collections.singleton("__none__") : tokens;
     }
 
     private static class ProjectTeamEntry {

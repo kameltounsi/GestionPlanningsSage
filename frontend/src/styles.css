@@ -44,6 +44,10 @@ body {
   overflow-x: hidden;
 }
 
+.swal2-container {
+  z-index: 2147483647 !important;
+}
+
 button,
 input,
 select,

@@ -1955,8 +1955,9 @@ function isRequestParticipantForUser(user, request, actions = [], projects = [])
 function canShowRequestForUser(user, request, actionsByRequestId = {}, projects = []) {
   if (isAdminUser(user)) return true;
   if (isRequestPilot(user, request, projects)) return true;
-  return Object.hasOwn(actionsByRequestId, request?.id)
-    && isRequestParticipantForUser(user, request, actionsByRequestId[request.id] || [], projects);
+  if (!user || !request) return false;
+  if (!Object.hasOwn(actionsByRequestId, request.id)) return true;
+  return isRequestParticipantForUser(user, request, actionsByRequestId[request.id] || [], projects);
 }
 
 function firstActionParticipantStage(user, actions = []) {
@@ -2082,10 +2083,7 @@ function App() {
     return selectedStages.filter(([key]) => key === currentStage || approvedStages.has(key));
   }, [currentUser, phaseValidations, selectedRequest, selectedStages]);
   const waitingForClosedParticipantActions = Boolean(
-    selectedRequest &&
-    !isAdminUser(currentUser) &&
-    isClosedRequest(selectedRequest) &&
-    !Object.hasOwn(actionsByRequestId, selectedRequest.id)
+    false
   );
   const canLoadSelectedStage = !waitingForClosedParticipantActions
     && visibleStages.some(([key]) => key === selectedStage);
@@ -2174,26 +2172,11 @@ function App() {
       setActionsByRequestId({});
       return undefined;
     }
-    const requestIds = requests
-      .filter((request) => !request.archived && request.id)
-      .map((request) => request.id)
-      .sort((first, second) => Number(first) - Number(second));
-    if (requestIds.length === 0) {
-      setActionsByRequestId({});
-      return undefined;
-    }
-    let active = true;
-    Promise.all(requestIds.map((requestId) =>
-      getActions(requestId)
-        .then((items) => [requestId, Array.isArray(items) ? items : []])
-        .catch(() => [requestId, []])
-    )).then((entries) => {
-      if (!active) return;
-      setActionsByRequestId(Object.fromEntries(entries));
+    setActionsByRequestId((current) => {
+      const visibleRequestIds = new Set(requests.map((request) => request.id).filter(Boolean));
+      return Object.fromEntries(Object.entries(current).filter(([requestId]) => visibleRequestIds.has(Number(requestId))));
     });
-    return () => {
-      active = false;
-    };
+    return undefined;
   }, [currentUser, requests]);
 
   useEffect(() => {

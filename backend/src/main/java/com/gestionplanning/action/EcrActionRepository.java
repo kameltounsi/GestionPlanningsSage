@@ -2,8 +2,11 @@ package com.gestionplanning.action;
 
 import com.gestionplanning.ecr.EcrStage;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 
 public interface EcrActionRepository extends JpaRepository<EcrAction, Long> {
@@ -20,6 +23,11 @@ public interface EcrActionRepository extends JpaRepository<EcrAction, Long> {
     List<EcrAction> findByRequest_IdAndStageOrderByStartDateAscEndDateAscDeadlineAscCreatedAtAscIdAsc(Long requestId, EcrStage stage);
 
     boolean existsByRequest_Id(Long requestId);
+
+    @Query("select count(action) > 0 from EcrAction action where action.request.id = :requestId and ("
+            + "lower(action.responsible) in :tokens or lower(action.validator) in :tokens or lower(action.validatorRole) in :tokens"
+            + ")")
+    boolean existsParticipantForRequest(@Param("requestId") Long requestId, @Param("tokens") Collection<String> tokens);
 
     List<EcrAction> findByDeadlineBeforeAndStatusNotInOrderByDeadlineAsc(LocalDate date, List<ActionStatus> statuses);
 

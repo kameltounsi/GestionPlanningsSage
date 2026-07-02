@@ -93,7 +93,6 @@ import {
   login,
   logout,
   planningEventsUrl,
-  planningWebSocketUrl,
   requestPasswordReset,
   storeSession,
   updateAction,
@@ -2878,28 +2877,7 @@ function App() {
       events.onerror = () => {};
     };
 
-    try {
-      socket = new WebSocket(planningWebSocketUrl(authSession.token));
-      socket.onmessage = (message) => {
-        let envelope = {};
-        try {
-          envelope = JSON.parse(message.data || "{}");
-        } catch {
-          envelope = {};
-        }
-        if (envelope.event === "planning-updated") handlePlanningUpdated();
-        if (envelope.event === "chat-message") handleChatMessage(envelope.data || {});
-        if (envelope.event === "chat-presence") handleChatPresence();
-        if (envelope.event === "chat-group-message") handleChatGroupMessage(envelope.data || {});
-        if (envelope.event === "chat-typing") handleChatTyping(envelope.data || {});
-      };
-      socket.onerror = startSseFallback;
-      socket.onclose = () => {
-        if (!usingSseFallback) startSseFallback();
-      };
-    } catch {
-      startSseFallback();
-    }
+    startSseFallback();
 
     return () => {
       disposed = true;
@@ -2908,7 +2886,6 @@ function App() {
       stopTypingSound();
       globalThis.clearTimeout(realtimeRefreshTimer.current);
       if (events) events.close();
-      if (socket) socket.close();
     };
   }, [authSession?.token, currentUser, selectedId, selectedStage, requestArchiveView, page, selectedChatUserId]);
 

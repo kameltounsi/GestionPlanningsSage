@@ -3045,6 +3045,17 @@ textarea {
   padding: 0;
 }
 
+.product-picker-heading {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.product-picker-heading legend {
+  margin-bottom: 0;
+}
+
 .form-page .product-picker-options {
   align-content: start;
   background: #ffffff;

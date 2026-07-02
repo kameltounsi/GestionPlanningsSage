@@ -5391,6 +5391,9 @@ function NewModificationPage({ clientOptions, currentUser = null, ecrForm, exist
   const availableFinishedProducts = finishedProductsForForm(ecrForm, finishedProductReferences);
   const selectedFinishedProducts = parseSelectedProducts(ecrForm.finishedProducts);
   const displayedFinishedProducts = includeCurrentFinishedProducts(availableFinishedProducts, selectedFinishedProducts);
+  const displayedFinishedProductKeys = displayedFinishedProducts.map(finishedProductKey).filter(Boolean);
+  const allDisplayedFinishedProductsSelected = displayedFinishedProductKeys.length > 0
+    && displayedFinishedProductKeys.every((key) => selectedFinishedProducts.includes(key));
   const coordinatesReady = Boolean(ecrForm.client && ecrForm.modificationProject && selectedProducts.length > 0);
   const finishedProductsRequired = availableFinishedProducts.length > 0;
   const requiredFieldsReady = Boolean(
@@ -5491,7 +5494,18 @@ function NewModificationPage({ clientOptions, currentUser = null, ecrForm, exist
             <span className="form-hint">{selectedProducts.length} produit{selectedProducts.length > 1 ? "s" : ""} sélectionné{selectedProducts.length > 1 ? "s" : ""}</span>
           </fieldset>
           <fieldset className="product-picker-field finished-product-picker-field">
-            <legend>Produits finis</legend>
+            <div className="product-picker-heading">
+              <legend>Produits finis</legend>
+              {coordinatesReady && displayedFinishedProductKeys.length > 0 && (
+                <button
+                  className="secondary-action compact-action"
+                  type="button"
+                  onClick={() => updateEcrForm("finishedProducts", allDisplayedFinishedProductsSelected ? "" : displayedFinishedProductKeys.join("; "))}
+                >
+                  {allDisplayedFinishedProductsSelected ? "Tout désélectionner" : "Tout sélectionner"}
+                </button>
+              )}
+            </div>
             {!coordinatesReady && <span className="form-hint">Selectionnez d'abord le client, le projet et au moins un produit.</span>}
             {coordinatesReady && displayedFinishedProducts.length === 0 && <span className="form-hint">Aucun produit fini lie a ces coordonnees.</span>}
             {coordinatesReady && displayedFinishedProducts.length > 0 && (

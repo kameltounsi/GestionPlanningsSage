@@ -2742,9 +2742,8 @@ function App() {
       getEcrRequests(requestLoadOptions(requestArchiveView, currentUser)),
       getChecklist(requestId, stage),
       getActions(requestId, stage),
-      getPhaseValidations(requestId),
-      getActions(requestId)
-    ]).then(([requestData, checklistData, actionData, validationData, requestActionData]) => {
+      getPhaseValidations(requestId)
+    ]).then(([requestData, checklistData, actionData, validationData]) => {
       if (requestSequence !== selectedDetailsRequestId.current) {
         return actionData;
       }
@@ -2752,10 +2751,6 @@ function App() {
       setChecklist(checklistData);
       setActions(actionData);
       setPhaseValidations(validationData);
-      setActionsByRequestId((current) => ({
-        ...current,
-        [requestId]: Array.isArray(requestActionData) ? requestActionData : []
-      }));
       return actionData;
     });
   }
@@ -2768,15 +2763,11 @@ function App() {
       return requestData;
     });
     const currentDetails = requestId
-      ? Promise.all([getChecklist(requestId, stage), getActions(requestId, stage), getPhaseValidations(requestId), getActions(requestId)])
-          .then(([checklistData, actionData, validationData, requestActionData]) => {
+      ? Promise.all([getChecklist(requestId, stage), getActions(requestId, stage), getPhaseValidations(requestId)])
+          .then(([checklistData, actionData, validationData]) => {
             setChecklist(checklistData);
             setActions(actionData);
             setPhaseValidations(validationData);
-            setActionsByRequestId((current) => ({
-              ...current,
-              [requestId]: Array.isArray(requestActionData) ? requestActionData : []
-            }));
           })
       : Promise.resolve();
     const adminData = isAdminUser(currentUser)

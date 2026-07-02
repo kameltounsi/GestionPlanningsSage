@@ -4,6 +4,10 @@ import com.gestionplanning.user.AppUser;
 import com.gestionplanning.user.AccountMailService;
 import com.gestionplanning.user.AppUserDto;
 import com.gestionplanning.user.AppUserRepository;
+import com.gestionplanning.user.MailDeliveryException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -17,6 +21,7 @@ import java.util.Locale;
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
+    private static final Logger LOGGER = LoggerFactory.getLogger(AuthController.class);
     private static final int TOKEN_BYTES = 48;
     private static final int RESET_CODE_BOUND = 10000;
     private final AppUserRepository userRepository;
@@ -82,22 +87,29 @@ public class AuthController {
 
     @PostMapping("/password-reset/request")
     @Transactional
-    public ResponseEntity<Void> requestPasswordReset(@RequestBody PasswordResetRequest request) {
+    public ResponseEntity<PasswordResetRequestResponse> requestPasswordReset(@RequestBody PasswordResetRequest request) {
         if (request == null || isBlank(request.getEmail())) {
             return ResponseEntity.badRequest().build();
         }
         resetCodeRepository.deleteByExpiresAtBefore(LocalDateTime.now(ZoneId.systemDefault()));
-        userRepository.findByEmail(request.getEmail().trim().toLowerCase(Locale.ROOT))
+        return userRepository.findByEmail(request.getEmail().trim().toLowerCase(Locale.ROOT))
                 .filter(AppUser::isEnabled)
-                .ifPresent(user -> {
+                .map(user -> {
                     PasswordResetCode resetCode = new PasswordResetCode();
                     resetCode.setUser(user);
                     resetCode.setCode(generateResetCode());
                     resetCode.setExpiresAt(LocalDateTime.now(ZoneId.systemDefault()).plusMinutes(10));
                     PasswordResetCode saved = resetCodeRepository.save(resetCode);
-                    accountMailService.sendPasswordResetCodeEmail(user, saved.getCode());
-                });
-        return ResponseEntity.noContent().build();
+                    try {
+                        accountMailService.sendPasswordResetCodeEmail(user, saved.getCode());
+                        return ResponseEntity.ok(new PasswordResetRequestResponse(true, "Code envoyé par email."));
+                    } catch (MailDeliveryException exception) {
+                        LOGGER.error("Password reset code generated but email delivery failed for {}", user.getEmail(), exception);
+                        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                                .body(new PasswordResetRequestResponse(false, "Code généré, mais l'envoi email a échoué. Vérifiez la configuration SMTP."));
+                    }
+                })
+                .orElseGet(() -> ResponseEntity.ok(new PasswordResetRequestResponse(true, "Si ce compte existe, un code sera envoyé par email.")));
     }
 
     @PostMapping("/password-reset/verify")
@@ -219,6 +231,24 @@ public class AuthController {
 
         public void setEmail(String email) {
             this.email = email;
+        }
+    }
+
+    public static class PasswordResetRequestResponse {
+        private final boolean sent;
+        private final String message;
+
+        public PasswordResetRequestResponse(boolean sent, String message) {
+            this.sent = sent;
+            this.message = message;
+        }
+
+        public boolean isSent() {
+            return sent;
+        }
+
+        public String getMessage() {
+            return message;
         }
     }
 

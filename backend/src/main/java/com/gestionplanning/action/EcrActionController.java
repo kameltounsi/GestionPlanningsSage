@@ -101,22 +101,27 @@ public class EcrActionController {
             return ResponseEntity.notFound().build();
         }
         com.gestionplanning.ecr.EcrRequest request = optionalRequest.get();
-        if (!accessControlService.canAccessRequest(user, request)) {
+        boolean admin = accessControlService.isAdmin(user);
+        if (!admin && !accessControlService.canAccessRequest(user, request)) {
             return ResponseEntity.status(403).build();
         }
-        templateService.ensureActionsFor(request);
-        planningService.recalculateRequest(request);
-        List<EcrAction> actions = actionRepository.findByRequest_IdOrderByStartDateAscEndDateAscDeadlineAscCreatedAtAscIdAsc(requestId);
-        boolean admin = accessControlService.isAdmin(user);
+        if (!actionRepository.existsByRequest_Id(requestId)) {
+            templateService.ensureActionsFor(request);
+        }
         if (!admin) {
             if (stage != null && !canViewStage(request, stage)) {
                 return ResponseEntity.ok(java.util.Collections.<EcrActionDto>emptyList());
             }
+        }
+        boolean canSeeAllActions = accessControlService.canSeeAllActions(user, request);
+        List<EcrAction> actions = loadRequestActions(requestId, stage, !admin && !canSeeAllActions);
+        planningService.refreshActionStatuses(actions);
+        if (!admin) {
             actions = actions.stream()
                     .filter(action -> canViewStage(request, action.getStage()))
                     .collect(Collectors.toList());
         }
-        if (!accessControlService.canSeeAllActions(user, request)) {
+        if (!canSeeAllActions) {
             actions = visibleActionsForUser(actions, user);
         }
         if (stage != null) {
@@ -125,6 +130,13 @@ public class EcrActionController {
                     .collect(Collectors.toList());
         }
         return ResponseEntity.ok(toDtos(enrichActions(actions)));
+    }
+
+    private List<EcrAction> loadRequestActions(Long requestId, EcrStage stage, boolean needsFullActionGraph) {
+        if (stage != null && !needsFullActionGraph) {
+            return actionRepository.findByRequest_IdAndStageOrderByStartDateAscEndDateAscDeadlineAscCreatedAtAscIdAsc(requestId, stage);
+        }
+        return actionRepository.findByRequest_IdOrderByStartDateAscEndDateAscDeadlineAscCreatedAtAscIdAsc(requestId);
     }
 
     @PostMapping("/ecr-requests/{requestId}/actions")

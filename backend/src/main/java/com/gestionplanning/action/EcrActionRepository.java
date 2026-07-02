@@ -29,6 +29,10 @@ public interface EcrActionRepository extends JpaRepository<EcrAction, Long> {
             + ")")
     boolean existsParticipantForRequest(@Param("requestId") Long requestId, @Param("tokens") Collection<String> tokens);
 
+    @Query("select distinct action.request.id from EcrAction action where "
+            + "lower(action.responsible) in :tokens or lower(action.validator) in :tokens or lower(action.validatorRole) in :tokens")
+    List<Long> findRequestIdsForParticipant(@Param("tokens") Collection<String> tokens);
+
     List<EcrAction> findByDeadlineBeforeAndStatusNotInOrderByDeadlineAsc(LocalDate date, List<ActionStatus> statuses);
 
     List<EcrAction> findByEndDateBetweenAndStatusNotInOrderByEndDateAscIdAsc(LocalDate startDate, LocalDate endDate, List<ActionStatus> statuses);

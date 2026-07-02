@@ -68,6 +68,29 @@ public class AccessControlService {
                 && actionRepository.existsParticipantForRequest(request.getId(), userAccessTokens(user));
     }
 
+    public List<EcrRequest> filterAccessibleRequests(AppUser user, List<EcrRequest> requests) {
+        if (isAdmin(user) || requests == null || requests.isEmpty()) {
+            return requests == null ? Collections.emptyList() : requests;
+        }
+        if (user == null) {
+            return Collections.emptyList();
+        }
+        Set<String> tokens = userAccessTokens(user);
+        Set<Long> participantRequestIds = actionRepository.findRequestIdsForParticipant(tokens).stream()
+                .collect(Collectors.toSet());
+        Set<String> projectLeadProjects = projectRepository.findAll().stream()
+                .filter(project -> isProjectLeadForProject(user, project))
+                .map(ProjectReference::getName)
+                .collect(Collectors.toSet());
+        return requests.stream()
+                .filter(request -> request != null && (
+                        directRequestPilotMatch(user, request)
+                                || projectLeadProjects.contains(request.getModificationProject())
+                                || participantRequestIds.contains(request.getId())
+                ))
+                .collect(Collectors.toList());
+    }
+
     public boolean canCreateRequest(AppUser user, EcrRequest request) {
         return isAdmin(user) || isProjectLeadForRequest(user, request);
     }
@@ -103,6 +126,10 @@ public class AccessControlService {
             return false;
         }
         return matchesRequestAssignment(user, request, request.getPilot());
+    }
+
+    private boolean directRequestPilotMatch(AppUser user, EcrRequest request) {
+        return matchesActionAssignment(user, request == null ? null : request.getPilot());
     }
 
     public boolean canSeeAllActions(AppUser user, EcrRequest request) {
@@ -356,10 +383,17 @@ public class AccessControlService {
             return Collections.emptySet();
         }
         Set<String> tokens = userRoleTokens(user);
-        tokens.addAll(Arrays.asList(user.getFullName(), user.getUsername(), user.getEmail(), user.getJobTitle()).stream()
-                .map(this::normalize)
-                .filter(value -> !value.isEmpty())
-                .collect(Collectors.toSet()));
+        Arrays.asList(user.getFullName(), user.getUsername(), user.getEmail(), user.getJobTitle(), user.getRole())
+                .forEach(value -> {
+                    String raw = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+                    String normalized = normalize(value);
+                    if (!raw.isEmpty()) {
+                        tokens.add(raw);
+                    }
+                    if (!normalized.isEmpty()) {
+                        tokens.add(normalized);
+                    }
+                });
         return tokens.isEmpty() ? Collections.singleton("__none__") : tokens;
     }
 

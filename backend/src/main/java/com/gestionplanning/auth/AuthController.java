@@ -57,7 +57,6 @@ public class AuthController {
                         user.setPassword(passwordService.encode(request.getPassword()));
                         userRepository.save(user);
                     }
-                    tokenRepository.deleteByExpiresAtBefore(LocalDateTime.now(ZoneId.systemDefault()));
                     AuthToken authToken = new AuthToken();
                     authToken.setUser(user);
                     authToken.setToken(generateToken());

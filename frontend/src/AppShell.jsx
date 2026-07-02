@@ -2082,9 +2082,7 @@ function App() {
     const currentStage = selectedRequest.currentStage;
     return selectedStages.filter(([key]) => key === currentStage || approvedStages.has(key));
   }, [currentUser, phaseValidations, selectedRequest, selectedStages]);
-  const waitingForClosedParticipantActions = Boolean(
-    false
-  );
+  const waitingForClosedParticipantActions = false;
   const canLoadSelectedStage = !waitingForClosedParticipantActions
     && visibleStages.some(([key]) => key === selectedStage);
   const doneCount = actions.filter(isActionDone).length;

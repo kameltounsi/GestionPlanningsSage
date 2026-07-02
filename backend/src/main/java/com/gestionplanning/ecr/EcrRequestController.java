@@ -79,8 +79,7 @@ public class EcrRequestController {
         List<EcrRequest> requests = (admin && ("all".equals(normalizedView) || VIEW_ARCHIVED.equals(normalizedView)))
                 ? requestRepository.findAllByOrderByReceptionDateDescIdDesc()
                 : requestRepository.findByArchivedFalseOrderByReceptionDateDescIdDesc();
-        return requests.stream()
-                .filter(request -> accessControlService.canAccessRequest(user, request))
+        return accessControlService.filterAccessibleRequests(user, requests).stream()
                 .filter(request -> matchesView(request, normalizedView, admin))
                 .map(EcrRequestDto::fromListItem)
                 .collect(java.util.stream.Collectors.toList());

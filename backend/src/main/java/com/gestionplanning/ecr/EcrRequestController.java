@@ -72,6 +72,7 @@ public class EcrRequestController {
     @GetMapping
     public List<EcrRequestDto> list(@RequestParam(defaultValue = "false") boolean includeArchived,
                                  @RequestParam(required = false) String view,
+                                 @RequestParam(required = false) String scope,
                                  @RequestAttribute("authenticatedUser") Object userAttribute) {
                                      AppUser user = (AppUser) userAttribute;
         String normalizedView = normalizeView(view, includeArchived);
@@ -79,7 +80,10 @@ public class EcrRequestController {
         List<EcrRequest> requests = (admin && ("all".equals(normalizedView) || VIEW_ARCHIVED.equals(normalizedView)))
                 ? requestRepository.findAllByOrderByReceptionDateDescIdDesc()
                 : requestRepository.findByArchivedFalseOrderByReceptionDateDescIdDesc();
-        return accessControlService.filterAccessibleRequests(user, requests).stream()
+        List<EcrRequest> visibleRequests = "mine".equalsIgnoreCase(String.valueOf(scope))
+                ? accessControlService.filterPersonalRequests(user, requests)
+                : accessControlService.filterAccessibleRequests(user, requests);
+        return visibleRequests.stream()
                 .filter(request -> matchesView(request, normalizedView, admin))
                 .map(EcrRequestDto::fromListItem)
                 .collect(java.util.stream.Collectors.toList());

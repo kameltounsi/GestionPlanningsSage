@@ -91,6 +91,23 @@ public class AccessControlService {
                 .collect(Collectors.toList());
     }
 
+    public List<EcrRequest> filterPersonalRequests(AppUser user, List<EcrRequest> requests) {
+        if (isAdmin(user) || requests == null || requests.isEmpty()) {
+            return requests == null ? Collections.emptyList() : requests;
+        }
+        if (user == null) {
+            return Collections.emptyList();
+        }
+        Set<Long> participantRequestIds = actionRepository.findRequestIdsForParticipant(userAccessTokens(user)).stream()
+                .collect(Collectors.toSet());
+        return requests.stream()
+                .filter(request -> request != null && (
+                        directRequestPilotMatch(user, request)
+                                || participantRequestIds.contains(request.getId())
+                ))
+                .collect(Collectors.toList());
+    }
+
     public boolean canCreateRequest(AppUser user, EcrRequest request) {
         return isAdmin(user) || isProjectLeadForRequest(user, request);
     }

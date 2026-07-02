@@ -437,9 +437,10 @@ function requestMatchesView(request, view, canAdmin = false) {
 }
 
 function requestLoadOptions(view, user) {
-  return isAdminUser(user) && (view === "archived" || view === "all")
-    ? { view }
-    : {};
+  if (isAdminUser(user)) {
+    return (view === "archived" || view === "all") ? { view } : {};
+  }
+  return { scope: "mine" };
 }
 
 function escapeHtml(value) {
@@ -1955,7 +1956,7 @@ function canShowRequestForUser(user, request, actionsByRequestId = {}, projects 
   if (isAdminUser(user)) return true;
   if (isRequestPilot(user, request, projects)) return true;
   if (!user || !request) return false;
-  if (!Object.hasOwn(actionsByRequestId, request.id)) return true;
+  if (!Object.hasOwn(actionsByRequestId, request.id)) return false;
   return isRequestParticipantForUser(user, request, actionsByRequestId[request.id] || [], projects);
 }
 
@@ -2093,7 +2094,6 @@ function App() {
     const canAdmin = isAdminUser(currentUser);
     return requests.filter((request) => {
       if (!requestMatchesView(request, requestArchiveView, canAdmin)) return false;
-      if (!canAdmin && !canShowRequestForUser(currentUser, request, actionsByRequestId, projects)) return false;
       const matchesProject = !projectFilter || request.modificationProject === projectFilter;
       const matchesType = !requestTypeFilter
         || (requestTypeFilter === "new-project" ? Boolean(request.newVersion) : !request.newVersion);
@@ -2102,7 +2102,7 @@ function App() {
         .some((value) => normalizeSearchText(value).includes(normalized));
       return matchesProject && matchesType && matchesSearch;
     });
-  }, [actionsByRequestId, currentUser, projects, requests, query, projectFilter, requestArchiveView, requestTypeFilter]);
+  }, [currentUser, requests, query, projectFilter, requestArchiveView, requestTypeFilter]);
 
   const requestSearchSuggestions = useMemo(() => {
     const normalized = normalizeSearchText(query);
@@ -2185,13 +2185,12 @@ function App() {
 
   const dashboardStats = useMemo(() => {
     const visibleRequests = requests
-      .filter((request) => !request.archived)
-      .filter((request) => canShowRequestForUser(currentUser, request, actionsByRequestId, projects));
+      .filter((request) => !request.archived);
     const active = visibleRequests.filter(isActiveRequest).length;
     const closed = visibleRequests.filter((request) => request.currentStage === "CLOSED").length;
     const visibleProjects = new Set(visibleRequests.map((request) => request.modificationProject).filter(Boolean));
     return { active, closed, projects: isAdminUser(currentUser) ? projects.length : visibleProjects.size, requests: visibleRequests.length };
-  }, [actionsByRequestId, currentUser, requests, projects]);
+  }, [currentUser, requests, projects]);
 
   const filteredAuditLogs = useMemo(() => {
     const normalized = auditQuery.trim().toLowerCase();
@@ -6535,15 +6534,13 @@ function ModificationsPage(props) {
   const authenticatedUserRequests = useMemo(() => {
     const userRequests = canAdmin
       ? [...requests]
-      : requests.filter((request) => !request.archived
-        && (!Object.hasOwn(actionsByRequestId, request.id)
-          || isRequestParticipantForUser(currentUser, request, actionsByRequestId[request.id] || [], projects)));
+      : requests.filter((request) => !request.archived);
     return userRequests.sort((first, second) => {
       const firstDate = parseDateOnly(first.receptionDate)?.getTime() || 0;
       const secondDate = parseDateOnly(second.receptionDate)?.getTime() || 0;
       return secondDate - firstDate || String(requestDisplayName(first)).localeCompare(String(requestDisplayName(second)), "fr", { sensitivity: "base" });
     });
-  }, [actionsByRequestId, canAdmin, currentUser, projects, requests]);
+  }, [canAdmin, requests]);
   const requestStatusOptions = [
     ["all", "Toutes"],
     ["active", "Actives"],

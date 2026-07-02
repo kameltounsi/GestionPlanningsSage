@@ -1,6 +1,6 @@
 import React, {useEffect, useMemo, useState} from "react";
 import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, ClipboardList, FileText, FolderKanban, Gauge, Plus, X, XCircle } from "lucide-react";
-import { getActions } from "../../api";
+import { getDashboardActions } from "../../api";
 import { EmptyState } from "../../components/common/EmptyState";
 import { PageHeader } from "../../components/common/PageHeader";
 import {getStages, stageColorClass, stageLabel} from "../../utils/stages";
@@ -243,42 +243,37 @@ export function DashboardPage({
   );
 
   useEffect(() => {
-    if (!cancelledRequestIds.length) {
+    if (!dashboardRequestIds.length) {
+      setDashboardActionsByRequestId({});
       setCancelledActionsByRequestId({});
       return undefined;
     }
     let active = true;
-    Promise.all(cancelledRequestIds.map((requestId) =>
-      getActions(requestId, "CANCELLED")
-        .then((items) => [requestId, Array.isArray(items) ? items : []])
-        .catch(() => [requestId, []])
-    )).then((entries) => {
+    const dashboardIds = new Set(dashboardRequestIds.map(Number));
+    const cancelledIds = new Set(cancelledRequestIds.map(Number));
+    getDashboardActions().then((items) => {
       if (!active) return;
-      setCancelledActionsByRequestId(Object.fromEntries(entries));
-    });
-    return () => {
-      active = false;
-    };
-  }, [cancelledRequestIdsKey]);
-
-  useEffect(() => {
-    if (!dashboardRequestIds.length) {
+      const actionsByRequest = {};
+      const cancelledActionsByRequest = {};
+      (Array.isArray(items) ? items : []).forEach((action) => {
+        const requestId = Number(action.requestId);
+        if (!dashboardIds.has(requestId)) return;
+        actionsByRequest[requestId] = [...(actionsByRequest[requestId] || []), action];
+        if (cancelledIds.has(requestId) && action.stage === "CANCELLED") {
+          cancelledActionsByRequest[requestId] = [...(cancelledActionsByRequest[requestId] || []), action];
+        }
+      });
+      setDashboardActionsByRequestId(actionsByRequest);
+      setCancelledActionsByRequestId(cancelledActionsByRequest);
+    }).catch(() => {
+      if (!active) return;
       setDashboardActionsByRequestId({});
-      return undefined;
-    }
-    let active = true;
-    Promise.all(dashboardRequestIds.map((requestId) =>
-      getActions(requestId)
-        .then((items) => [requestId, Array.isArray(items) ? items : []])
-        .catch(() => [requestId, []])
-    )).then((entries) => {
-      if (!active) return;
-      setDashboardActionsByRequestId(Object.fromEntries(entries));
+      setCancelledActionsByRequestId({});
     });
     return () => {
       active = false;
     };
-  }, [dashboardRequestIdsKey]);
+  }, [dashboardRequestIdsKey, cancelledRequestIdsKey]);
 
   const lateRequests = activeRequests.filter((request) => {
     const sopDate = parseDateOnly(request.sopDate);

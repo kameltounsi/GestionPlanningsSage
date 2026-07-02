@@ -223,6 +223,7 @@ export function getEcrRequests(options = {}) {
   } else {
     if (options.includeArchived) params.set("includeArchived", "true");
     if (options.view) params.set("view", options.view);
+    if (options.scope) params.set("scope", options.scope);
   }
   const query = params.toString() ? `?${params.toString()}` : "";
   return request(`/ecr-requests${query}`);
@@ -717,4 +718,8 @@ export function uploadUserPhoto(userId, file) {
 
 export function getAuditLogs() {
   return request("/audit");
+}
+
+export function getDashboardActions() {
+  return request("/dashboard/actions");
 }

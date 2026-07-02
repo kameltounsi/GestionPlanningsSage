@@ -131,6 +131,33 @@ public class EcrActionDto {
         return dto;
     }
 
+    public static EcrActionDto fromDashboardItem(EcrAction action) {
+        if (action == null) {
+            return null;
+        }
+        EcrActionDto dto = new EcrActionDto();
+        dto.id = action.getId();
+        dto.requestId = action.getRequestId();
+        dto.title = action.getTitle();
+        dto.responsible = action.getResponsible();
+        dto.validator = action.getValidator();
+        dto.validatorRole = action.getValidatorRole();
+        dto.validatorDisplayName = action.getValidatorDisplayName();
+        dto.criticality = action.getCriticality();
+        dto.checked = action.isChecked();
+        dto.deadline = action.getDeadline();
+        dto.startDate = action.getStartDate();
+        dto.endDate = action.getEndDate();
+        dto.stage = action.getStage();
+        dto.status = action.getStatus();
+        dto.closedDate = action.getClosedDate();
+        dto.finalizationDate = action.getFinalizationDate();
+        dto.createdAt = action.getCreatedAt();
+        dto.validationStatus = action.getValidationStatus();
+        dto.late = action.isLate();
+        return dto;
+    }
+
     public EcrAction toEntity() {
         EcrAction action = new EcrAction();
         action.setTitle(title);

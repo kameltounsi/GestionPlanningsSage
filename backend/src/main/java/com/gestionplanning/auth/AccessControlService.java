@@ -98,13 +98,8 @@ public class AccessControlService {
         if (user == null) {
             return Collections.emptyList();
         }
-        Set<Long> participantRequestIds = actionRepository.findRequestIdsForParticipant(userAccessTokens(user)).stream()
-                .collect(Collectors.toSet());
         return requests.stream()
-                .filter(request -> request != null && (
-                        directRequestPilotMatch(user, request)
-                                || participantRequestIds.contains(request.getId())
-                ))
+                .filter(request -> request != null && directRequestPilotMatch(user, request))
                 .collect(Collectors.toList());
     }
 

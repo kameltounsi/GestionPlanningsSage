@@ -35,7 +35,7 @@ public class DashboardController {
     @GetMapping("/actions")
     public List<EcrActionDto> actions(@RequestAttribute("authenticatedUser") Object userAttribute) {
         AppUser user = (AppUser) userAttribute;
-        List<EcrRequest> requests = accessControlService.filterPersonalRequests(
+        List<EcrRequest> requests = accessControlService.filterAccessibleRequests(
                 user,
                 requestRepository.findByArchivedFalseOrderByReceptionDateDescIdDesc()
         );

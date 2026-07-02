@@ -5,11 +5,12 @@ backend/target/
 # Node / Vite
 frontend/node_modules/
 frontend/dist/
-
+scripts/
+outputs/
 # Logs
 *.log
 .env
-
+.ps1
 # IDE / OS
 .idea/
 .vscode/

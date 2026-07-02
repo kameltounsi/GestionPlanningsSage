@@ -734,7 +734,17 @@ public class EcrActionController {
         if (request != null && request.getCurrentStage() == EcrStage.CANCELLED) {
             return isStageInCancelledHistory(request, stage);
         }
-        return stage == request.getCurrentStage() || isPhaseApproved(request.getId(), stage);
+        return stage == request.getCurrentStage() || isCompletedOrCurrentWorkflowStage(request, stage) || isPhaseApproved(request.getId(), stage);
+    }
+
+    private boolean isCompletedOrCurrentWorkflowStage(com.gestionplanning.ecr.EcrRequest request, EcrStage stage) {
+        if (request == null || stage == null) {
+            return false;
+        }
+        List<EcrStage> stages = EcrStage.allowedStages(request.isNewVersion());
+        int stageIndex = stages.indexOf(stage);
+        int currentIndex = stages.indexOf(request.getCurrentStage());
+        return stageIndex >= 0 && currentIndex >= 0 && stageIndex <= currentIndex;
     }
 
     private boolean isStageInCancelledHistory(com.gestionplanning.ecr.EcrRequest request, EcrStage stage) {

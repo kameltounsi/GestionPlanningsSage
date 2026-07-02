@@ -1,30 +1,30 @@
-# Guide local et deploiement - Gestion Planning
+# Guide local et deploiement VM - Gestion Planning
 
-Ce fichier sert de procedure simple pour travailler en local puis redeployer l'application sans assistance repetitive.
+Ce guide donne un parcours fiable pour lancer l'application en local, la deployer sur une VM Linux, puis verifier que le deploiement est utilisable.
 
-## 1. Travail en local
-
-### Option A - Tout lancer avec Docker
+## 1. Lancement local rapide
 
 Depuis la racine du projet:
 
 ```powershell
 docker compose up -d --build
+docker compose ps
 ```
 
 Adresses locales:
 
 - Frontend: http://localhost:3000
+- Backend health: http://localhost:3001/actuator/health
 - Backend API: http://localhost:3001/api
 - PostgreSQL cote machine: localhost:5432
 - PostgreSQL cote conteneur backend: postgres:5432
 
-Verifier les services:
+Verification locale:
 
 ```powershell
 docker compose ps
-docker compose logs -f backend
-docker compose logs -f frontend
+docker compose logs --tail=120 backend
+docker compose logs --tail=120 frontend
 ```
 
 Arreter:
@@ -39,7 +39,7 @@ Arreter et supprimer aussi la base locale Docker:
 docker compose down -v
 ```
 
-### Option B - PostgreSQL Docker + backend/frontend en mode developpement
+## 2. Developpement local sans tout Dockeriser
 
 Demarrer seulement PostgreSQL:
 
@@ -51,14 +51,6 @@ Lancer le backend local:
 
 ```powershell
 .\scripts\deploy-backend-local.ps1
-```
-
-Depuis IntelliJ, tu peux aussi lancer `GestionPlanningApplication` directement. Le backend utilise par defaut:
-
-```properties
-SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/plannings
-SPRING_DATASOURCE_USERNAME=postgres
-SPRING_DATASOURCE_PASSWORD=supersecret
 ```
 
 Ou manuellement:
@@ -82,33 +74,22 @@ $env:VITE_API_BASE_URL="http://localhost:3001/api"
 npm run dev
 ```
 
-## 2. Fichier .env
+## 3. Preparer une VM Linux
 
-Pour Docker, le fichier `.env` doit rester oriente conteneurs:
-
-```env
-APP_FRONTEND_URL=http://localhost:3000
-VITE_API_BASE_URL=/api
-POSTGRES_HOST_PORT=5432
-```
-
-Important:
-
-- Ne mets pas de vrais mots de passe dans `.env.example`.
-- Garde tes vrais secrets uniquement dans `.env` sur la machine de deploiement.
-- Si le backend tourne dans Docker, ne force pas `SPRING_DATASOURCE_URL` dans `.env`: le compose utilise deja `jdbc:postgresql://postgres:5432/plannings`.
-- Si tu lances le backend hors Docker avec PostgreSQL expose par Docker, utilise `jdbc:postgresql://localhost:5432/plannings`.
-- Pour une connexion externe depuis le LAN/VM, adapte l'IP et le port exposes.
-
-## 3. Deploiement sur une machine ou VM
-
-Installer Docker et Git sur la machine:
+Installer Docker, Docker Compose et Git:
 
 ```bash
 sudo apt update
-sudo apt install -y docker.io docker-compose-plugin git
+sudo apt install -y docker.io docker-compose-plugin git curl
 sudo systemctl enable docker
 sudo systemctl start docker
+```
+
+Autoriser l'utilisateur courant a utiliser Docker sans `sudo`:
+
+```bash
+sudo usermod -aG docker "$USER"
+newgrp docker
 ```
 
 Recuperer le projet:
@@ -118,65 +99,92 @@ git clone https://github.com/VOTRE_COMPTE/VOTRE_REPO.git
 cd VOTRE_REPO
 ```
 
-Creer le fichier `.env`:
+## 4. Configurer le `.env` de la VM
+
+Utiliser le template dedie VM:
 
 ```bash
-cp .env.example .env
+cp .env.vm.example .env
 nano .env
 ```
 
-Adapter au minimum:
+Valeurs a modifier obligatoirement:
 
 ```env
 POSTGRES_PASSWORD=mot_de_passe_fort
 APP_FRONTEND_URL=http://IP_OU_DOMAINE:3000
-VITE_API_BASE_URL=/api
-POSTGRES_HOST_PORT=5432
 CLOUDINARY_CLOUD_NAME=...
 CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...
-SPRING_MAIL_HOST=...
-SPRING_MAIL_PORT=...
 SPRING_MAIL_USERNAME=...
 SPRING_MAIL_PASSWORD=...
+GRAFANA_ADMIN_PASSWORD=mot_de_passe_fort
+SONAR_POSTGRES_PASSWORD=mot_de_passe_fort
 ```
 
-Lancer:
+Important:
+
+- Ne jamais commiter `.env`.
+- Garder les secrets uniquement sur la VM.
+- En Docker, ne pas definir `SPRING_DATASOURCE_URL` dans `.env`: `docker-compose.yml` force deja `jdbc:postgresql://postgres:5432/plannings`.
+- Le template VM limite PostgreSQL a `127.0.0.1:5432`; ne l'exposer au reseau que si c'est vraiment necessaire.
+
+## 5. Lancer sur la VM
+
+Construire et demarrer:
 
 ```bash
 docker compose up -d --build
 ```
 
-Ouvrir les ports si le firewall est actif:
+Ouvrir les ports applicatifs si `ufw` est actif:
 
 ```bash
-sudo ufw allow 3000
-sudo ufw allow 3001
-sudo ufw allow 5432
+sudo ufw allow 3000/tcp
+sudo ufw allow 3001/tcp
 ```
 
-Verifier:
+Ne pas ouvrir `5432/tcp` sauf besoin explicite d'acces PostgreSQL depuis l'exterieur.
+
+## 6. Verifier apres deploiement
+
+Lancer le smoke test fourni:
+
+```bash
+chmod +x scripts/smoke-test-vm.sh
+BASE_URL=http://IP_OU_DOMAINE:3000 BACKEND_URL=http://IP_OU_DOMAINE:3001 ./scripts/smoke-test-vm.sh
+```
+
+Le script verifie:
+
+- l'etat Docker Compose;
+- le healthcheck PostgreSQL;
+- le healthcheck backend `/actuator/health`;
+- le frontend servi par Nginx;
+- la connexion PostgreSQL interne avec `pg_isready`.
+
+En local sur la VM, sans passer par l'IP publique:
+
+```bash
+./scripts/smoke-test-vm.sh
+```
+
+Verification manuelle utile:
 
 ```bash
 docker compose ps
-docker compose logs -f backend
+curl -fsS http://localhost:3001/actuator/health
+curl -I http://localhost:3000
 ```
 
-Services optionnels:
-
-```bash
-docker compose --profile monitoring up -d prometheus grafana
-docker compose --profile quality up -d sonar-db sonarqube
-```
-
-## 4. Mettre a jour apres des modifications
+## 7. Mettre a jour la VM
 
 Depuis la machine de deploiement:
 
 ```bash
 git pull
 docker compose up -d --build
-docker compose ps
+./scripts/smoke-test-vm.sh
 ```
 
 Si le frontend ne change pas dans le navigateur:
@@ -184,6 +192,7 @@ Si le frontend ne change pas dans le navigateur:
 ```bash
 docker compose build --no-cache frontend
 docker compose up -d frontend
+./scripts/smoke-test-vm.sh
 ```
 
 Si le backend ne redemarre pas correctement:
@@ -191,9 +200,30 @@ Si le backend ne redemarre pas correctement:
 ```bash
 docker compose logs --tail=200 backend
 docker compose restart backend
+./scripts/smoke-test-vm.sh
 ```
 
-## 5. Sauvegarder la base PostgreSQL
+## 8. Services optionnels
+
+Monitoring:
+
+```bash
+docker compose --profile monitoring up -d prometheus grafana
+```
+
+Qualite:
+
+```bash
+docker compose --profile quality up -d sonar-db sonarqube
+```
+
+Ports par defaut:
+
+- Prometheus: http://IP_OU_DOMAINE:9090
+- Grafana: http://IP_OU_DOMAINE:3002
+- SonarQube: http://IP_OU_DOMAINE:9000
+
+## 9. Sauvegarder et restaurer PostgreSQL
 
 Sauvegarde:
 
@@ -207,7 +237,9 @@ Restauration:
 cat backup-plannings.sql | docker exec -i gestion-planning-postgres psql -U postgres plannings
 ```
 
-## 6. Commandes utiles
+## 10. Diagnostic rapide
+
+Commandes utiles:
 
 ```bash
 docker compose ps
@@ -219,28 +251,23 @@ docker compose up -d --build
 docker compose down
 ```
 
-## 7. Erreurs frequentes
+Backend ne se connecte pas a PostgreSQL:
 
-### Backend ne se connecte pas a PostgreSQL
+- Backend Docker: utiliser `postgres:5432`, deja configure par `docker-compose.yml`.
+- Backend Maven local: utiliser `jdbc:postgresql://localhost:5432/plannings`.
+- VM/LAN externe: utiliser l'IP de la VM uniquement si PostgreSQL doit vraiment etre expose.
 
-Verifier la connexion PostgreSQL:
-
-- Backend Docker: le compose force `jdbc:postgresql://postgres:5432/plannings`
-- VM / LAN externe: `jdbc:postgresql://IP_OU_DOMAINE:5432/plannings`
-- Backend local Maven: `jdbc:postgresql://localhost:5432/plannings`
-
-### Frontend charge mais API ne repond pas
-
-Verifier:
+Frontend charge mais API ne repond pas:
 
 ```bash
 docker compose ps
-docker compose logs --tail=100 backend
+docker compose logs --tail=120 backend
+curl -fsS http://localhost:3001/actuator/health
 ```
 
 En Docker, le frontend appelle `/api`, puis Nginx redirige vers le conteneur backend.
 
-### Maven dit "No compiler is provided"
+Maven dit "No compiler is provided":
 
 Java pointe vers un JRE au lieu d'un JDK. Installer un JDK 17 ou definir `JAVA_HOME` vers un JDK:
 

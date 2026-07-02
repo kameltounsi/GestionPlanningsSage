@@ -3050,10 +3050,19 @@ textarea {
   display: flex;
   gap: 10px;
   justify-content: space-between;
+  min-width: 0;
 }
 
 .product-picker-heading legend {
   margin-bottom: 0;
+}
+
+.product-picker-heading-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .form-page .product-picker-options {
@@ -3081,6 +3090,7 @@ textarea {
   gap: 10px;
   justify-content: flex-start;
   min-height: 34px;
+  min-width: 0;
   padding: 7px 10px;
   width: 100%;
 }
@@ -3109,29 +3119,40 @@ textarea {
 
 .form-page .finished-product-picker-options {
   max-height: 250px;
+  gap: 10px;
 }
 
 .form-page .finished-product-option {
   align-items: flex-start;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  min-height: 78px;
+  padding: 12px 14px;
 }
 
 .form-page .finished-product-option span {
   display: grid;
-  gap: 3px;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
   white-space: normal;
 }
 
 .form-page .finished-product-option strong,
 .form-page .finished-product-option small {
+  display: block;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .form-page .finished-product-option small {
   color: var(--muted);
   font-size: 12px;
   font-weight: 650;
+  line-height: 1.45;
 }
 
 .modifications-content .file-picker {

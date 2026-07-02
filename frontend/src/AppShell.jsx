@@ -440,7 +440,7 @@ function requestLoadOptions(view, user) {
   if (isAdminUser(user)) {
     return (view === "archived" || view === "all") ? { view } : {};
   }
-  return { scope: "mine" };
+  return {};
 }
 
 function escapeHtml(value) {
@@ -1930,13 +1930,16 @@ function actionStageForRequest(action, request) {
   return action?.stage || request?.currentStage || "FEASIBILITY_VALIDATION";
 }
 
-function activeStageActionsForUser(user, request, actions = []) {
-  return stageActionsForUser(user, request, actions, request?.currentStage);
+function activeStageActionsForUser(user, request, actions = [], projects = []) {
+  return stageActionsForUser(user, request, actions, request?.currentStage, projects);
 }
 
-function stageActionsForUser(user, request, actions = [], stage = request?.currentStage) {
+function stageActionsForUser(user, request, actions = [], stage = request?.currentStage, projects = []) {
   if (!request || isAdminUser(user)) return actions;
   const selectedStageKey = stage || request.currentStage;
+  if (isRequestPilot(user, request, projects)) {
+    return actions.filter((action) => actionStageForRequest(action, request) === selectedStageKey);
+  }
   return actions.filter((action) =>
     actionStageForRequest(action, request) === selectedStageKey
     && isActionParticipantForUser(user, action)
@@ -2080,7 +2083,8 @@ function App() {
       .map((validation) => validation.stage)
       .filter(Boolean));
     const currentStage = selectedRequest.currentStage;
-    return selectedStages.filter(([key]) => key === currentStage || approvedStages.has(key));
+    const currentIndex = selectedStages.findIndex(([key]) => key === currentStage);
+    return selectedStages.filter(([key], index) => key === currentStage || approvedStages.has(key) || currentIndex >= 0 && index <= currentIndex);
   }, [currentUser, phaseValidations, selectedRequest, selectedStages]);
   const waitingForClosedParticipantActions = false;
   const canLoadSelectedStage = !waitingForClosedParticipantActions
@@ -3821,7 +3825,7 @@ function App() {
     if (!selectedRequest || !validation || !action) return;
     setSaving(true);
     approveActionValidation(selectedRequest.id, validation.id, action.id)
-        .then(() => getEcrRequests())
+        .then(() => getEcrRequests(requestLoadOptions(requestArchiveView, currentUser)))
         .then((requestData) => {
           const refreshedRequest = requestData.find((item) => item.id === selectedRequest.id);
           const nextStage = refreshedRequest
@@ -3918,7 +3922,7 @@ function App() {
         if (selectedRequest?.modificationProject === savedProject.name || selectedRequest?.modificationProject === editingProject) {
           return refreshCurrentActionsAndRequests();
         }
-        return getEcrRequests().then(setRequests);
+        return getEcrRequests(requestLoadOptions(requestArchiveView, currentUser)).then(setRequests);
       })
       .catch(() => {
         const message = "Sauvegarde projet impossible. Vérifiez le nom du projet.";
@@ -4270,7 +4274,7 @@ function App() {
         setPlanningRuleForm(emptyPlanningRuleForm);
         setEditingPlanningRule(null);
         successToast(isEdit ? "Règle planning modifiée" : "Règle planning ajoutée");
-        return selectedId ? Promise.all([getActions(selectedId, selectedStage), getEcrRequests()]) : Promise.resolve([actions, requests]);
+        return selectedId ? Promise.all([getActions(selectedId, selectedStage), getEcrRequests(requestLoadOptions(requestArchiveView, currentUser))]) : Promise.resolve([actions, requests]);
       })
       .then(([actionData, requestData]) => {
         if (Array.isArray(actionData)) setActions(actionData);
@@ -5394,6 +5398,7 @@ function NewModificationPage({ clientOptions, currentUser = null, ecrForm, exist
   const displayedFinishedProductKeys = displayedFinishedProducts.map(finishedProductKey).filter(Boolean);
   const allDisplayedFinishedProductsSelected = displayedFinishedProductKeys.length > 0
     && displayedFinishedProductKeys.every((key) => selectedFinishedProducts.includes(key));
+  const anyDisplayedFinishedProductsSelected = displayedFinishedProductKeys.some((key) => selectedFinishedProducts.includes(key));
   const coordinatesReady = Boolean(ecrForm.client && ecrForm.modificationProject && selectedProducts.length > 0);
   const finishedProductsRequired = availableFinishedProducts.length > 0;
   const requiredFieldsReady = Boolean(
@@ -5497,13 +5502,24 @@ function NewModificationPage({ clientOptions, currentUser = null, ecrForm, exist
             <div className="product-picker-heading">
               <legend>Produits finis</legend>
               {coordinatesReady && displayedFinishedProductKeys.length > 0 && (
-                <button
-                  className="secondary-action compact-action"
-                  type="button"
-                  onClick={() => updateEcrForm("finishedProducts", allDisplayedFinishedProductsSelected ? "" : displayedFinishedProductKeys.join("; "))}
-                >
-                  {allDisplayedFinishedProductsSelected ? "Tout désélectionner" : "Tout sélectionner"}
-                </button>
+                <div className="product-picker-heading-actions">
+                  <button
+                    className="secondary-action compact-action"
+                    disabled={allDisplayedFinishedProductsSelected}
+                    type="button"
+                    onClick={() => updateEcrForm("finishedProducts", displayedFinishedProductKeys.join("; "))}
+                  >
+                    Tout sélectionner
+                  </button>
+                  <button
+                    className="secondary-action compact-action"
+                    disabled={!anyDisplayedFinishedProductsSelected}
+                    type="button"
+                    onClick={() => updateEcrForm("finishedProducts", "")}
+                  >
+                    Tout désélectionner
+                  </button>
+                </div>
               )}
             </div>
             {!coordinatesReady && <span className="form-hint">Selectionnez d'abord le client, le projet et au moins un produit.</span>}
@@ -6542,19 +6558,19 @@ function ModificationsPage(props) {
   const canCloseRequest = !requestTerminal && canAdmin && workflowApproved && selectedRequest?.closureRequested;
   const currentValidation = phaseValidations.find((validation) => validation.stage === selectedStage && validation.status === "PENDING");
   const latestStageValidation = phaseValidations.find((validation) => validation.stage === selectedStage);
-  const visibleActions = canAdmin ? actions : stageActionsForUser(currentUser, selectedRequest, actions, selectedStage);
+  const visibleActions = canAdmin ? actions : stageActionsForUser(currentUser, selectedRequest, actions, selectedStage, projects);
   const stageActionsDone = actions.every(isActionDone);
   const isCurrentStage = selectedRequest && selectedStage === selectedRequest.currentStage;
   const authenticatedUserRequests = useMemo(() => {
     const userRequests = canAdmin
       ? [...requests]
-      : requests.filter((request) => !request.archived);
+      : requests.filter((request) => !request.archived && isRequestPilot(currentUser, request, projects));
     return userRequests.sort((first, second) => {
       const firstDate = parseDateOnly(first.receptionDate)?.getTime() || 0;
       const secondDate = parseDateOnly(second.receptionDate)?.getTime() || 0;
       return secondDate - firstDate || String(requestDisplayName(first)).localeCompare(String(requestDisplayName(second)), "fr", { sensitivity: "base" });
     });
-  }, [canAdmin, requests]);
+  }, [canAdmin, currentUser, projects, requests]);
   const requestStatusOptions = [
     ["all", "Toutes"],
     ["active", "Actives"],

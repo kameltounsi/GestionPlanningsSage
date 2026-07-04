@@ -204,7 +204,7 @@ public class AppUserController {
         dto.setProfilePhotoFileName(user.getProfilePhotoFileName());
         dto.setProfilePhotoContentType(user.getProfilePhotoContentType());
         dto.setProfilePhotoFileSize(user.getProfilePhotoFileSize());
-        dto.setProfilePhotoUrl(user.getProfilePhotoUrl());
+        dto.setProfilePhotoUrl(storageService.publicUrl(user.getProfilePhotoPublicId(), user.getProfilePhotoResourceType(), user.getProfilePhotoUrl()));
         dto.setRole(user.getRole());
         dto.setEnabled(user.isEnabled());
         dto.setCreatedAt(user.getCreatedAt());

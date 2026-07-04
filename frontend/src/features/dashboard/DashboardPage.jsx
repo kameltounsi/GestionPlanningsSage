@@ -228,6 +228,38 @@ export function DashboardPage({
   const dashboardCandidateRequests = requests.filter((request) => !request.archived);
   const dashboardRequestIds = dashboardCandidateRequests.map((request) => request.id).filter(Boolean).sort((first, second) => Number(first) - Number(second));
   const dashboardRequestIdsKey = dashboardRequestIds.join("|");
+  const dashboardAccessKey = useMemo(() => ([
+    currentUser?.id,
+    currentUser?.username,
+    currentUser?.email,
+    currentUser?.fullName,
+    currentUser?.jobTitle,
+    currentUser?.role,
+    currentUser?.chef1,
+    currentUser?.chef2,
+    users.map((user) => [
+      user.id,
+      user.username,
+      user.email,
+      user.fullName,
+      user.jobTitle,
+      user.role,
+      user.chef1,
+      user.chef2,
+      user.enabled
+    ].join(":")).sort().join("||"),
+    projects.map((project) => [
+      project.name,
+      project.projectTeam
+    ].join(":")).sort().join("||"),
+    dashboardCandidateRequests.map((request) => [
+      request.id,
+      request.pilot,
+      request.modificationProject,
+      request.currentStage,
+      request.archived
+    ].join(":")).sort().join("||")
+  ].join("|")), [currentUser, users, projects, dashboardCandidateRequests]);
   const dashboardRequests = adminView
     ? dashboardCandidateRequests
     : dashboardCandidateRequests.filter((request) => !Object.hasOwn(dashboardActionsByRequestId, request.id)
@@ -273,7 +305,7 @@ export function DashboardPage({
     return () => {
       active = false;
     };
-  }, [dashboardRequestIdsKey, cancelledRequestIdsKey]);
+  }, [dashboardRequestIdsKey, cancelledRequestIdsKey, dashboardAccessKey]);
 
   const lateRequests = activeRequests.filter((request) => {
     const sopDate = parseDateOnly(request.sopDate);

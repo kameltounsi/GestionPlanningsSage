@@ -19,6 +19,7 @@ import {
   FileText,
   FolderKanban,
   Gauge,
+  Info,
   Maximize2,
   Pencil,
   Plus,
@@ -169,6 +170,30 @@ const AppSwal = Swal.mixin({
   showCloseButton: true
 });
 
+function openQuickGuide(page) {
+  const items = quickGuideItems[page] || quickGuideItems.dashboard;
+  const html = `
+    <div class="quick-guide-content">
+      <ol>
+        ${items.map(([label, text]) => `<li><strong>${label} :</strong> ${text}</li>`).join("")}
+      </ol>
+    </div>
+  `;
+  return AppSwal.fire({
+    title: "Guide rapide",
+    html,
+    icon: "info",
+    confirmButtonText: "OK",
+    confirmButtonColor: "#637614",
+    customClass: {
+      popup: "quick-guide-popup",
+      icon: "quick-guide-icon",
+      title: "quick-guide-title",
+      confirmButton: "quick-guide-confirm"
+    }
+  });
+}
+
 const pageTitles = {
   dashboard: "Tableau de bord",
   modifications: "Modifications",
@@ -190,6 +215,82 @@ const pageRoutes = {
   preferentials: "/preferentiels",
   users: "/utilisateurs",
   profile: "/profil"
+};
+const quickGuideItems = {
+  dashboard: [
+    ["Vue globale", "commencez par lire les cartes en haut de page pour connaitre le nombre de modifications actives, cloturees, en retard et le volume total suivi dans l'application."],
+    ["Priorites", "controlez les indicateurs de retard et de risque pour identifier les projets qui demandent une action rapide ou un suivi plus regulier."],
+    ["Graphiques", "utilisez les graphiques par projet, client ou statut pour comprendre ou se concentre la charge de travail et comparer les situations."],
+    ["Details", "cliquez sur les cartes ou les lignes interactives pour afficher la liste des modifications concernees, puis ouvrez la demande voulue."],
+    ["Creation", "si une nouvelle modification doit etre declaree, utilisez le bouton de creation pour basculer directement vers le formulaire de demande."]
+  ],
+  modifications: [
+    ["Affichage", "utilisez les filtres pour limiter la liste par projet, type de demande ou statut d'archive afin de travailler uniquement sur les modifications utiles."],
+    ["Recherche", "tapez un client, produit, projet, motif ou numero de modification. Les suggestions vous aident a ouvrir rapidement la bonne demande."],
+    ["Selection", "cliquez sur une modification dans la liste pour afficher son detail, son avancement, ses phases, ses actions et les informations de validation."],
+    ["Phases", "choisissez la phase a consulter. Chaque phase contient ses actions, leurs pilotes, leurs preuves attendues et leur statut d'avancement."],
+    ["Actions", "cochez une action terminee, ajoutez les assets ou liens demandes, puis demandez la validation lorsque les informations sont completes."],
+    ["Validation", "les validateurs peuvent accepter ou refuser une phase ou une action. En cas de refus, lisez le motif puis corrigez les elements demandes."],
+    ["Exports", "utilisez les exports PDF, Excel ou Gantt pour generer le dossier ECR, le planning ou les documents de suivi a partager."]
+  ],
+  "ask-ai": [
+    ["Recherche", "saisissez une reference de produit fini, un mot cle ou une information connue pour retrouver les modifications qui peuvent etre liees."],
+    ["Lecture", "analysez les resultats proposes et comparez les references, projets, clients et produits pour choisir la modification la plus pertinente."],
+    ["Ouverture", "ouvrez directement la demande associee lorsque vous avez trouve le bon resultat, sans repasser par la liste principale."],
+    ["Verification", "confirmez toujours les informations dans la fiche de modification avant de lancer une action ou une validation."],
+    ["Usage", "utilisez cette page comme aide de recherche rapide lorsque vous ne connaissez pas exactement le numero ou le projet de la demande."]
+  ],
+  projects: [
+    ["Objectif", "cette page sert a definir les actions standard qui seront proposees automatiquement dans les modifications selon les phases du processus."],
+    ["Creation", "choisissez la phase, renseignez le titre de l'action, le topic ou risque, puis indiquez si l'action concerne un nouveau projet ou une modification."],
+    ["Responsables", "associez un pilote d'action et un validateur. Ces roles permettent ensuite de savoir qui doit realiser et qui doit approuver."],
+    ["Durees", "renseignez le nombre de jours de travail pour que le planning et le diagramme de Gantt puissent calculer les echeances."],
+    ["Criticite", "selectionnez le niveau de criticite pour mettre en evidence les actions importantes et renforcer le suivi des elements sensibles."],
+    ["Preuves", "ajoutez les documents ou preuves attendus lorsque l'action doit etre justifiee par un fichier, un lien ou un asset."],
+    ["Maintenance", "modifiez ou supprimez une action standard lorsque le processus evolue, afin que les prochaines demandes utilisent les bonnes regles."]
+  ],
+  traceability: [
+    ["Historique", "consultez les evenements importants realises dans l'application : creation, modification, validation, refus, archivage ou ajout de referentiel."],
+    ["Recherche", "tapez le nom d'un utilisateur, un role, une action ou une reference pour retrouver rapidement une operation precise."],
+    ["Filtre", "utilisez le type d'action pour limiter l'affichage a une categorie, par exemple les validations de phase ou les modifications de demande."],
+    ["Lecture", "chaque ligne indique qui a effectue l'action, sur quel element, a quel moment et avec quel resultat."],
+    ["Controle", "servez-vous de cette page pour verifier les changements recents, comprendre l'origine d'un statut ou suivre les decisions importantes."],
+    ["Actualiser", "cliquez sur actualiser pour recharger les derniers evenements lorsque plusieurs utilisateurs travaillent en meme temps."]
+  ],
+  messages: [
+    ["Conversations", "selectionnez un utilisateur ou un groupe dans la colonne de gauche pour ouvrir le fil de discussion correspondant."],
+    ["Message", "ecrivez votre texte dans la zone de saisie, puis envoyez-le pour informer directement les personnes concernees."],
+    ["Fichiers", "joignez un fichier lorsque vous devez partager une preuve, un document, une image ou un element utile au suivi."],
+    ["Vocal", "si l'enregistrement est disponible, utilisez le micro pour envoyer un message vocal rapide quand une explication ecrite serait trop longue."],
+    ["Groupes", "creez un groupe lie a un projet et ajoutez les membres concernes pour centraliser les discussions autour d'une modification."],
+    ["Notifications", "les compteurs et indicateurs vous signalent les messages non lus afin de ne pas manquer une information importante."]
+  ],
+  preferentials: [
+    ["References", "cette page centralise les donnees de base utilisees dans les formulaires : projets, clients, produits, produits finis et roles d'action."],
+    ["Ajout", "ouvrez la section concernee, remplissez le champ demande, puis enregistrez pour rendre la reference disponible dans l'application."],
+    ["Modification", "cliquez sur modifier pour corriger une reference existante. Les prochains formulaires utiliseront la valeur mise a jour."],
+    ["Suppression", "supprimez uniquement les references qui ne doivent plus etre utilisees, apres verification de leur impact sur les demandes existantes."],
+    ["Produits finis", "renseignez les informations de reference produit fini pour faciliter les recherches et les rapprochements dans Ask AI."],
+    ["Import", "utilisez l'import en masse lorsque vous avez un fichier prepare, afin d'ajouter plusieurs produits finis plus rapidement."],
+    ["Qualite", "gardez ces listes propres et coherentes : elles conditionnent la qualite des filtres, des recherches et des rapports."]
+  ],
+  users: [
+    ["Comptes", "cette page permet a l'administrateur de creer, modifier ou desactiver les comptes qui accedent a l'application."],
+    ["Creation", "remplissez les informations obligatoires de l'utilisateur, notamment son identite, son email, son telephone et ses roles."],
+    ["Roles", "attribuez les droits selon les responsabilites de la personne. Les roles determinent les pages accessibles et les actions autorisees."],
+    ["Chefs et equipes", "associez les responsables ou relations necessaires pour que les validations et notifications soient dirigees vers les bonnes personnes."],
+    ["Recherche", "utilisez la barre de recherche et le filtre de role pour retrouver rapidement un compte dans une liste importante."],
+    ["Modification", "cliquez sur modifier pour corriger les informations d'un utilisateur ou ajuster ses droits lorsque son poste evolue."],
+    ["Photo", "ajoutez une image de profil pour faciliter l'identification dans la navigation et la messagerie."]
+  ],
+  profile: [
+    ["Informations", "verifiez vos donnees personnelles et mettez-les a jour si votre nom, telephone ou information de contact change."],
+    ["Photo", "importez une photo de profil claire pour etre facilement identifiable dans la barre laterale et la messagerie."],
+    ["Securite", "changez votre mot de passe lorsque cela est necessaire ou si vous pensez que votre acces doit etre securise."],
+    ["Confirmation", "saisissez le nouveau mot de passe puis confirmez-le exactement de la meme maniere pour eviter les erreurs."],
+    ["Enregistrement", "cliquez sur enregistrer apres chaque modification afin que les changements soient bien appliques a votre compte."],
+    ["Bon usage", "gardez vos informations a jour, car elles peuvent etre utilisees pour les notifications, validations et echanges internes."]
+  ]
 };
 const routePages = Object.fromEntries(Object.entries(pageRoutes).map(([key, route]) => [route, key]));
 function pageFromPath(pathname) {
@@ -440,7 +541,7 @@ function requestLoadOptions(view, user) {
   if (isAdminUser(user)) {
     return (view === "archived" || view === "all") ? { view } : {};
   }
-  return {};
+  return { scope: "mine" };
 }
 
 function escapeHtml(value) {
@@ -2067,6 +2168,7 @@ function App() {
   const chatTypingStopTimer = useRef(null);
   const chatTypingClearTimer = useRef(null);
   const realtimeRefreshTimer = useRef(null);
+  const realtimeStateRef = useRef({});
   const selectedDetailsRequestId = useRef(0);
 
   const selectedRequest = requests.find((request) => request.id === selectedId);
@@ -2092,6 +2194,18 @@ function App() {
   const doneCount = actions.filter(isActionDone).length;
   const completion = modificationCompletionRate(selectedRequest, actions);
   const lateActions = actions.filter((action) => action.late).length;
+
+  useEffect(() => {
+    realtimeStateRef.current = {
+      auditLogs,
+      currentUser,
+      page,
+      requestArchiveView,
+      selectedChatUserId,
+      selectedId,
+      selectedStage
+    };
+  });
 
   const filteredRequests = useMemo(() => {
     const normalized = normalizeSearchText(query);
@@ -2745,12 +2859,41 @@ function App() {
   }
 
   function refreshRealtimeData() {
-    const requestId = selectedId;
-    const stage = selectedStage;
-    const baseRequests = getEcrRequests(requestLoadOptions(requestArchiveView, currentUser)).then((requestData) => {
+    const realtimeState = realtimeStateRef.current;
+    const requestId = realtimeState.selectedId;
+    const stage = realtimeState.selectedStage;
+    const activeUser = realtimeState.currentUser;
+    const activePage = realtimeState.page;
+    const archiveView = realtimeState.requestArchiveView;
+    const currentUserRequest = getCurrentUser()
+      .then((currentUserData) => {
+        setCurrentUser(currentUserData);
+        if (activePage !== "profile") {
+          setProfileForm(userToForm(currentUserData));
+        }
+        return currentUserData;
+      })
+      .catch(() => activeUser);
+    const referenceData = Promise.allSettled([
+      getPilots(),
+      getProjects(),
+      getRoleReferences(),
+      getUsers()
+    ]).then((results) => {
+      const valueAt = (index) => results[index]?.status === "fulfilled" ? results[index].value : null;
+      const pilotData = valueAt(0);
+      const projectData = valueAt(1);
+      const roleReferenceData = valueAt(2);
+      const userData = valueAt(3);
+      if (Array.isArray(pilotData)) setPilots(pilotData);
+      if (Array.isArray(projectData)) setProjects(projectData);
+      if (Array.isArray(roleReferenceData)) setRoleReferences(roleReferenceData);
+      if (Array.isArray(userData)) setUsers(userData);
+    });
+    const baseRequests = currentUserRequest.then((latestUser) => getEcrRequests(requestLoadOptions(archiveView, latestUser)).then((requestData) => {
       setRequests(requestData);
       return requestData;
-    });
+    }));
     const currentDetails = requestId
       ? Promise.all([getChecklist(requestId, stage), getActions(requestId, stage), getPhaseValidations(requestId)])
           .then(([checklistData, actionData, validationData]) => {
@@ -2759,20 +2902,19 @@ function App() {
             setPhaseValidations(validationData);
           })
       : Promise.resolve();
-    const adminData = isAdminUser(currentUser)
-      ? Promise.all([getActionStandardSuggestions(), page === "traceability" ? getAuditLogs() : Promise.resolve(auditLogs)])
+    const adminData = isAdminUser(activeUser)
+      ? Promise.all([getActionStandardSuggestions(), activePage === "traceability" ? getAuditLogs() : Promise.resolve(realtimeState.auditLogs)])
           .then(([suggestionData, auditData]) => {
             setActionSuggestions(suggestionData);
             if (Array.isArray(auditData)) setAuditLogs(auditData);
           })
       : Promise.resolve();
-    return Promise.all([baseRequests, currentDetails, adminData]).catch(() => {});
+    return Promise.all([baseRequests, currentDetails, adminData, referenceData]).catch(() => {});
   }
 
   useEffect(() => {
     if (!authSession?.token || !currentUser) return undefined;
     let events = null;
-    let socket = null;
     let usingSseFallback = false;
     let disposed = false;
 
@@ -2781,16 +2923,17 @@ function App() {
       realtimeRefreshTimer.current = globalThis.setTimeout(refreshRealtimeData, 250);
     };
     const handleChatMessage = (payload = {}) => {
-      const currentId = Number(currentUser?.id);
+      const realtimeState = realtimeStateRef.current;
+      const currentId = Number(realtimeState.currentUser?.id);
       const senderId = Number(payload.senderId);
       const recipientId = Number(payload.recipientId);
-      const activeTarget = parseChatTarget(selectedChatUserId);
+      const activeTarget = parseChatTarget(realtimeState.selectedChatUserId);
       const activePeerId = activeTarget.type === "user" ? Number(activeTarget.id) : null;
       const concernsCurrentUser = senderId === currentId || recipientId === currentId;
       if (!concernsCurrentUser) return;
       loadChatUsers();
       if (activePeerId && (senderId === activePeerId || recipientId === activePeerId)) {
-        loadChatMessages(selectedChatUserId);
+        loadChatMessages(realtimeState.selectedChatUserId);
       }
       setChatTypingNotice(null);
       stopTypingSound();
@@ -2802,28 +2945,30 @@ function App() {
       loadChatUsers();
     };
     const handleChatGroupMessage = (payload = {}) => {
+      const realtimeState = realtimeStateRef.current;
       const groupId = Number(payload.groupId);
       const senderId = Number(payload.senderId);
-      const activeTarget = parseChatTarget(selectedChatUserId);
+      const activeTarget = parseChatTarget(realtimeState.selectedChatUserId);
       loadChatUsers();
       if (activeTarget.type === "group" && Number(activeTarget.id) === groupId) {
-        loadChatMessages(selectedChatUserId);
+        loadChatMessages(realtimeState.selectedChatUserId);
       }
       setChatTypingNotice(null);
       stopTypingSound();
-      if (senderId !== Number(currentUser?.id)) {
+      if (senderId !== Number(realtimeState.currentUser?.id)) {
         notifyIncomingChat("Nouveau message groupe");
       }
     };
     const handleChatTyping = (payload = {}) => {
+      const realtimeState = realtimeStateRef.current;
       const senderId = Number(payload.senderId);
-      if (!senderId || senderId === Number(currentUser?.id)) return;
+      if (!senderId || senderId === Number(realtimeState.currentUser?.id)) return;
       const targetType = payload.targetType || "user";
       const targetId = Number(payload.targetId);
       const active = String(payload.active ?? "true") === "true";
-      const activeTarget = parseChatTarget(selectedChatUserId);
+      const activeTarget = parseChatTarget(realtimeState.selectedChatUserId);
       const matchesActiveDirect = targetType === "user"
-        && targetId === Number(currentUser?.id)
+        && targetId === Number(realtimeState.currentUser?.id)
         && activeTarget.type === "user"
         && activeTarget.id === senderId;
       const matchesActiveGroup = targetType === "group"
@@ -2890,7 +3035,7 @@ function App() {
       globalThis.clearTimeout(realtimeRefreshTimer.current);
       if (events) events.close();
     };
-  }, [authSession?.token, currentUser, selectedId, selectedStage, requestArchiveView, page, selectedChatUserId]);
+  }, [authSession?.token, currentUser?.id]);
 
   useEffect(() => {
     if (!authSession?.token) {
@@ -4832,6 +4977,16 @@ function App() {
           onNavigate={handleNavigate}
       />
       <section className="page-shell">
+        <button
+          aria-label="Ouvrir le guide rapide"
+          className="quick-guide-button"
+          title="Guide rapide"
+          type="button"
+          onClick={() => openQuickGuide(page)}
+        >
+          <Info size={20} />
+        </button>
+
         {error && (
           <div className="banner">
             <CircleAlert size={18} />

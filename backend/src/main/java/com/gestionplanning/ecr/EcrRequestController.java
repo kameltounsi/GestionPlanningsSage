@@ -80,9 +80,10 @@ public class EcrRequestController {
         List<EcrRequest> requests = (admin && ("all".equals(normalizedView) || VIEW_ARCHIVED.equals(normalizedView)))
                 ? requestRepository.findAllByOrderByReceptionDateDescIdDesc()
                 : requestRepository.findByArchivedFalseOrderByReceptionDateDescIdDesc();
-        List<EcrRequest> visibleRequests = "mine".equalsIgnoreCase(String.valueOf(scope))
-                ? accessControlService.filterPersonalRequests(user, requests)
-                : accessControlService.filterAccessibleRequests(user, requests);
+        String normalizedScope = scope == null ? "" : scope.trim().toLowerCase(Locale.ROOT);
+        List<EcrRequest> visibleRequests = admin || "accessible".equals(normalizedScope)
+                ? accessControlService.filterAccessibleRequests(user, requests)
+                : accessControlService.filterPersonalRequests(user, requests);
         return visibleRequests.stream()
                 .filter(request -> matchesView(request, normalizedView, admin))
                 .map(EcrRequestDto::fromListItem)

@@ -54,7 +54,7 @@ public class MessagingController {
         userRepository.findAll().stream()
                 .filter(AppUser::isEnabled)
                 .filter(user -> !user.getId().equals(currentUser.getId()))
-                .map(user -> ChatConversationDto.user(user, onlinePresence(user), latestByPeer.get(user.getId()), directUnreadCount(currentUser, user)))
+                .map(user -> ChatConversationDto.user(user, onlinePresence(user), latestByPeer.get(user.getId()), directUnreadCount(currentUser, user), storageService))
                 .forEach(conversations::add);
         groupRepository.findForUser(currentUser.getId()).stream()
                 .map(group -> ChatConversationDto.group(group, messageRepository.recentForGroup(group.getId()).stream().findFirst().orElse(null), groupUnreadCount(group, currentUser)))
@@ -83,7 +83,7 @@ public class MessagingController {
         return userRepository.findAll().stream()
                 .filter(AppUser::isEnabled)
                 .filter(user -> !user.getId().equals(currentUser.getId()))
-                .map(user -> ChatUserDto.from(user, onlinePresence(user), latestByPeer.get(user.getId())))
+                .map(user -> ChatUserDto.from(user, onlinePresence(user), latestByPeer.get(user.getId()), storageService))
                 .sorted(Comparator.comparing(ChatUserDto::isOnline).reversed()
                         .thenComparing(dto -> dto.getFullName() == null ? "" : dto.getFullName(), String.CASE_INSENSITIVE_ORDER))
                 .collect(Collectors.toList());
@@ -392,13 +392,13 @@ public class MessagingController {
         private LocalDateTime lastSeenAt;
         private ChatMessageDto latestMessage;
 
-        public static ChatUserDto from(AppUser user, UserPresence presence, ChatMessage latestMessage) {
+        public static ChatUserDto from(AppUser user, UserPresence presence, ChatMessage latestMessage, CloudinaryStorageService storageService) {
             ChatUserDto dto = new ChatUserDto();
             dto.id = user.getId();
             dto.fullName = user.getFullName();
             dto.username = user.getUsername();
             dto.jobTitle = user.getJobTitle();
-            dto.profilePhotoUrl = user.getProfilePhotoUrl();
+            dto.profilePhotoUrl = storageService.publicUrl(user.getProfilePhotoPublicId(), user.getProfilePhotoResourceType(), user.getProfilePhotoUrl());
             dto.online = presence != null && presence.isOnline();
             dto.lastSeenAt = presence == null ? null : presence.getLastSeenAt();
             dto.latestMessage = latestMessage == null ? null : ChatMessageDto.from(latestMessage);
@@ -430,14 +430,14 @@ public class MessagingController {
         private List<Long> memberIds = new ArrayList<>();
         private ChatMessageDto latestMessage;
 
-        public static ChatConversationDto user(AppUser user, UserPresence presence, ChatMessage latestMessage, long unreadCount) {
+        public static ChatConversationDto user(AppUser user, UserPresence presence, ChatMessage latestMessage, long unreadCount, CloudinaryStorageService storageService) {
             ChatConversationDto dto = new ChatConversationDto();
             dto.id = user.getId();
             dto.type = "user";
             dto.name = user.getFullName();
             dto.username = user.getUsername();
             dto.jobTitle = user.getJobTitle();
-            dto.profilePhotoUrl = user.getProfilePhotoUrl();
+            dto.profilePhotoUrl = storageService.publicUrl(user.getProfilePhotoPublicId(), user.getProfilePhotoResourceType(), user.getProfilePhotoUrl());
             dto.online = presence != null && presence.isOnline();
             dto.lastSeenAt = presence == null ? null : presence.getLastSeenAt();
             dto.memberCount = 1;

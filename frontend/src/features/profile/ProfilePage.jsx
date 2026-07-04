@@ -2,6 +2,7 @@ import React from "react";
 import { Camera, Save, UserCircle } from "lucide-react";
 import { EmptyState } from "../../components/common/EmptyState";
 import { PageHeader } from "../../components/common/PageHeader";
+import { safeImageUrl } from "../../utils/assets";
 import { userRoleLabel } from "../../utils/users";
 
 export function ProfilePage({ currentUser, passwordForm, profileForm, saving, onChangePassword, onSubmit, onUploadPhoto, setPasswordForm, setProfileForm }) {
@@ -13,6 +14,7 @@ export function ProfilePage({ currentUser, passwordForm, profileForm, saving, on
       </section>
     );
   }
+  const profilePhotoUrl = safeImageUrl(currentUser.profilePhotoUrl);
 
   return (
     <section className="page-content profile-content">
@@ -20,7 +22,7 @@ export function ProfilePage({ currentUser, passwordForm, profileForm, saving, on
       <div className="profile-layout">
         <section className="panel profile-card">
           <div className="profile-photo">
-            {currentUser.profilePhotoUrl ? <img alt="" src={currentUser.profilePhotoUrl} /> : <UserCircle size={72} />}
+            {profilePhotoUrl ? <img alt="" src={profilePhotoUrl} /> : <UserCircle size={72} />}
           </div>
           <h2>{currentUser.fullName}</h2>
           <span>{userRoleLabel(currentUser.role)}</span>

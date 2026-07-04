@@ -3,6 +3,7 @@ import { Bot, Image as ImageIcon, Mic, MessageCircle, Paperclip, Pencil, Plus, S
 import { chatAttachmentUrl } from "../../api";
 import { EmptyState } from "../../components/common/EmptyState";
 import { PageHeader } from "../../components/common/PageHeader";
+import { safeImageUrl } from "../../utils/assets";
 import { stageLabel } from "../../utils/stages";
 
 const chatEmojiPalette = [
@@ -688,6 +689,7 @@ function ArabicKeyboard({ onKey }) {
 
 function UserAvatar({ user, small = false }) {
   const label = chatUserName(user);
+  const photoUrl = safeImageUrl(user?.profilePhotoUrl);
   const initials = label
     .split(/\s+/)
     .filter(Boolean)
@@ -697,7 +699,7 @@ function UserAvatar({ user, small = false }) {
     .toUpperCase() || "?";
   return (
     <span className={(user?.type || "") === "group" ? (small ? "chat-avatar group small" : "chat-avatar group") : (small ? "chat-avatar small" : "chat-avatar")}>
-      {user?.profilePhotoUrl ? <img src={user.profilePhotoUrl} alt={label} /> : initials}
+      {photoUrl ? <img src={photoUrl} alt={label} /> : initials}
     </span>
   );
 }

@@ -5,6 +5,7 @@ import com.gestionplanning.user.AccountMailService;
 import com.gestionplanning.user.AppUserDto;
 import com.gestionplanning.user.AppUserRepository;
 import com.gestionplanning.user.MailDeliveryException;
+import com.gestionplanning.storage.CloudinaryStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -30,17 +31,20 @@ public class AuthController {
     private final PasswordService passwordService;
     private final AccountMailService accountMailService;
     private final AuthenticatedUserService authenticatedUserService;
+    private final CloudinaryStorageService storageService;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthController(AppUserRepository userRepository, AuthTokenRepository tokenRepository,
                           PasswordResetCodeRepository resetCodeRepository, PasswordService passwordService,
-                          AccountMailService accountMailService, AuthenticatedUserService authenticatedUserService) {
+                          AccountMailService accountMailService, AuthenticatedUserService authenticatedUserService,
+                          CloudinaryStorageService storageService) {
         this.userRepository = userRepository;
         this.tokenRepository = tokenRepository;
         this.resetCodeRepository = resetCodeRepository;
         this.passwordService = passwordService;
         this.accountMailService = accountMailService;
         this.authenticatedUserService = authenticatedUserService;
+        this.storageService = storageService;
     }
 
     @PostMapping("/login")
@@ -192,7 +196,7 @@ public class AuthController {
         dto.setProfilePhotoFileName(user.getProfilePhotoFileName());
         dto.setProfilePhotoContentType(user.getProfilePhotoContentType());
         dto.setProfilePhotoFileSize(user.getProfilePhotoFileSize());
-        dto.setProfilePhotoUrl(user.getProfilePhotoUrl());
+        dto.setProfilePhotoUrl(storageService.publicUrl(user.getProfilePhotoPublicId(), user.getProfilePhotoResourceType(), user.getProfilePhotoUrl()));
         dto.setRole(user.getRole());
         dto.setEnabled(user.isEnabled());
         dto.setCreatedAt(user.getCreatedAt());

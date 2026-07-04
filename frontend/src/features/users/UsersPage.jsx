@@ -4,6 +4,7 @@ import { EmptyState } from "../../components/common/EmptyState";
 import { PageHeader } from "../../components/common/PageHeader";
 import { emptyUserForm } from "../../constants/forms";
 import { userRoleOptions } from "../../constants/roles";
+import { safeImageUrl } from "../../utils/assets";
 import { parseUserRoles, userRoleLabel } from "../../utils/users";
 
 export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, saving, userForm, users, onCancelEdit, onDelete, onEdit, onSubmit, setUserForm }) {
@@ -124,31 +125,34 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
             {filteredUsers.length === 0 ? (
               <EmptyState title="Aucun utilisateur" text="Aucun compte ne correspond aux filtres." />
             ) : (
-              pagedUsers.map((user) => (
-                <article className="user-row" key={user.id}>
-                  <div className="avatar-cell">
-                    {user.profilePhotoUrl ? <img alt="" src={user.profilePhotoUrl} /> : <UserCircle size={24} />}
-                  </div>
-                  <div className="user-identity"><strong>{user.fullName}</strong><span>{user.jobTitle || "-"}</span></div>
-                  <div className="user-account"><strong>{user.username || "-"}</strong><span>{user.email}</span></div>
-                  <div className="user-chefs"><strong>Chef 1: {userLabelForValue(users, user.chef1)}</strong><span>Chef 2: {userLabelForValue(users, user.chef2)}</span></div>
-                  <ul className="user-role-list" aria-label="Roles applicatifs">
-                    {parseUserRoles(user.role).length === 0 ? (
-                      <li className="status in_progress">-</li>
-                    ) : parseUserRoles(user.role).map((role) => (
-                      <li className="status in_progress" key={role}>{userRoleLabel(role)}</li>
-                    ))}
-                  </ul>
-                  <div className="row-actions">
-                    <button className="secondary-action compact-action icon-only-action" disabled={!canAdmin} type="button" onClick={() => openEditDialog(user)} aria-label="Modifier l'utilisateur" title="Modifier">
-                      <Pencil size={15} />
-                    </button>
-                    <button className="ghost-icon" disabled={!canAdmin || user.id === currentUser?.id} type="button" onClick={() => onDelete(user.id)} title="Supprimer">
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </article>
-              ))
+              pagedUsers.map((user) => {
+                const photoUrl = safeImageUrl(user.profilePhotoUrl);
+                return (
+                  <article className="user-row" key={user.id}>
+                    <div className="avatar-cell">
+                      {photoUrl ? <img alt="" src={photoUrl} /> : <UserCircle size={24} />}
+                    </div>
+                    <div className="user-identity"><strong>{user.fullName}</strong><span>{user.jobTitle || "-"}</span></div>
+                    <div className="user-account"><strong>{user.username || "-"}</strong><span>{user.email}</span></div>
+                    <div className="user-chefs"><strong>Chef 1: {userLabelForValue(users, user.chef1)}</strong><span>Chef 2: {userLabelForValue(users, user.chef2)}</span></div>
+                    <ul className="user-role-list" aria-label="Roles applicatifs">
+                      {parseUserRoles(user.role).length === 0 ? (
+                        <li className="status in_progress">-</li>
+                      ) : parseUserRoles(user.role).map((role) => (
+                        <li className="status in_progress" key={role}>{userRoleLabel(role)}</li>
+                      ))}
+                    </ul>
+                    <div className="row-actions">
+                      <button className="secondary-action compact-action icon-only-action" disabled={!canAdmin} type="button" onClick={() => openEditDialog(user)} aria-label="Modifier l'utilisateur" title="Modifier">
+                        <Pencil size={15} />
+                      </button>
+                      <button className="ghost-icon" disabled={!canAdmin || user.id === currentUser?.id} type="button" onClick={() => onDelete(user.id)} title="Supprimer">
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </article>
+                );
+              })
             )}
           </div>
           {filteredUsers.length > pageSize && (
@@ -198,7 +202,7 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
     : roleOptions;
   const [roleSlotCount, setRoleSlotCount] = useState(Math.max(1, formRoles.length));
   const roleRows = Array.from({ length: Math.max(1, roleSlotCount, formRoles.length) }, (_, index) => formRoles[index] || "");
-  const previewPhotoUrl = localPhotoPreviewUrl || form.profilePhotoUrl || "";
+  const previewPhotoUrl = localPhotoPreviewUrl || safeImageUrl(form.profilePhotoUrl);
   const chefOptions = userSelectOptions(users, form, editingUser);
 
   useEffect(() => {

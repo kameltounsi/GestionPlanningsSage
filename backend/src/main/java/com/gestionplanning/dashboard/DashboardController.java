@@ -35,10 +35,10 @@ public class DashboardController {
     @GetMapping("/actions")
     public List<EcrActionDto> actions(@RequestAttribute("authenticatedUser") Object userAttribute) {
         AppUser user = (AppUser) userAttribute;
-        List<EcrRequest> requests = accessControlService.filterAccessibleRequests(
-                user,
-                requestRepository.findByArchivedFalseOrderByReceptionDateDescIdDesc()
-        );
+        List<EcrRequest> allActiveRequests = requestRepository.findByArchivedFalseOrderByReceptionDateDescIdDesc();
+        List<EcrRequest> requests = accessControlService.isAdmin(user)
+                ? allActiveRequests
+                : accessControlService.filterPersonalRequests(user, allActiveRequests);
         if (requests.isEmpty()) {
             return Collections.emptyList();
         }

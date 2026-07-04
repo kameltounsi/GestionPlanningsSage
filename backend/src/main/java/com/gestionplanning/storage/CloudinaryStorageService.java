@@ -83,6 +83,30 @@ public class CloudinaryStorageService {
         return download(fileUrl, fallbackContentType);
     }
 
+    public String publicUrl(String publicId, String resourceType, String fileUrl) {
+        if (isHttpUrl(fileUrl)) {
+            return fileUrl.trim();
+        }
+        if (publicId == null || publicId.trim().isEmpty()) {
+            return null;
+        }
+        com.cloudinary.Url url = cloudinary.url()
+                .secure(true)
+                .resourceType(resourceType == null || resourceType.trim().isEmpty() ? IMAGE_RESOURCE_TYPE : resourceType);
+        String version = versionFromUrl(fileUrl);
+        if (version != null) {
+            url.version(version);
+        }
+        String format = extensionFromUrl(fileUrl);
+        if (format != null) {
+            String normalizedPublicId = publicId.trim().toLowerCase();
+            if (!normalizedPublicId.endsWith("." + format)) {
+                url.format(format);
+            }
+        }
+        return url.generate(publicId);
+    }
+
     public DownloadedAsset download(String fileUrl, String fallbackContentType) {
         if (fileUrl == null || fileUrl.trim().isEmpty()) {
             throw new IllegalArgumentException("URL fichier manquante");
@@ -220,6 +244,23 @@ public class CloudinaryStorageService {
             return null;
         }
         java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("/v(\\d+)/").matcher(fileUrl);
+        return matcher.find() ? matcher.group(1) : null;
+    }
+
+    private boolean isHttpUrl(String value) {
+        if (value == null) {
+            return false;
+        }
+        String text = value.trim().toLowerCase();
+        return text.startsWith("http://") || text.startsWith("https://");
+    }
+
+    private String extensionFromUrl(String fileUrl) {
+        if (fileUrl == null) {
+            return null;
+        }
+        String path = fileUrl.split("[?#]", 2)[0].trim().toLowerCase();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\.([a-z0-9]{2,5})$").matcher(path);
         return matcher.find() ? matcher.group(1) : null;
     }
 

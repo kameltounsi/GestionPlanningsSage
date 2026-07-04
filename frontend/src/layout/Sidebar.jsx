@@ -1,5 +1,6 @@
 import React from "react";
 import { Bot, ChevronLeft, ChevronRight, Database, FolderKanban, History, LayoutDashboard, ListChecks, LogOut, MessageCircle, UserCircle, Users } from "lucide-react";
+import { safeImageUrl } from "../utils/assets";
 
 const navItems = [
   ["dashboard", "Tableau", LayoutDashboard],
@@ -19,6 +20,7 @@ export function Sidebar({ canAccessPreferentials, canAdmin, collapsed, currentUs
     || ["dashboard", "modifications", "ask-ai", "messages", "profile"].includes(key)
     || (key === "preferentials" && canAccessPreferentials)
   );
+  const currentUserPhotoUrl = safeImageUrl(currentUser?.profilePhotoUrl);
 
   return (
       <aside className="app-nav">
@@ -37,8 +39,8 @@ export function Sidebar({ canAccessPreferentials, canAdmin, collapsed, currentUs
           <div className="nav-user-card">
             <div className="nav-user-controls">
               <div className="nav-user-avatar">
-                {currentUser?.profilePhotoUrl ? (
-                    <img src={currentUser.profilePhotoUrl} alt={currentUser.fullName || "Utilisateur"}/>
+                {currentUserPhotoUrl ? (
+                    <img src={currentUserPhotoUrl} alt={currentUser.fullName || "Utilisateur"}/>
                 ) : (
                     <UserCircle size={28}/>
                 )}

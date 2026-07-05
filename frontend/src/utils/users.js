@@ -18,6 +18,7 @@ export function userToForm(user) {
     fullName: user?.fullName || "",
     username: user?.username || "",
     jobTitle: user?.jobTitle || "",
+    matricule: user?.matricule || "",
     email: user?.email || "",
     password: "",
     phone: user?.phone || "",

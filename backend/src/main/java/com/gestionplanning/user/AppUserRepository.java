@@ -9,11 +9,15 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
 
     Optional<AppUser> findByUsername(String username);
 
+    Optional<AppUser> findByMatricule(String matricule);
+
     Optional<AppUser> findByPhone(String phone);
 
     boolean existsByEmail(String email);
 
     boolean existsByUsername(String username);
+
+    boolean existsByMatricule(String matricule);
 
     boolean existsByPhone(String phone);
 }

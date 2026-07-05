@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.text.Normalizer;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -76,15 +77,14 @@ public class AccessControlService {
             return Collections.emptyList();
         }
         Set<String> tokens = userAccessTokens(user);
-        Set<Long> participantRequestIds = actionRepository.findRequestIdsForParticipant(tokens).stream()
-                .collect(Collectors.toSet());
+        Set<Long> participantRequestIds = participantRequestIdsFor(user, requests, tokens);
         Set<String> projectLeadProjects = projectRepository.findAll().stream()
                 .filter(project -> isProjectLeadForProject(user, project))
                 .map(ProjectReference::getName)
                 .collect(Collectors.toSet());
         return requests.stream()
                 .filter(request -> request != null && (
-                        directRequestPilotMatch(user, request)
+                        isRequestPilot(user, request)
                                 || projectLeadProjects.contains(request.getModificationProject())
                                 || participantRequestIds.contains(request.getId())
                 ))
@@ -98,8 +98,12 @@ public class AccessControlService {
         if (user == null) {
             return Collections.emptyList();
         }
+        Set<Long> participantRequestIds = participantRequestIdsFor(user, requests, userAccessTokens(user));
         return requests.stream()
-                .filter(request -> request != null && directRequestPilotMatch(user, request))
+                .filter(request -> request != null && (
+                        isRequestPilot(user, request)
+                                || participantRequestIds.contains(request.getId())
+                ))
                 .collect(Collectors.toList());
     }
 
@@ -138,10 +142,6 @@ public class AccessControlService {
             return false;
         }
         return matchesRequestAssignment(user, request, request.getPilot());
-    }
-
-    private boolean directRequestPilotMatch(AppUser user, EcrRequest request) {
-        return matchesActionAssignment(user, request == null ? null : request.getPilot());
     }
 
     public boolean canSeeAllActions(AppUser user, EcrRequest request) {
@@ -407,6 +407,26 @@ public class AccessControlService {
                     }
                 });
         return tokens.isEmpty() ? Collections.singleton("__none__") : tokens;
+    }
+
+    private Set<Long> participantRequestIdsFor(AppUser user, List<EcrRequest> requests, Set<String> tokens) {
+        if (user == null || requests == null || requests.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<Long> requestIds = requests.stream()
+                .filter(request -> request != null && request.getId() != null)
+                .map(EcrRequest::getId)
+                .collect(Collectors.toSet());
+        if (requestIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<Long> participantRequestIds = new HashSet<>(actionRepository.findRequestIdsForParticipant(tokens));
+        actionRepository.findByRequest_IdInOrderByRequest_IdAscStartDateAscEndDateAscDeadlineAscCreatedAtAscIdAsc(requestIds).stream()
+                .filter(action -> isActionParticipant(user, action))
+                .map(EcrAction::getRequestId)
+                .filter(id -> id != null)
+                .forEach(participantRequestIds::add);
+        return participantRequestIds;
     }
 
     private static class ProjectTeamEntry {

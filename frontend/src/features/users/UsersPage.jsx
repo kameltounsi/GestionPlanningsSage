@@ -39,6 +39,7 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
         user.username,
         user.email,
         user.jobTitle,
+        user.matricule,
         user.phone,
         userRoleLabel(user.role)
       ].filter(Boolean).some((value) => normalizeUserSearch(value).includes(normalizedQuery));
@@ -132,7 +133,7 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
                     <div className="avatar-cell">
                       {photoUrl ? <img alt="" src={photoUrl} /> : <UserCircle size={24} />}
                     </div>
-                    <div className="user-identity"><strong>{user.fullName}</strong><span>{user.jobTitle || "-"}</span></div>
+                    <div className="user-identity"><strong>{user.fullName}</strong><span>{user.jobTitle || "-"}{user.matricule ? ` - Matricule ${user.matricule}` : ""}</span></div>
                     <div className="user-account"><strong>{user.username || "-"}</strong><span>{user.email}</span></div>
                     <div className="user-chefs"><strong>Chef 1: {userLabelForValue(users, user.chef1)}</strong><span>Chef 2: {userLabelForValue(users, user.chef2)}</span></div>
                     <ul className="user-role-list" aria-label="Roles applicatifs">
@@ -297,6 +298,10 @@ function UserDialog({ actionRoleOptions = [], canAdmin, editingUser, form, savin
           <label>
             Poste
             <input disabled={!canAdmin} value={form.jobTitle} onChange={(event) => setForm((current) => ({ ...current, jobTitle: event.target.value }))} />
+          </label>
+          <label>
+            Matricule
+            <input disabled={!canAdmin} inputMode="numeric" pattern="[0-9]*" value={form.matricule || ""} onChange={(event) => setForm((current) => ({ ...current, matricule: event.target.value.replace(/\D/g, "") }))} />
           </label>
           <label>
             Email

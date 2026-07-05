@@ -73,6 +73,7 @@ public class AppUserController {
                     user.setFullName(updatedUser.getFullName());
                     user.setUsername(updatedUser.getUsername());
                     user.setJobTitle(updatedUser.getJobTitle());
+                    user.setMatricule(updatedUser.getMatricule());
                     user.setEmail(updatedUser.getEmail());
                     if (hasRequestedPassword(updatedUser)) {
                         user.setPassword(passwordService.encode(updatedUser.getPassword()));
@@ -181,6 +182,7 @@ public class AppUserController {
         user.setFullName(dto.getFullName());
         user.setUsername(dto.getUsername());
         user.setJobTitle(dto.getJobTitle());
+        user.setMatricule(dto.getMatricule());
         user.setEmail(dto.getEmail());
         user.setPassword(dto.getPassword());
         user.setPhone(dto.getPhone());
@@ -197,6 +199,7 @@ public class AppUserController {
         dto.setFullName(user.getFullName());
         dto.setUsername(user.getUsername());
         dto.setJobTitle(user.getJobTitle());
+        dto.setMatricule(user.getMatricule());
         dto.setEmail(user.getEmail());
         dto.setPhone(user.getPhone());
         dto.setChef1(user.getChef1());
@@ -215,6 +218,7 @@ public class AppUserController {
     private void normalize(AppUser user) {
         user.setUsername(normalizedText(user.getUsername()));
         user.setEmail(normalizedText(user.getEmail()));
+        user.setMatricule(normalizedOptionalDigits(user.getMatricule()));
         user.setPhone(user.getPhone() == null ? null : user.getPhone().trim());
         user.setChef1(normalizedText(user.getChef1()));
         user.setChef2(normalizedText(user.getChef2()));
@@ -223,6 +227,13 @@ public class AppUserController {
 
     private String normalizedText(String value) {
         return value == null ? null : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizedOptionalDigits(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return null;
+        }
+        return value.trim();
     }
 
     private String requiredOrExisting(String requestedValue, String existingValue) {
@@ -235,6 +246,10 @@ public class AppUserController {
 
     private boolean hasDuplicateEmail(Long id, String email) {
         return email != null && userRepository.findByEmail(email).map(user -> !user.getId().equals(id)).orElse(false);
+    }
+
+    private boolean hasDuplicateMatricule(Long id, String matricule) {
+        return matricule != null && userRepository.findByMatricule(matricule).map(user -> !user.getId().equals(id)).orElse(false);
     }
 
     private boolean hasDuplicatePhone(Long id, String phone) {
@@ -260,11 +275,17 @@ public class AppUserController {
         if (invalidPhone(user.getPhone())) {
             return "Le numero de telephone est invalide ou manquant.";
         }
+        if (invalidMatricule(user.getMatricule())) {
+            return "Le matricule doit contenir uniquement des chiffres.";
+        }
         if (hasDuplicateUsername(id, user.getUsername())) {
             return "Ce username existe deja. Choisissez un autre username.";
         }
         if (hasDuplicateEmail(id, user.getEmail())) {
             return "Cet email existe deja. Choisissez une autre adresse email.";
+        }
+        if (hasDuplicateMatricule(id, user.getMatricule())) {
+            return "Ce matricule existe deja. Choisissez un autre matricule.";
         }
         if (hasDuplicatePhone(id, user.getPhone())) {
             return "Ce numero de telephone existe deja. Choisissez un autre numero.";
@@ -277,6 +298,10 @@ public class AppUserController {
 
     private boolean invalidPhone(String phone) {
         return phone == null || phone.trim().isEmpty() || !phone.trim().matches("\\+?[0-9\\s().-]{8,20}");
+    }
+
+    private boolean invalidMatricule(String matricule) {
+        return matricule != null && !matricule.matches("\\d+");
     }
 
     private boolean invalidChefAssignment(AppUser user, Long userId) {

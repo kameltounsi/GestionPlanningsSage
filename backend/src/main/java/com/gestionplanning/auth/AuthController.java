@@ -189,6 +189,7 @@ public class AuthController {
         dto.setFullName(user.getFullName());
         dto.setUsername(user.getUsername());
         dto.setJobTitle(user.getJobTitle());
+        dto.setMatricule(user.getMatricule());
         dto.setEmail(user.getEmail());
         dto.setPhone(user.getPhone());
         dto.setChef1(user.getChef1());

@@ -3,6 +3,7 @@ package com.gestionplanning.user;
 import javax.persistence.*;
 import javax.validation.constraints.Email;
 import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.Pattern;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -22,6 +23,10 @@ public class AppUser {
     private String username;
 
     private String jobTitle;
+
+    @Pattern(regexp = "\\d*")
+    @Column(unique = true)
+    private String matricule;
 
     @Email
     @NotBlank
@@ -87,6 +92,14 @@ public class AppUser {
 
     public void setJobTitle(String jobTitle) {
         this.jobTitle = jobTitle;
+    }
+
+    public String getMatricule() {
+        return matricule;
+    }
+
+    public void setMatricule(String matricule) {
+        this.matricule = matricule;
     }
 
     public String getEmail() {

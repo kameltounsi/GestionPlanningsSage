@@ -93,6 +93,7 @@ export const emptyUserForm = {
   fullName: "",
   username: "",
   jobTitle: "",
+  matricule: "",
   email: "",
   password: "",
   phone: "",

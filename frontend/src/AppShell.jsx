@@ -4578,6 +4578,7 @@ function App() {
       username: userForm.username.trim(),
       email: userForm.email.trim(),
       jobTitle: userForm.jobTitle.trim(),
+      matricule: String(userForm.matricule || "").trim(),
       phone: userForm.phone.trim(),
       chef1: userForm.chef1.trim(),
       chef2: userForm.chef2.trim()
@@ -4598,6 +4599,12 @@ function App() {
       const message = "Saisissez un numero de telephone valide: 8 a 20 caracteres, chiffres, espaces, +, -, points ou parentheses.";
       setError(message);
       warningAlert("Telephone invalide", message);
+      return Promise.reject(new Error(message));
+    }
+    if (payload.matricule && !/^\d+$/.test(payload.matricule)) {
+      const message = "Le matricule doit contenir uniquement des chiffres.";
+      setError(message);
+      warningAlert("Matricule invalide", message);
       return Promise.reject(new Error(message));
     }
     if (!isValidPhone(payload.phone)) {
@@ -6717,15 +6724,13 @@ function ModificationsPage(props) {
   const stageActionsDone = actions.every(isActionDone);
   const isCurrentStage = selectedRequest && selectedStage === selectedRequest.currentStage;
   const authenticatedUserRequests = useMemo(() => {
-    const userRequests = canAdmin
-      ? [...requests]
-      : requests.filter((request) => !request.archived && isRequestPilot(currentUser, request, projects));
+    const userRequests = [...requests];
     return userRequests.sort((first, second) => {
       const firstDate = parseDateOnly(first.receptionDate)?.getTime() || 0;
       const secondDate = parseDateOnly(second.receptionDate)?.getTime() || 0;
       return secondDate - firstDate || String(requestDisplayName(first)).localeCompare(String(requestDisplayName(second)), "fr", { sensitivity: "base" });
     });
-  }, [canAdmin, currentUser, projects, requests]);
+  }, [requests]);
   const requestStatusOptions = [
     ["all", "Toutes"],
     ["active", "Actives"],

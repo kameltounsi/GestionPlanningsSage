@@ -2,6 +2,7 @@ package com.gestionplanning.user;
 
 import javax.validation.constraints.Email;
 import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.Pattern;
 import java.time.LocalDateTime;
 
 public class AppUserDto {
@@ -12,6 +13,8 @@ public class AppUserDto {
 
     private String username;
     private String jobTitle;
+    @Pattern(regexp = "\\d*")
+    private String matricule;
 
     @Email
     @NotBlank
@@ -61,6 +64,14 @@ public class AppUserDto {
 
     public void setJobTitle(String jobTitle) {
         this.jobTitle = jobTitle;
+    }
+
+    public String getMatricule() {
+        return matricule;
+    }
+
+    public void setMatricule(String matricule) {
+        this.matricule = matricule;
     }
 
     public String getEmail() {

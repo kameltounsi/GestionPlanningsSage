@@ -3735,6 +3735,13 @@ textarea {
   min-width: 0;
 }
 
+.finished-product-filter-grid {
+  align-items: start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
 .finished-product-project-filter {
   align-items: center;
   border: 1px solid var(--line);
@@ -3770,6 +3777,13 @@ textarea {
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
+}
+
+.finished-product-filter-count {
+  align-self: end;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
 }
 
 .project-dialog {

@@ -90,14 +90,16 @@ public class FinishedProductReferenceController {
 
     @GetMapping("/export")
     public ResponseEntity<byte[]> exportFile(@RequestParam(value = "projects", required = false) List<String> projects,
+                                             @RequestParam(value = "clients", required = false) List<String> clients,
+                                             @RequestParam(value = "products", required = false) List<String> products,
                                              @RequestAttribute("authenticatedUser") Object userAttribute) {
         AppUser user = (AppUser) userAttribute;
-        Set<String> projectFilter = projectFilter(projects);
-        List<FinishedProductReference> references = filteredReferences(projectFilter, user);
+        ReferenceFilters filters = referenceFilters(projects, clients, products);
+        List<FinishedProductReference> references = filteredReferences(filters, user);
 
         try {
             byte[] content = exportWorkbook(references);
-            String fileName = projectFilter.isEmpty() ? "produits-finis.xlsx" : "produits-finis-projets.xlsx";
+            String fileName = filters.isEmpty() ? "produits-finis.xlsx" : "produits-finis-filtres.xlsx";
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
             headers.setContentDisposition(ContentDisposition.attachment().filename(fileName).build());
@@ -110,17 +112,20 @@ public class FinishedProductReferenceController {
 
     @GetMapping("/export-with-modifications")
     public ResponseEntity<byte[]> exportWithModifications(@RequestParam(value = "projects", required = false) List<String> projects,
+                                                          @RequestParam(value = "clients", required = false) List<String> clients,
+                                                          @RequestParam(value = "products", required = false) List<String> products,
                                                           @RequestAttribute("authenticatedUser") Object userAttribute) {
         AppUser user = (AppUser) userAttribute;
-        Set<String> projectFilter = projectFilter(projects);
-        List<FinishedProductReference> references = filteredReferences(projectFilter, user);
+        ReferenceFilters filters = referenceFilters(projects, clients, products);
+        List<FinishedProductReference> references = filteredReferences(filters, user);
         List<EcrRequest> requests = requestRepository.findAllByOrderByReceptionDateDescIdDesc().stream()
-                .filter(request -> projectFilter.isEmpty() || projectFilter.contains(normalizedKey(request.getModificationProject())))
+                .filter(request -> filters.projects.isEmpty() || filters.projects.contains(normalizedKey(request.getModificationProject())))
+                .filter(request -> filters.clients.isEmpty() || filters.clients.contains(normalizedKey(request.getClient())))
                 .filter(request -> accessControlService.canAccessRequest(user, request))
                 .collect(Collectors.toList());
         try {
             byte[] content = exportMatrixWorkbook(references, requests);
-            String fileName = projectFilter.isEmpty() ? "produits-finis-avec-modifications.xlsx" : "produits-finis-avec-modifications-projets.xlsx";
+            String fileName = filters.isEmpty() ? "produits-finis-avec-modifications.xlsx" : "produits-finis-avec-modifications-filtres.xlsx";
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
             headers.setContentDisposition(ContentDisposition.attachment().filename(fileName).build());
@@ -425,16 +430,28 @@ public class FinishedProductReferenceController {
         fileReducedCodes.add(reducedCodeKey);
     }
 
-    private Set<String> projectFilter(List<String> projects) {
-        return projects == null ? new HashSet<>() : projects.stream()
+    private ReferenceFilters referenceFilters(List<String> projects, List<String> clients, List<String> products) {
+        ReferenceFilters filters = new ReferenceFilters();
+        filters.projects = normalizedFilter(projects);
+        filters.clients = normalizedFilter(clients);
+        filters.products = normalizedFilter(products);
+        return filters;
+    }
+
+    private Set<String> normalizedFilter(List<String> values) {
+        return values == null ? new HashSet<>() : values.stream()
                 .map(this::normalizedKey)
                 .filter(value -> value != null)
                 .collect(Collectors.toSet());
     }
 
-    private List<FinishedProductReference> filteredReferences(Set<String> projectFilter, AppUser user) {
+    private List<FinishedProductReference> filteredReferences(ReferenceFilters filters, AppUser user) {
         return repository.findAllByOrderByProjectAscProductAscPartNumberAsc().stream()
-                .filter(reference -> projectFilter.isEmpty() || projectFilter.contains(normalizedKey(reference.getProject())))
+                .filter(reference -> filters.projects.isEmpty() || filters.projects.contains(normalizedKey(reference.getProject())))
+                .filter(reference -> filters.clients.isEmpty() || filters.clients.contains(normalizedKey(reference.getClient())))
+                .filter(reference -> filters.products.isEmpty() || productList(reference.getProduct()).stream()
+                        .map(this::normalizedKey)
+                        .anyMatch(filters.products::contains))
                 .filter(reference -> accessControlService.canManageFinishedProduct(user, reference.getProject()))
                 .collect(Collectors.toList());
     }
@@ -780,6 +797,16 @@ public class FinishedProductReferenceController {
         private CellStyle bodyCenter;
         private CellStyle bodyMuted;
         private CellStyle product;
+    }
+
+    private static class ReferenceFilters {
+        private Set<String> projects = new HashSet<>();
+        private Set<String> clients = new HashSet<>();
+        private Set<String> products = new HashSet<>();
+
+        private boolean isEmpty() {
+            return projects.isEmpty() && clients.isEmpty() && products.isEmpty();
+        }
     }
 
     private Map<String, Integer> headerColumns(Row headerRow) {

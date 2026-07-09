@@ -438,17 +438,22 @@ export function importFinishedProductReferences(file) {
   return multipartRequest("/preferentials/finished-products/import", formData);
 }
 
-export function exportFinishedProductReferences(projects = []) {
+function finishedProductExportParams(filters = []) {
+  const normalizedFilters = Array.isArray(filters) ? { projects: filters } : filters || {};
   const params = new URLSearchParams();
-  projects.filter(Boolean).forEach((project) => params.append("projects", project));
-  const query = params.toString() ? `?${params.toString()}` : "";
+  (normalizedFilters.projects || []).filter(Boolean).forEach((project) => params.append("projects", project));
+  (normalizedFilters.clients || []).filter(Boolean).forEach((client) => params.append("clients", client));
+  (normalizedFilters.products || []).filter(Boolean).forEach((product) => params.append("products", product));
+  return params.toString() ? `?${params.toString()}` : "";
+}
+
+export function exportFinishedProductReferences(filters = []) {
+  const query = finishedProductExportParams(filters);
   return downloadRequest(`/preferentials/finished-products/export${query}`);
 }
 
-export function exportFinishedProductReferencesWithModifications(projects = []) {
-  const params = new URLSearchParams();
-  projects.filter(Boolean).forEach((project) => params.append("projects", project));
-  const query = params.toString() ? `?${params.toString()}` : "";
+export function exportFinishedProductReferencesWithModifications(filters = []) {
+  const query = finishedProductExportParams(filters);
   return downloadRequest(`/preferentials/finished-products/export-with-modifications${query}`);
 }
 

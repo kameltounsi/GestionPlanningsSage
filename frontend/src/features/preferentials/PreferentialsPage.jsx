@@ -28,6 +28,13 @@ function uniqueSorted(values) {
   return [...new Set(values.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
 }
 
+function splitReferenceValues(value) {
+  return String(value || "")
+    .split(/[;,/\n\r]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function roleOptionLabel(role) {
   const normalizedRole = normalizeRoleToken(role).replaceAll("_", " ");
   const option = userRoleOptions.find(([value, label]) =>
@@ -542,17 +549,30 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
   const [exportProjectSelection, setExportProjectSelection] = useState([]);
   const [showAllProjects, setShowAllProjects] = useState(true);
   const [projectFilterSelection, setProjectFilterSelection] = useState([]);
+  const [showAllClients, setShowAllClients] = useState(true);
+  const [clientFilterSelection, setClientFilterSelection] = useState([]);
+  const [showAllProducts, setShowAllProducts] = useState(true);
+  const [productFilterSelection, setProductFilterSelection] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const importInputRef = useRef(null);
   const clientNames = uniqueSorted(clients.map((client) => client.name));
   const projectNames = uniqueSorted(projects.map((project) => project.name));
   const productNames = uniqueSorted(products.map((product) => product.name));
-  const projectFilteredReferences = useMemo(() => {
-    if (showAllProjects) return references;
+  const activeFilters = useMemo(() => ({
+    projects: showAllProjects ? [] : projectFilterSelection,
+    clients: showAllClients ? [] : clientFilterSelection,
+    products: showAllProducts ? [] : productFilterSelection
+  }), [clientFilterSelection, productFilterSelection, projectFilterSelection, showAllClients, showAllProducts, showAllProjects]);
+  const filterFilteredReferences = useMemo(() => {
     const selectedProjects = new Set(projectFilterSelection);
-    return references.filter((reference) => selectedProjects.has(reference.project));
-  }, [projectFilterSelection, references, showAllProjects]);
-  const filteredReferences = useFilteredItems(projectFilteredReferences, searchTerm, (reference) => [
+    const selectedClients = new Set(clientFilterSelection);
+    const selectedProducts = new Set(productFilterSelection);
+    return references
+      .filter((reference) => showAllProjects || selectedProjects.has(reference.project))
+      .filter((reference) => showAllClients || selectedClients.has(reference.client))
+      .filter((reference) => showAllProducts || splitReferenceValues(reference.product).some((product) => selectedProducts.has(product)));
+  }, [clientFilterSelection, productFilterSelection, projectFilterSelection, references, showAllClients, showAllProducts, showAllProjects]);
+  const filteredReferences = useFilteredItems(filterFilteredReferences, searchTerm, (reference) => [
     reference.client,
     reference.project,
     reference.partNumber,
@@ -612,8 +632,10 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
 
   function submitExport(event) {
     event.preventDefault();
-    const selectedProjects = exportAllProjects ? [] : exportProjectSelection;
-    const exportResult = onExport?.(selectedProjects);
+    const exportResult = onExport?.({
+      ...activeFilters,
+      projects: exportAllProjects ? [] : exportProjectSelection
+    });
     if (exportResult?.then) {
       exportResult.then(() => setExportDialogOpen(false)).catch(() => {});
     } else {
@@ -622,8 +644,7 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
   }
 
   function exportWithModifications() {
-    const selectedProjects = showAllProjects ? [] : projectFilterSelection;
-    const exportResult = onExportWithModifications?.(selectedProjects);
+    const exportResult = onExportWithModifications?.(activeFilters);
     if (exportResult && typeof exportResult.catch === "function") {
       exportResult.catch(() => {});
     }
@@ -632,6 +653,16 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
   function toggleProjectFilter(project, checked) {
     setShowAllProjects(false);
     setProjectFilterSelection((current) => toggleArrayValue(current, project, checked));
+  }
+
+  function toggleClientFilter(client, checked) {
+    setShowAllClients(false);
+    setClientFilterSelection((current) => toggleArrayValue(current, client, checked));
+  }
+
+  function toggleProductFilter(product, checked) {
+    setShowAllProducts(false);
+    setProductFilterSelection((current) => toggleArrayValue(current, product, checked));
   }
 
   return (
@@ -664,39 +695,109 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
       {clientNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un client.</p>}
       {projectNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un projet.</p>}
       {productNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un produit.</p>}
-      {projectNames.length > 0 && (
-        <fieldset className="finished-product-project-filter">
-          <legend>Filtrer par projet</legend>
-          <label>
-            <input
-              checked={showAllProjects}
-              type="checkbox"
-              onChange={(event) => {
-                setShowAllProjects(event.target.checked);
-                setProjectFilterSelection([]);
-              }}
-            />
-            Tous les projets
-          </label>
-          {projectNames.map((project) => (
-            <label key={project}>
-              <input
-                checked={showAllProjects || projectFilterSelection.includes(project)}
-                type="checkbox"
-                onChange={(event) => {
-                  if (showAllProjects) {
-                    setShowAllProjects(false);
-                    setProjectFilterSelection(event.target.checked ? projectNames : projectNames.filter((item) => item !== project));
-                    return;
-                  }
-                  toggleProjectFilter(project, event.target.checked);
-                }}
-              />
-              {project}
-            </label>
-          ))}
-          <span>{filteredReferences.length} produit{filteredReferences.length > 1 ? "s" : ""} affiche{filteredReferences.length > 1 ? "s" : ""}</span>
-        </fieldset>
+      {(projectNames.length > 0 || clientNames.length > 0 || productNames.length > 0) && (
+        <div className="finished-product-filter-grid">
+          {projectNames.length > 0 && (
+            <fieldset className="finished-product-project-filter">
+              <legend>Filtrer par projet</legend>
+              <label>
+                <input
+                  checked={showAllProjects}
+                  type="checkbox"
+                  onChange={(event) => {
+                    setShowAllProjects(event.target.checked);
+                    setProjectFilterSelection([]);
+                  }}
+                />
+                Tous les projets
+              </label>
+              {projectNames.map((project) => (
+                <label key={project}>
+                  <input
+                    checked={showAllProjects || projectFilterSelection.includes(project)}
+                    type="checkbox"
+                    onChange={(event) => {
+                      if (showAllProjects) {
+                        setShowAllProjects(false);
+                        setProjectFilterSelection(event.target.checked ? projectNames : projectNames.filter((item) => item !== project));
+                        return;
+                      }
+                      toggleProjectFilter(project, event.target.checked);
+                    }}
+                  />
+                  {project}
+                </label>
+              ))}
+            </fieldset>
+          )}
+          {clientNames.length > 0 && (
+            <fieldset className="finished-product-project-filter">
+              <legend>Filtrer par client</legend>
+              <label>
+                <input
+                  checked={showAllClients}
+                  type="checkbox"
+                  onChange={(event) => {
+                    setShowAllClients(event.target.checked);
+                    setClientFilterSelection([]);
+                  }}
+                />
+                Tous les clients
+              </label>
+              {clientNames.map((client) => (
+                <label key={client}>
+                  <input
+                    checked={showAllClients || clientFilterSelection.includes(client)}
+                    type="checkbox"
+                    onChange={(event) => {
+                      if (showAllClients) {
+                        setShowAllClients(false);
+                        setClientFilterSelection(event.target.checked ? clientNames : clientNames.filter((item) => item !== client));
+                        return;
+                      }
+                      toggleClientFilter(client, event.target.checked);
+                    }}
+                  />
+                  {client}
+                </label>
+              ))}
+            </fieldset>
+          )}
+          {productNames.length > 0 && (
+            <fieldset className="finished-product-project-filter">
+              <legend>Filtrer par produit</legend>
+              <label>
+                <input
+                  checked={showAllProducts}
+                  type="checkbox"
+                  onChange={(event) => {
+                    setShowAllProducts(event.target.checked);
+                    setProductFilterSelection([]);
+                  }}
+                />
+                Tous les produits
+              </label>
+              {productNames.map((product) => (
+                <label key={product}>
+                  <input
+                    checked={showAllProducts || productFilterSelection.includes(product)}
+                    type="checkbox"
+                    onChange={(event) => {
+                      if (showAllProducts) {
+                        setShowAllProducts(false);
+                        setProductFilterSelection(event.target.checked ? productNames : productNames.filter((item) => item !== product));
+                        return;
+                      }
+                      toggleProductFilter(product, event.target.checked);
+                    }}
+                  />
+                  {product}
+                </label>
+              ))}
+            </fieldset>
+          )}
+          <span className="finished-product-filter-count">{filteredReferences.length} produit{filteredReferences.length > 1 ? "s" : ""} affiche{filteredReferences.length > 1 ? "s" : ""}</span>
+        </div>
       )}
       <label className="preferential-search">
         Rechercher

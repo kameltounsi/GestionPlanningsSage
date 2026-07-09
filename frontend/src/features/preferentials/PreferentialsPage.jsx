@@ -388,6 +388,7 @@ export function PreferentialsPage({
   onEditProject,
   onEditRole,
   onExportFinishedProducts,
+  onExportFinishedProductsWithModifications,
   onImportFinishedProducts,
   onSubmitClient,
   onSubmitFinishedProduct,
@@ -504,6 +505,7 @@ export function PreferentialsPage({
           onDelete={onDeleteFinishedProduct}
           onEdit={onEditFinishedProduct}
           onExport={onExportFinishedProducts}
+          onExportWithModifications={onExportFinishedProductsWithModifications}
           onImport={onImportFinishedProducts}
           onSubmit={onSubmitFinishedProduct}
           setForm={setFinishedProductForm}
@@ -533,7 +535,7 @@ export function PreferentialsPage({
 }
 
 
-function FinishedProductPreferentialPanel({ clients = [], editing, form, products, projects, references, saving, onCancelEdit, onDelete, onEdit, onExport, onImport, onSubmit, setForm }) {
+function FinishedProductPreferentialPanel({ clients = [], editing, form, products, projects, references, saving, onCancelEdit, onDelete, onEdit, onExport, onExportWithModifications, onImport, onSubmit, setForm }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportAllProjects, setExportAllProjects] = useState(true);
@@ -619,6 +621,14 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
     }
   }
 
+  function exportWithModifications() {
+    const selectedProjects = showAllProjects ? [] : projectFilterSelection;
+    const exportResult = onExportWithModifications?.(selectedProjects);
+    if (exportResult && typeof exportResult.catch === "function") {
+      exportResult.catch(() => {});
+    }
+  }
+
   function toggleProjectFilter(project, checked) {
     setShowAllProjects(false);
     setProjectFilterSelection((current) => toggleArrayValue(current, project, checked));
@@ -635,6 +645,10 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
           <button className="secondary-action compact-action" disabled={saving || references.length === 0} type="button" onClick={openExportDialog}>
             <Download size={16} />
             Exporter Excel
+          </button>
+          <button className="secondary-action compact-action" disabled={saving || references.length === 0} type="button" onClick={exportWithModifications}>
+            <Download size={16} />
+            Export avec modifications
           </button>
           <button className="secondary-action compact-action" disabled={saving} type="button" onClick={() => importInputRef.current?.click()}>
             <Upload size={16} />

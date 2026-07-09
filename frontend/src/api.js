@@ -445,6 +445,13 @@ export function exportFinishedProductReferences(projects = []) {
   return downloadRequest(`/preferentials/finished-products/export${query}`);
 }
 
+export function exportFinishedProductReferencesWithModifications(projects = []) {
+  const params = new URLSearchParams();
+  projects.filter(Boolean).forEach((project) => params.append("projects", project));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return downloadRequest(`/preferentials/finished-products/export-with-modifications${query}`);
+}
+
 export function createFinishedProductReference(payload) {
   return request("/preferentials/finished-products", {
     method: "POST",

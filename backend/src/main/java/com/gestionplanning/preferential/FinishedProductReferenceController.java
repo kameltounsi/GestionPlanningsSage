@@ -2,16 +2,26 @@ package com.gestionplanning.preferential;
 
 import com.gestionplanning.audit.AuditLogService;
 import com.gestionplanning.auth.AccessControlService;
+import com.gestionplanning.ecr.EcrRequest;
+import com.gestionplanning.ecr.EcrRequestRepository;
 import com.gestionplanning.project.ProjectReference;
 import com.gestionplanning.project.ProjectReferenceRepository;
 import com.gestionplanning.user.AppUser;
+import org.apache.poi.ss.usermodel.BorderStyle;
 import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.HorizontalAlignment;
+import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.DateUtil;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.VerticalAlignment;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.ss.util.CellRangeAddress;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
@@ -48,6 +58,7 @@ public class FinishedProductReferenceController {
     private final ClientReferenceRepository clientRepository;
     private final ProjectReferenceRepository projectRepository;
     private final ProductReferenceRepository productRepository;
+    private final EcrRequestRepository requestRepository;
     private final FinishedProductReferenceMapper finishedProductMapper;
     private final AuditLogService auditLogService;
     private final AccessControlService accessControlService;
@@ -56,6 +67,7 @@ public class FinishedProductReferenceController {
                                               ClientReferenceRepository clientRepository,
                                               ProjectReferenceRepository projectRepository,
                                               ProductReferenceRepository productRepository,
+                                              EcrRequestRepository requestRepository,
                                               FinishedProductReferenceMapper finishedProductMapper,
                                               AuditLogService auditLogService,
                                               AccessControlService accessControlService) {
@@ -63,6 +75,7 @@ public class FinishedProductReferenceController {
         this.clientRepository = clientRepository;
         this.projectRepository = projectRepository;
         this.productRepository = productRepository;
+        this.requestRepository = requestRepository;
         this.finishedProductMapper = finishedProductMapper;
         this.auditLogService = auditLogService;
         this.accessControlService = accessControlService;
@@ -79,18 +92,35 @@ public class FinishedProductReferenceController {
     public ResponseEntity<byte[]> exportFile(@RequestParam(value = "projects", required = false) List<String> projects,
                                              @RequestAttribute("authenticatedUser") Object userAttribute) {
         AppUser user = (AppUser) userAttribute;
-        Set<String> projectFilter = projects == null ? new HashSet<>() : projects.stream()
-                .map(this::normalizedKey)
-                .filter(value -> value != null)
-                .collect(Collectors.toSet());
-        List<FinishedProductReference> references = repository.findAllByOrderByProjectAscProductAscPartNumberAsc().stream()
-                .filter(reference -> projectFilter.isEmpty() || projectFilter.contains(normalizedKey(reference.getProject())))
-                .filter(reference -> accessControlService.canManageFinishedProduct(user, reference.getProject()))
-                .collect(Collectors.toList());
+        Set<String> projectFilter = projectFilter(projects);
+        List<FinishedProductReference> references = filteredReferences(projectFilter, user);
 
         try {
             byte[] content = exportWorkbook(references);
             String fileName = projectFilter.isEmpty() ? "produits-finis.xlsx" : "produits-finis-projets.xlsx";
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+            headers.setContentDisposition(ContentDisposition.attachment().filename(fileName).build());
+            headers.setContentLength(content.length);
+            return new ResponseEntity<>(content, headers, HttpStatus.OK);
+        } catch (IOException exception) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/export-with-modifications")
+    public ResponseEntity<byte[]> exportWithModifications(@RequestParam(value = "projects", required = false) List<String> projects,
+                                                          @RequestAttribute("authenticatedUser") Object userAttribute) {
+        AppUser user = (AppUser) userAttribute;
+        Set<String> projectFilter = projectFilter(projects);
+        List<FinishedProductReference> references = filteredReferences(projectFilter, user);
+        List<EcrRequest> requests = requestRepository.findAllByOrderByReceptionDateDescIdDesc().stream()
+                .filter(request -> projectFilter.isEmpty() || projectFilter.contains(normalizedKey(request.getModificationProject())))
+                .filter(request -> accessControlService.canAccessRequest(user, request))
+                .collect(Collectors.toList());
+        try {
+            byte[] content = exportMatrixWorkbook(references, requests);
+            String fileName = projectFilter.isEmpty() ? "produits-finis-avec-modifications.xlsx" : "produits-finis-avec-modifications-projets.xlsx";
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
             headers.setContentDisposition(ContentDisposition.attachment().filename(fileName).build());
@@ -395,6 +425,20 @@ public class FinishedProductReferenceController {
         fileReducedCodes.add(reducedCodeKey);
     }
 
+    private Set<String> projectFilter(List<String> projects) {
+        return projects == null ? new HashSet<>() : projects.stream()
+                .map(this::normalizedKey)
+                .filter(value -> value != null)
+                .collect(Collectors.toSet());
+    }
+
+    private List<FinishedProductReference> filteredReferences(Set<String> projectFilter, AppUser user) {
+        return repository.findAllByOrderByProjectAscProductAscPartNumberAsc().stream()
+                .filter(reference -> projectFilter.isEmpty() || projectFilter.contains(normalizedKey(reference.getProject())))
+                .filter(reference -> accessControlService.canManageFinishedProduct(user, reference.getProject()))
+                .collect(Collectors.toList());
+    }
+
     private byte[] exportWorkbook(List<FinishedProductReference> references) throws IOException {
         try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
              ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
@@ -454,10 +498,288 @@ public class FinishedProductReferenceController {
         }
     }
 
+    private byte[] exportMatrixWorkbook(List<FinishedProductReference> references, List<EcrRequest> requests) throws IOException {
+        try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            Sheet sheet = workbook.createSheet("CHANGE MATRIX");
+            MatrixStyles styles = matrixStyles(workbook);
+            setupMatrixSheet(sheet);
+            writeMatrixTitle(sheet, styles, references);
+            int rowIndex = 3;
+            rowIndex = writeProgressiveRegister(sheet, styles, references, requests, rowIndex);
+            rowIndex += 2;
+            writeProductRegister(sheet, styles, references, rowIndex);
+            workbook.write(outputStream);
+            return outputStream.toByteArray();
+        }
+    }
+
+    private void setupMatrixSheet(Sheet sheet) {
+        int[] widths = {5, 34, 32, 16, 16, 16, 16, 16, 16, 16};
+        for (int column = 0; column < widths.length; column++) {
+            sheet.setColumnWidth(column, widths[column] * 256);
+        }
+        sheet.createFreezePane(0, 5);
+        sheet.setDisplayGridlines(false);
+    }
+
+    private void writeMatrixTitle(Sheet sheet, MatrixStyles styles, List<FinishedProductReference> references) {
+        Row titleRow = sheet.createRow(0);
+        titleRow.setHeightInPoints(24);
+        merge(sheet, 0, 1, 0, 5);
+        cell(titleRow, 1, "CHANGE MANAGEMENT MATRIX", styles.title);
+        Row subtitleRow = sheet.createRow(1);
+        subtitleRow.setHeightInPoints(22);
+        merge(sheet, 1, 1, 1, 5);
+        String projectLabel = references.stream().map(FinishedProductReference::getProject).filter(value -> value != null)
+                .distinct().collect(Collectors.joining(" / "));
+        cell(subtitleRow, 1, projectLabel.isEmpty() ? "Produits finis" : "Coiffes " + projectLabel, styles.title);
+        cell(subtitleRow, 6, java.sql.Date.valueOf(LocalDate.now()), styles.date);
+        cell(subtitleRow, 8, "INDEX", styles.index);
+        cell(subtitleRow, 9, 1, styles.index);
+    }
+
+    private int writeProgressiveRegister(Sheet sheet, MatrixStyles styles, List<FinishedProductReference> references,
+                                         List<EcrRequest> requests, int rowIndex) {
+        Row sectionRow = sheet.createRow(rowIndex++);
+        merge(sheet, rowIndex - 1, 1, rowIndex - 1, 9);
+        cell(sectionRow, 1, "Progressive register changes", styles.section);
+        Row headerRow = sheet.createRow(rowIndex++);
+        String[] headers = {"Version", "Change description", "Modification number", "Pilot", "Status", "Reception date", "DR drawing", "DR digit", "SOP date"};
+        for (int column = 0; column < headers.length; column++) {
+            cell(headerRow, column + 1, headers[column], styles.header);
+        }
+        for (FinishedProductReference reference : references) {
+            List<EcrRequest> productRequests = matchingRequests(reference, requests);
+            Row productRow = sheet.createRow(rowIndex++);
+            cell(productRow, 1, productVersion(reference), styles.product);
+            cell(productRow, 2, "INITIAL RELEASE", styles.body);
+            cell(productRow, 6, reference.getProductionIntegrationDate() == null ? null : java.sql.Date.valueOf(reference.getProductionIntegrationDate()), styles.date);
+            cell(productRow, 7, reference.getDrawingIndex(), styles.bodyCenter);
+            cell(productRow, 8, reference.getCoiffeIndex(), styles.bodyCenter);
+
+            if (productRequests.isEmpty()) {
+                Row emptyRow = sheet.createRow(rowIndex++);
+                cell(emptyRow, 2, "Aucune modification associee", styles.bodyMuted);
+                applyEmptyRowBorders(emptyRow, styles, 1, 9);
+                continue;
+            }
+            for (EcrRequest request : productRequests) {
+                Row row = sheet.createRow(rowIndex++);
+                cell(row, 2, changeDescription(request), styles.body);
+                cell(row, 3, request.getModificationNumber(), styles.bodyCenter);
+                cell(row, 4, request.getPilot(), styles.body);
+                cell(row, 5, request.getCurrentStage() == null ? null : request.getCurrentStage().name(), styles.bodyCenter);
+                cell(row, 6, request.getReceptionDate() == null ? null : java.sql.Date.valueOf(request.getReceptionDate()), styles.date);
+                cell(row, 7, reference.getDrawingIndex(), styles.bodyCenter);
+                cell(row, 8, digitLabel(request, reference), styles.bodyCenter);
+                cell(row, 9, request.getSopDate() == null ? null : java.sql.Date.valueOf(request.getSopDate()), styles.date);
+                applyEmptyRowBorders(row, styles, 1, 9);
+            }
+        }
+        return rowIndex;
+    }
+
+    private void writeProductRegister(Sheet sheet, MatrixStyles styles, List<FinishedProductReference> references, int rowIndex) {
+        Row sectionRow = sheet.createRow(rowIndex++);
+        merge(sheet, rowIndex - 1, 1, rowIndex - 1, 9);
+        cell(sectionRow, 1, "Registro codici fodere", styles.section);
+        Row headerRow = sheet.createRow(rowIndex++);
+        String[] headers = {"Allestimento", "DESCRIZIONE", "Cover PN", "IND,C", "Customer PN", "Projet", "Code reduit", "DR\nDISEGNI", "DR\nDIME"};
+        for (int column = 0; column < headers.length; column++) {
+            cell(headerRow, column + 1, headers[column], styles.header);
+        }
+        String previousProduct = null;
+        for (FinishedProductReference reference : references) {
+            Row row = sheet.createRow(rowIndex++);
+            String product = reference.getProduct();
+            cell(row, 1, product == null || product.equals(previousProduct) ? null : product, styles.bodyCenter);
+            cell(row, 2, reference.getDesignation(), styles.body);
+            cell(row, 3, reference.getPartNumber(), styles.bodyCenter);
+            cell(row, 4, reference.getCoiffeIndex(), styles.bodyCenter);
+            cell(row, 5, reference.getCustomerPn(), styles.bodyCenter);
+            cell(row, 6, reference.getProject(), styles.bodyCenter);
+            cell(row, 7, reference.getReducedCode(), styles.bodyCenter);
+            cell(row, 8, reference.getDrawingIndex(), styles.bodyCenter);
+            cell(row, 9, reference.getCoiffeIndex(), styles.bodyCenter);
+            previousProduct = product;
+        }
+    }
+
     private void writeText(Row row, int column, String value) {
         if (value != null) {
             row.createCell(column).setCellValue(value);
         }
+    }
+
+    private List<EcrRequest> matchingRequests(FinishedProductReference reference, List<EcrRequest> requests) {
+        Set<String> productKeys = new HashSet<>();
+        addKey(productKeys, reference.getPartNumber());
+        addKey(productKeys, reference.getReducedCode());
+        addKey(productKeys, reference.getDesignation());
+        String projectKey = normalizedKey(reference.getProject());
+        return requests.stream()
+                .filter(request -> projectKey != null && projectKey.equals(normalizedKey(request.getModificationProject())))
+                .filter(request -> requestMatchesFinishedProduct(request, productKeys))
+                .sorted((left, right) -> {
+                    int dateCompare = nullSafeDate(left.getReceptionDate()).compareTo(nullSafeDate(right.getReceptionDate()));
+                    if (dateCompare != 0) {
+                        return dateCompare;
+                    }
+                    return String.valueOf(left.getModificationNumber()).compareToIgnoreCase(String.valueOf(right.getModificationNumber()));
+                })
+                .collect(Collectors.toList());
+    }
+
+    private boolean requestMatchesFinishedProduct(EcrRequest request, Set<String> productKeys) {
+        if (request == null || productKeys.isEmpty()) {
+            return false;
+        }
+        Set<String> requestKeys = new HashSet<>();
+        addSplitKeys(requestKeys, request.getFinishedProducts());
+        addSplitKeys(requestKeys, request.getProduct());
+        for (String key : productKeys) {
+            if (requestKeys.contains(key) || normalizedTextContains(request.getFinishedProducts(), key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private LocalDate nullSafeDate(LocalDate date) {
+        return date == null ? LocalDate.of(1900, 1, 1) : date;
+    }
+
+    private String productVersion(FinishedProductReference reference) {
+        String designation = trimToNull(reference.getDesignation());
+        if (designation != null) {
+            return designation;
+        }
+        return trimToNull(reference.getPartNumber()) == null ? reference.getReducedCode() : reference.getPartNumber();
+    }
+
+    private String changeDescription(EcrRequest request) {
+        String reason = trimToNull(request.getModificationReason());
+        String detail = trimToNull(request.getModificationDetail());
+        if (reason != null && detail != null) {
+            return reason + " - " + detail;
+        }
+        if (detail != null) {
+            return detail;
+        }
+        return reason == null ? "Modification" : reason;
+    }
+
+    private String digitLabel(EcrRequest request, FinishedProductReference reference) {
+        String coiffe = trimToNull(reference.getCoiffeIndex());
+        if (request.isDigitChange() && coiffe != null) {
+            return coiffe;
+        }
+        return request.isDigitChange() ? "Oui" : coiffe;
+    }
+
+    private void addSplitKeys(Set<String> keys, String value) {
+        String text = trimToNull(value);
+        if (text == null) {
+            return;
+        }
+        for (String part : text.split("[,;/\\r\\n|]+")) {
+            addKey(keys, part);
+        }
+    }
+
+    private void addKey(Set<String> keys, String value) {
+        String key = normalizedKey(value);
+        if (key != null) {
+            keys.add(key);
+        }
+    }
+
+    private boolean normalizedTextContains(String text, String key) {
+        String normalizedText = normalizedKey(text);
+        return normalizedText != null && key != null && normalizedText.contains(key);
+    }
+
+    private void merge(Sheet sheet, int firstRow, int firstColumn, int lastRow, int lastColumn) {
+        sheet.addMergedRegion(new CellRangeAddress(firstRow, lastRow, firstColumn, lastColumn));
+    }
+
+    private void cell(Row row, int column, Object value, CellStyle style) {
+        Cell cell = row.createCell(column);
+        if (value instanceof java.util.Date) {
+            cell.setCellValue((java.util.Date) value);
+        } else if (value instanceof Number) {
+            cell.setCellValue(((Number) value).doubleValue());
+        } else if (value != null) {
+            cell.setCellValue(String.valueOf(value));
+        }
+        if (style != null) {
+            cell.setCellStyle(style);
+        }
+    }
+
+    private void applyEmptyRowBorders(Row row, MatrixStyles styles, int firstColumn, int lastColumn) {
+        for (int column = firstColumn; column <= lastColumn; column++) {
+            Cell cell = row.getCell(column);
+            if (cell == null) {
+                cell = row.createCell(column);
+            }
+            if (cell.getCellStyle() == null || cell.getCellStyle().getIndex() == 0) {
+                cell.setCellStyle(styles.body);
+            }
+        }
+    }
+
+    private MatrixStyles matrixStyles(Workbook workbook) {
+        MatrixStyles styles = new MatrixStyles();
+        short dateFormat = workbook.getCreationHelper().createDataFormat().getFormat("dd-mmm-yy");
+        styles.title = style(workbook, true, 16, null, HorizontalAlignment.CENTER, true);
+        styles.index = style(workbook, false, 14, null, HorizontalAlignment.CENTER, true);
+        styles.date = style(workbook, false, 10, null, HorizontalAlignment.CENTER, true);
+        styles.date.setDataFormat(dateFormat);
+        styles.section = style(workbook, true, 11, IndexedColors.LIGHT_GREEN, HorizontalAlignment.LEFT, true);
+        styles.header = style(workbook, true, 9, IndexedColors.ROSE, HorizontalAlignment.CENTER, true);
+        styles.body = style(workbook, false, 9, null, HorizontalAlignment.LEFT, true);
+        styles.bodyCenter = style(workbook, false, 9, null, HorizontalAlignment.CENTER, true);
+        styles.bodyMuted = style(workbook, false, 9, IndexedColors.GREY_25_PERCENT, HorizontalAlignment.LEFT, true);
+        styles.product = style(workbook, true, 9, null, HorizontalAlignment.LEFT, true);
+        return styles;
+    }
+
+    private CellStyle style(Workbook workbook, boolean bold, int fontSize, IndexedColors fill,
+                            HorizontalAlignment alignment, boolean border) {
+        CellStyle style = workbook.createCellStyle();
+        Font font = workbook.createFont();
+        font.setFontName("Verdana");
+        font.setFontHeightInPoints((short) fontSize);
+        font.setBold(bold);
+        style.setFont(font);
+        style.setAlignment(alignment);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        style.setWrapText(true);
+        if (fill != null) {
+            style.setFillForegroundColor(fill.getIndex());
+            style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        }
+        if (border) {
+            style.setBorderTop(BorderStyle.THIN);
+            style.setBorderBottom(BorderStyle.THIN);
+            style.setBorderLeft(BorderStyle.THIN);
+            style.setBorderRight(BorderStyle.THIN);
+        }
+        return style;
+    }
+
+    private static class MatrixStyles {
+        private CellStyle title;
+        private CellStyle index;
+        private CellStyle date;
+        private CellStyle section;
+        private CellStyle header;
+        private CellStyle body;
+        private CellStyle bodyCenter;
+        private CellStyle bodyMuted;
+        private CellStyle product;
     }
 
     private Map<String, Integer> headerColumns(Row headerRow) {

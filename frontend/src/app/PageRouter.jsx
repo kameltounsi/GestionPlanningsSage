@@ -84,6 +84,7 @@ export function PageRouter({
   handleDeleteRoleReference,
   handleDeleteUser,
   handleExportFinishedProducts,
+  handleExportFinishedProductsWithModifications,
   handleImportFinishedProducts,
   handleRejectActionValidation,
   handleRejectPhase,
@@ -361,6 +362,7 @@ export function PageRouter({
           onEditProject={startProjectEdit}
           onEditRole={startRoleReferenceEdit}
           onExportFinishedProducts={handleExportFinishedProducts}
+          onExportFinishedProductsWithModifications={handleExportFinishedProductsWithModifications}
           onImportFinishedProducts={handleImportFinishedProducts}
           onSubmitClient={handleSaveClientReference}
           onSubmitFinishedProduct={handleSaveFinishedProductReference}

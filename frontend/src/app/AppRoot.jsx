@@ -43,6 +43,7 @@ import {
   deleteUser,
   ecrRequestFileDownloadUrl,
   exportFinishedProductReferences,
+  exportFinishedProductReferencesWithModifications,
   getActionPlanningRules,
   getActionStandardSuggestions,
   getPendingActionDeadlineAlerts,
@@ -4712,6 +4713,22 @@ function AppRoot() {
       .finally(() => setSaving(false));
   }
 
+  function handleExportFinishedProductsWithModifications(projects = []) {
+    setSaving(true);
+    setError("");
+    return exportFinishedProductReferencesWithModifications(projects)
+      .then(({ blob, fileName, type }) => {
+        downloadBlobFile(fileName || "produits-finis-avec-modifications.xlsx", blob, type);
+        successToast("Export produits finis avec modifications lance");
+      })
+      .catch((exception) => {
+        const message = friendlyErrorMessage(exception?.message || "Export des produits finis avec modifications impossible.");
+        setError(message);
+        errorAlert(message);
+      })
+      .finally(() => setSaving(false));
+  }
+
   function handleSaveRoleReference(event) {
     event.preventDefault();
     const name = roleReferenceForm.name.trim();
@@ -5458,6 +5475,7 @@ function AppRoot() {
           handleDeleteRoleReference={handleDeleteRoleReference}
           handleDeleteUser={handleDeleteUser}
           handleExportFinishedProducts={handleExportFinishedProducts}
+          handleExportFinishedProductsWithModifications={handleExportFinishedProductsWithModifications}
           handleImportFinishedProducts={handleImportFinishedProducts}
           handleRejectActionValidation={handleRejectActionValidation}
           handleRejectPhase={handleRejectPhase}

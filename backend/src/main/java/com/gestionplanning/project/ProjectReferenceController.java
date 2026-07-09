@@ -31,16 +31,19 @@ public class ProjectReferenceController {
     private static final String PROJECT_LEAD_ROLE = "chef de projet";
 
     private final ProjectReferenceRepository projectRepository;
+    private final ProjectReferenceMapper projectMapper;
     private final EcrRequestRepository requestRepository;
     private final EcrActionRepository actionRepository;
     private final AuditLogService auditLogService;
     private final AccessControlService accessControlService;
     private final ActionAssigneeResolver assigneeResolver;
 
-    public ProjectReferenceController(ProjectReferenceRepository projectRepository, AuditLogService auditLogService,
+    public ProjectReferenceController(ProjectReferenceRepository projectRepository, ProjectReferenceMapper projectMapper,
+                                      AuditLogService auditLogService,
                                       AccessControlService accessControlService, EcrRequestRepository requestRepository,
                                       EcrActionRepository actionRepository, ActionAssigneeResolver assigneeResolver) {
         this.projectRepository = projectRepository;
+        this.projectMapper = projectMapper;
         this.requestRepository = requestRepository;
         this.actionRepository = actionRepository;
         this.auditLogService = auditLogService;
@@ -51,7 +54,7 @@ public class ProjectReferenceController {
     @GetMapping
     public List<ProjectReferenceDto> list() {
         return projectRepository.findAllByOrderByNameAsc().stream()
-                .map(this::toDto)
+                .map(projectMapper::toDto)
                 .collect(Collectors.toList());
     }
 
@@ -62,16 +65,15 @@ public class ProjectReferenceController {
         if (!accessControlService.isAdmin(user)) {
             return ResponseEntity.status(403).<ProjectReferenceDto>build();
         }
-        Optional<String> validationError = validateProjectTeam(project.getProjectTeam());
+        ProjectReference entity = projectMapper.toEntity(project);
+        String projectTeam = entity.getProjectTeam();
+        Optional<String> validationError = validateProjectTeam(projectTeam);
         if (validationError.isPresent()) {
             return ResponseEntity.badRequest().<ProjectReferenceDto>build();
         }
-        ProjectReference entity = new ProjectReference();
-        entity.setName(project.getName().trim());
-        entity.setProjectTeam(project.getProjectTeam());
         ProjectReference saved = projectRepository.save(entity);
         auditLogService.recordBusinessEvent(user, "AJOUT_PROJET", "projet", saved.getName(), "Ajout du projet: " + saved.getName());
-        return ResponseEntity.ok(toDto(saved));
+        return ResponseEntity.ok(projectMapper.toDto(saved));
     }
 
     @PutMapping("/{name}")
@@ -84,18 +86,19 @@ public class ProjectReferenceController {
                     if (!accessControlService.canManageProjectTeam(user, project)) {
                         return ResponseEntity.status(403).<ProjectReferenceDto>build();
                     }
-                    Optional<String> validationError = validateProjectTeam(updatedProject.getProjectTeam());
+                    String projectTeam = projectMapper.projectTeamForSave(updatedProject);
+                    Optional<String> validationError = validateProjectTeam(projectTeam);
                     if (validationError.isPresent()) {
                         return ResponseEntity.badRequest().<ProjectReferenceDto>build();
                     }
                     String previousProjectTeam = project.getProjectTeam();
                     String previousProjectLead = projectLeadName(project.getProjectTeam()).orElse(null);
-                    String nextProjectLead = projectLeadName(updatedProject.getProjectTeam()).orElse(null);
-                    project.setProjectTeam(updatedProject.getProjectTeam());
+                    String nextProjectLead = projectLeadName(projectTeam).orElse(null);
+                    projectMapper.updateEntity(project, updatedProject);
                     ProjectReference saved = projectRepository.save(project);
                     syncProjectTeamOnRequests(saved.getName(), previousProjectTeam, saved.getProjectTeam(), previousProjectLead, nextProjectLead);
                     auditLogService.recordBusinessEvent(user, "MODIFICATION_PROJET_EQUIPE", "projet", saved.getName(), "Modification du projet ou de son equipe: " + saved.getName());
-                    return ResponseEntity.ok(toDto(saved));
+                    return ResponseEntity.ok(projectMapper.toDto(saved));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -133,10 +136,6 @@ public class ProjectReferenceController {
             return Optional.of("Selectionnez exactement un utilisateur avec le role Chef de projet.");
         }
         return Optional.empty();
-    }
-
-    private ProjectReferenceDto toDto(ProjectReference project) {
-        return new ProjectReferenceDto(project.getName(), project.getProjectTeam());
     }
 
     private void syncProjectTeamOnRequests(String projectName, String previousProjectTeam, String nextProjectTeam,

@@ -3,6 +3,9 @@ package com.gestionplanning.messaging;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import com.gestionplanning.user.AppUser;
+
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -26,4 +29,8 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
     long countByGroup_IdAndSender_IdNot(Long groupId, Long senderId);
 
     Optional<ChatMessage> findByIdAndAttachmentUrlIsNotNull(Long id);
+
+    void deleteBySenderOrRecipient(AppUser sender, AppUser recipient);
+
+    void deleteByGroup_IdIn(Collection<Long> groupIds);
 }

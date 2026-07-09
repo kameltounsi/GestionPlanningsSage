@@ -3,9 +3,9 @@ package com.gestionplanning.auth;
 import com.gestionplanning.user.AppUser;
 import com.gestionplanning.user.AccountMailService;
 import com.gestionplanning.user.AppUserDto;
+import com.gestionplanning.user.AppUserMapper;
 import com.gestionplanning.user.AppUserRepository;
 import com.gestionplanning.user.MailDeliveryException;
-import com.gestionplanning.storage.CloudinaryStorageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -31,20 +31,20 @@ public class AuthController {
     private final PasswordService passwordService;
     private final AccountMailService accountMailService;
     private final AuthenticatedUserService authenticatedUserService;
-    private final CloudinaryStorageService storageService;
+    private final AppUserMapper userMapper;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthController(AppUserRepository userRepository, AuthTokenRepository tokenRepository,
                           PasswordResetCodeRepository resetCodeRepository, PasswordService passwordService,
                           AccountMailService accountMailService, AuthenticatedUserService authenticatedUserService,
-                          CloudinaryStorageService storageService) {
+                          AppUserMapper userMapper) {
         this.userRepository = userRepository;
         this.tokenRepository = tokenRepository;
         this.resetCodeRepository = resetCodeRepository;
         this.passwordService = passwordService;
         this.accountMailService = accountMailService;
         this.authenticatedUserService = authenticatedUserService;
-        this.storageService = storageService;
+        this.userMapper = userMapper;
     }
 
     @PostMapping("/login")
@@ -66,7 +66,7 @@ public class AuthController {
                     authToken.setToken(generateToken());
                     authToken.setExpiresAt(LocalDateTime.now(ZoneId.systemDefault()).plusHours(12));
                     AuthToken savedToken = tokenRepository.save(authToken);
-                    return ResponseEntity.ok(new AuthResponse(savedToken.getToken(), savedToken.getExpiresAt(), toDto(user)));
+                    return ResponseEntity.ok(new AuthResponse(savedToken.getToken(), savedToken.getExpiresAt(), userMapper.toDto(user)));
                 })
                 .orElse(ResponseEntity.status(401).build());
     }
@@ -74,7 +74,7 @@ public class AuthController {
     @GetMapping("/me")
     public ResponseEntity<AppUserDto> currentUser(@RequestAttribute(value = "authenticatedUserId", required = false) Long userId) {
         return authenticatedUserService.find(userId)
-                .map(user -> ResponseEntity.ok(toDto(user)))
+                .map(user -> ResponseEntity.ok(userMapper.toDto(user)))
                 .orElseGet(() -> ResponseEntity.status(401).build());
     }
 
@@ -181,28 +181,6 @@ public class AuthController {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
-    }
-
-    private AppUserDto toDto(AppUser user) {
-        AppUserDto dto = new AppUserDto();
-        dto.setId(user.getId());
-        dto.setFullName(user.getFullName());
-        dto.setUsername(user.getUsername());
-        dto.setJobTitle(user.getJobTitle());
-        dto.setMatricule(user.getMatricule());
-        dto.setEmail(user.getEmail());
-        dto.setPhone(user.getPhone());
-        dto.setChef1(user.getChef1());
-        dto.setChef2(user.getChef2());
-        dto.setProfilePhotoFileName(user.getProfilePhotoFileName());
-        dto.setProfilePhotoContentType(user.getProfilePhotoContentType());
-        dto.setProfilePhotoFileSize(user.getProfilePhotoFileSize());
-        dto.setProfilePhotoUrl(storageService.publicUrl(user.getProfilePhotoPublicId(), user.getProfilePhotoResourceType(), user.getProfilePhotoUrl()));
-        dto.setRole(user.getRole());
-        dto.setEnabled(user.isEnabled());
-        dto.setCreatedAt(user.getCreatedAt());
-        dto.setUpdatedAt(user.getUpdatedAt());
-        return dto;
     }
 
     public static class LoginRequest {

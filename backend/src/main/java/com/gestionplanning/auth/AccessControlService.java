@@ -65,8 +65,7 @@ public class AccessControlService {
         if (isProjectLeadForRequest(user, request)) {
             return true;
         }
-        return request.getId() != null
-                && actionRepository.existsParticipantForRequest(request.getId(), userAccessTokens(user));
+        return isParticipantForRequest(user, request);
     }
 
     public List<EcrRequest> filterAccessibleRequests(AppUser user, List<EcrRequest> requests) {
@@ -76,8 +75,7 @@ public class AccessControlService {
         if (user == null) {
             return Collections.emptyList();
         }
-        Set<String> tokens = userAccessTokens(user);
-        Set<Long> participantRequestIds = participantRequestIdsFor(user, requests, tokens);
+        Set<Long> participantRequestIds = participantRequestIdsFor(user, requests);
         Set<String> projectLeadProjects = projectRepository.findAll().stream()
                 .filter(project -> isProjectLeadForProject(user, project))
                 .map(ProjectReference::getName)
@@ -98,7 +96,7 @@ public class AccessControlService {
         if (user == null) {
             return Collections.emptyList();
         }
-        Set<Long> participantRequestIds = participantRequestIdsFor(user, requests, userAccessTokens(user));
+        Set<Long> participantRequestIds = participantRequestIdsFor(user, requests);
         return requests.stream()
                 .filter(request -> request != null && (
                         isRequestPilot(user, request)
@@ -184,10 +182,7 @@ public class AccessControlService {
         if (responsible.isEmpty()) {
             return canAccessRequest(user, action.getRequest());
         }
-        return matchesUser(user, responsible)
-                || normalize(user.getJobTitle()).equals(responsible)
-                || userRoleTokens(user).contains(responsible)
-                || matchesProjectRoleAssignment(user, action.getRequest(), responsible);
+        return matchesRequestAssignment(user, action.getRequest(), responsible);
     }
 
     public boolean canCompleteAction(AppUser user, EcrAction action) {
@@ -390,26 +385,7 @@ public class AccessControlService {
                 .collect(Collectors.toSet());
     }
 
-    private Set<String> userAccessTokens(AppUser user) {
-        if (user == null) {
-            return Collections.emptySet();
-        }
-        Set<String> tokens = userRoleTokens(user);
-        Arrays.asList(user.getFullName(), user.getUsername(), user.getEmail(), user.getJobTitle(), user.getRole())
-                .forEach(value -> {
-                    String raw = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
-                    String normalized = normalize(value);
-                    if (!raw.isEmpty()) {
-                        tokens.add(raw);
-                    }
-                    if (!normalized.isEmpty()) {
-                        tokens.add(normalized);
-                    }
-                });
-        return tokens.isEmpty() ? Collections.singleton("__none__") : tokens;
-    }
-
-    private Set<Long> participantRequestIdsFor(AppUser user, List<EcrRequest> requests, Set<String> tokens) {
+    private Set<Long> participantRequestIdsFor(AppUser user, List<EcrRequest> requests) {
         if (user == null || requests == null || requests.isEmpty()) {
             return Collections.emptySet();
         }
@@ -420,13 +396,21 @@ public class AccessControlService {
         if (requestIds.isEmpty()) {
             return Collections.emptySet();
         }
-        Set<Long> participantRequestIds = new HashSet<>(actionRepository.findRequestIdsForParticipant(tokens));
+        Set<Long> participantRequestIds = new HashSet<>();
         actionRepository.findByRequest_IdInOrderByRequest_IdAscStartDateAscEndDateAscDeadlineAscCreatedAtAscIdAsc(requestIds).stream()
                 .filter(action -> isActionParticipant(user, action))
                 .map(EcrAction::getRequestId)
                 .filter(id -> id != null)
                 .forEach(participantRequestIds::add);
         return participantRequestIds;
+    }
+
+    private boolean isParticipantForRequest(AppUser user, EcrRequest request) {
+        if (user == null || request == null || request.getId() == null) {
+            return false;
+        }
+        return actionRepository.findByRequest_IdOrderByStartDateAscEndDateAscDeadlineAscCreatedAtAscIdAsc(request.getId()).stream()
+                .anyMatch(action -> isActionParticipant(user, action));
     }
 
     private static class ProjectTeamEntry {
@@ -457,7 +441,11 @@ public class AccessControlService {
     }
 
     private boolean matchesRequestAssignment(AppUser user, EcrRequest request, String assignment) {
-        return matchesActionAssignment(user, assignment) || matchesProjectRoleAssignment(user, request, assignment);
+        String token = normalize(assignment);
+        if (token.isEmpty()) {
+            return false;
+        }
+        return matchesUser(user, token) || matchesProjectRoleAssignment(user, request, token);
     }
 
     private boolean matchesProjectRoleAssignment(AppUser user, EcrRequest request, String assignment) {

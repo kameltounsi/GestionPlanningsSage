@@ -14,12 +14,14 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/preferentials/clients")
 public class ClientReferenceController {
     private final ClientReferenceRepository repository;
+    private final ReferenceMapper referenceMapper;
     private final AuditLogService auditLogService;
     private final AccessControlService accessControlService;
 
-    public ClientReferenceController(ClientReferenceRepository repository, AuditLogService auditLogService,
+    public ClientReferenceController(ClientReferenceRepository repository, ReferenceMapper referenceMapper, AuditLogService auditLogService,
                                      AccessControlService accessControlService) {
         this.repository = repository;
+        this.referenceMapper = referenceMapper;
         this.auditLogService = auditLogService;
         this.accessControlService = accessControlService;
     }
@@ -27,7 +29,7 @@ public class ClientReferenceController {
     @GetMapping
     public List<ReferenceDto> list() {
         return repository.findAllByOrderByNameAsc().stream()
-                .map(this::toDto)
+                .map(referenceMapper::toDto)
                 .collect(Collectors.toList());
     }
 
@@ -38,11 +40,10 @@ public class ClientReferenceController {
         if (!accessControlService.isAdmin(user)) {
             return ResponseEntity.status(403).<ReferenceDto>build();
         }
-        ClientReference entity = new ClientReference();
-        entity.setName(client.getName().trim());
+        ClientReference entity = referenceMapper.toClientEntity(client);
         ClientReference saved = repository.save(entity);
         auditLogService.recordBusinessEvent(user, "AJOUT_CLIENT", "client", saved.getId() == null ? null : String.valueOf(saved.getId()), "Ajout du client: " + saved.getName());
-        return ResponseEntity.ok(toDto(saved));
+        return ResponseEntity.ok(referenceMapper.toDto(saved));
     }
 
     @PutMapping("/{id}")
@@ -54,8 +55,8 @@ public class ClientReferenceController {
         }
         return repository.findById(id)
                 .map(client -> {
-                    client.setName(updatedClient.getName().trim());
-                    return ResponseEntity.ok(toDto(repository.save(client)));
+                    referenceMapper.updateClientEntity(client, updatedClient);
+                    return ResponseEntity.ok(referenceMapper.toDto(repository.save(client)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -73,7 +74,4 @@ public class ClientReferenceController {
         return ResponseEntity.noContent().build();
     }
 
-    private ReferenceDto toDto(ClientReference client) {
-        return new ReferenceDto(client.getId(), client.getName());
-    }
 }

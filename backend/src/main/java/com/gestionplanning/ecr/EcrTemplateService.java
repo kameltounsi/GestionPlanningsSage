@@ -6,6 +6,7 @@ import com.gestionplanning.action.ActionPlanningRuleRepository;
 import com.gestionplanning.action.ActionPlanningRuleProofDocument;
 import com.gestionplanning.action.ActionPlanningService;
 import com.gestionplanning.action.ActionAssigneeResolver;
+import com.gestionplanning.action.ActionDeadlineAlertRepository;
 import com.gestionplanning.action.EcrAction;
 import com.gestionplanning.action.EcrActionProofDocument;
 import com.gestionplanning.action.EcrActionRepository;
@@ -29,13 +30,16 @@ public class EcrTemplateService {
     private final ActionPlanningRuleRepository ruleRepository;
     private final ActionPlanningService planningService;
     private final ActionAssigneeResolver assigneeResolver;
+    private final ActionDeadlineAlertRepository deadlineAlertRepository;
 
     public EcrTemplateService(EcrActionRepository actionRepository, ActionPlanningRuleRepository ruleRepository,
-                              ActionPlanningService planningService, ActionAssigneeResolver assigneeResolver) {
+                              ActionPlanningService planningService, ActionAssigneeResolver assigneeResolver,
+                              ActionDeadlineAlertRepository deadlineAlertRepository) {
         this.actionRepository = actionRepository;
         this.ruleRepository = ruleRepository;
         this.planningService = planningService;
         this.assigneeResolver = assigneeResolver;
+        this.deadlineAlertRepository = deadlineAlertRepository;
     }
 
     public void applyTo(EcrRequest request) {
@@ -87,14 +91,10 @@ public class EcrTemplateService {
             return;
         }
         if (actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId()).isEmpty()) {
-            if (hasSuppressedActions(request)) {
-                ensureMissingActionsFor(request);
-                return;
+            if (!hasSuppressedActions(request)) {
+                createActionsFor(request, new ArrayList<>());
             }
-            createActionsFor(request, new ArrayList<>());
-            return;
         }
-        ensureMissingActionsFor(request);
     }
 
     public void ensureMissingActionsFor(EcrRequest request) {
@@ -288,30 +288,103 @@ public class EcrTemplateService {
     }
 
     public void syncActionRuleFor(EcrRequest request, ActionPlanningRule previousRule, ActionPlanningRule updatedRule) {
-        if (request == null || request.getId() == null || updatedRule == null || request.getCurrentStage() == EcrStage.CLOSED || request.getCurrentStage() == EcrStage.CANCELLED) {
+        if (request == null || request.getId() == null || (previousRule == null && updatedRule == null)
+                || request.getCurrentStage() == EcrStage.CLOSED || request.getCurrentStage() == EcrStage.CANCELLED) {
             return;
         }
-        if (!EcrStage.isAllowed(updatedRule.getStage(), request.isNewVersion()) || !appliesToRequest(updatedRule, request)) {
-            return;
-        }
-        if (suppressedActionKeys(request).contains(ruleKey(updatedRule))) {
-            return;
-        }
-        String previousKey = previousRule == null ? ruleKey(updatedRule) : ruleKey(previousRule);
-        String currentKey = ruleKey(updatedRule);
         List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId());
-        actions.stream()
-                .filter(action -> actionKey(action).equals(previousKey) || actionKey(action).equals(currentKey))
+        String previousKey = previousRule == null ? null : ruleKey(previousRule);
+        String currentKey = updatedRule == null ? null : ruleKey(updatedRule);
+        boolean updatedRuleApplies = updatedRule != null
+                && EcrStage.isAllowed(updatedRule.getStage(), request.isNewVersion())
+                && appliesToRequest(updatedRule, request)
+                && !suppressedActionKeys(request).contains(currentKey);
+
+        List<EcrAction> previousActions = previousKey == null ? new ArrayList<>() : actions.stream()
+                .filter(action -> actionKey(action).equals(previousKey))
+                .filter(action -> !isDone(action))
+                .collect(Collectors.toList());
+
+        if (!updatedRuleApplies) {
+            deleteActions(previousActions);
+            syncActionDependenciesFromRules(request,
+                    actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId()),
+                    rulesFor(request));
+            return;
+        }
+
+        EcrAction actionToUpdate = actions.stream()
+                .filter(action -> actionKey(action).equals(currentKey))
                 .filter(action -> !isDone(action))
                 .findFirst()
-                .ifPresent(action -> {
-                    applyRuleMetadata(request, action, updatedRule);
-                    applyRulePlanning(action, updatedRule);
-                    actionRepository.save(action);
-                    syncActionDependenciesFromRules(request,
-                            actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId()),
-                            rulesFor(request));
-                });
+                .orElseGet(() -> previousActions.stream().findFirst().orElse(null));
+
+        if (actionToUpdate != null) {
+            applyRuleMetadata(request, actionToUpdate, updatedRule);
+            applyRulePlanning(actionToUpdate, updatedRule);
+            actionRepository.save(actionToUpdate);
+            for (EcrAction oldAction : previousActions) {
+                if (!Objects.equals(oldAction.getId(), actionToUpdate.getId())) {
+                    actionRepository.delete(oldAction);
+                }
+            }
+        }
+
+        syncActionDependenciesFromRules(request,
+                actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId()),
+                rulesFor(request));
+    }
+
+    public Set<Long> deleteOpenActionsForRule(ActionPlanningRule rule) {
+        if (rule == null || rule.getStage() == null || !hasText(rule.getActionTitle())) {
+            return new HashSet<>();
+        }
+        List<EcrAction> actionsToDelete = actionRepository
+                .findByStageAndTitleIgnoreCaseAndCheckedFalseAndStatusNotIn(rule.getStage(), rule.getActionTitle(),
+                        java.util.Arrays.asList(ActionStatus.DONE, ActionStatus.DONE_LATE))
+                .stream()
+                .filter(action -> action.getRequest() != null)
+                .filter(action -> action.getRequest().getCurrentStage() != EcrStage.CLOSED)
+                .filter(action -> action.getRequest().getCurrentStage() != EcrStage.CANCELLED)
+                .filter(action -> appliesToRequest(rule, action.getRequest()))
+                .collect(Collectors.toList());
+        if (actionsToDelete.isEmpty()) {
+            return new HashSet<>();
+        }
+
+        Set<Long> actionIds = actionsToDelete.stream()
+                .map(EcrAction::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Set<Long> requestIds = actionsToDelete.stream()
+                .map(EcrAction::getRequestId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        clearDependenciesOnDeletedActions(actionIds);
+        deleteActions(actionsToDelete);
+        return requestIds;
+    }
+
+    private void clearDependenciesOnDeletedActions(Set<Long> actionIds) {
+        if (actionIds == null || actionIds.isEmpty()) {
+            return;
+        }
+        List<EcrAction> dependentActions = actionRepository.findByDependsOnActionIdIn(actionIds);
+        if (dependentActions.isEmpty()) {
+            return;
+        }
+        dependentActions.forEach(action -> action.setDependsOnActionId(null));
+        actionRepository.saveAll(dependentActions);
+    }
+
+    private void deleteActions(List<EcrAction> actions) {
+        if (actions != null && !actions.isEmpty()) {
+            actions.stream()
+                    .map(EcrAction::getId)
+                    .filter(Objects::nonNull)
+                    .forEach(deadlineAlertRepository::deleteByAction_Id);
+            actionRepository.deleteAll(actions);
+        }
     }
 
     private List<EcrAction> defaultActionsFor(EcrRequest request) {

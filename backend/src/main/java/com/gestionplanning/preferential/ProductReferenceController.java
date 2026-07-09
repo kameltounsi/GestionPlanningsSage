@@ -14,12 +14,14 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/preferentials/products")
 public class ProductReferenceController {
     private final ProductReferenceRepository repository;
+    private final ReferenceMapper referenceMapper;
     private final AuditLogService auditLogService;
     private final AccessControlService accessControlService;
 
-    public ProductReferenceController(ProductReferenceRepository repository, AuditLogService auditLogService,
+    public ProductReferenceController(ProductReferenceRepository repository, ReferenceMapper referenceMapper, AuditLogService auditLogService,
                                       AccessControlService accessControlService) {
         this.repository = repository;
+        this.referenceMapper = referenceMapper;
         this.auditLogService = auditLogService;
         this.accessControlService = accessControlService;
     }
@@ -27,7 +29,7 @@ public class ProductReferenceController {
     @GetMapping
     public List<ReferenceDto> list() {
         return repository.findAllByOrderByNameAsc().stream()
-                .map(this::toDto)
+                .map(referenceMapper::toDto)
                 .collect(Collectors.toList());
     }
 
@@ -38,11 +40,10 @@ public class ProductReferenceController {
         if (!accessControlService.isAdmin(user)) {
             return ResponseEntity.status(403).<ReferenceDto>build();
         }
-        ProductReference entity = new ProductReference();
-        entity.setName(product.getName().trim());
+        ProductReference entity = referenceMapper.toProductEntity(product);
         ProductReference saved = repository.save(entity);
         auditLogService.recordBusinessEvent(user, "AJOUT_PRODUIT", "produit", saved.getId() == null ? null : String.valueOf(saved.getId()), "Ajout du produit: " + saved.getName());
-        return ResponseEntity.ok(toDto(saved));
+        return ResponseEntity.ok(referenceMapper.toDto(saved));
     }
 
     @PutMapping("/{id}")
@@ -54,8 +55,8 @@ public class ProductReferenceController {
         }
         return repository.findById(id)
                 .map(product -> {
-                    product.setName(updatedProduct.getName().trim());
-                    return ResponseEntity.ok(toDto(repository.save(product)));
+                    referenceMapper.updateProductEntity(product, updatedProduct);
+                    return ResponseEntity.ok(referenceMapper.toDto(repository.save(product)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -73,7 +74,4 @@ public class ProductReferenceController {
         return ResponseEntity.noContent().build();
     }
 
-    private ReferenceDto toDto(ProductReference product) {
-        return new ReferenceDto(product.getId(), product.getName());
-    }
 }

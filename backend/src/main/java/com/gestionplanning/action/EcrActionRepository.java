@@ -41,5 +41,9 @@ public interface EcrActionRepository extends JpaRepository<EcrAction, Long> {
 
     List<EcrAction> findByDependsOnActionId(Long actionId);
 
+    List<EcrAction> findByDependsOnActionIdIn(Collection<Long> actionIds);
+
+    List<EcrAction> findByStageAndTitleIgnoreCaseAndCheckedFalseAndStatusNotIn(EcrStage stage, String title, Collection<ActionStatus> statuses);
+
     void deleteByRequest_Id(Long requestId);
 }

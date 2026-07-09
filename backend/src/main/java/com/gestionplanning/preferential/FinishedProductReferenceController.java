@@ -13,6 +13,8 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +22,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
@@ -45,6 +48,7 @@ public class FinishedProductReferenceController {
     private final ClientReferenceRepository clientRepository;
     private final ProjectReferenceRepository projectRepository;
     private final ProductReferenceRepository productRepository;
+    private final FinishedProductReferenceMapper finishedProductMapper;
     private final AuditLogService auditLogService;
     private final AccessControlService accessControlService;
 
@@ -52,12 +56,14 @@ public class FinishedProductReferenceController {
                                               ClientReferenceRepository clientRepository,
                                               ProjectReferenceRepository projectRepository,
                                               ProductReferenceRepository productRepository,
+                                              FinishedProductReferenceMapper finishedProductMapper,
                                               AuditLogService auditLogService,
                                               AccessControlService accessControlService) {
         this.repository = repository;
         this.clientRepository = clientRepository;
         this.projectRepository = projectRepository;
         this.productRepository = productRepository;
+        this.finishedProductMapper = finishedProductMapper;
         this.auditLogService = auditLogService;
         this.accessControlService = accessControlService;
     }
@@ -65,8 +71,34 @@ public class FinishedProductReferenceController {
     @GetMapping
     public List<FinishedProductReferenceDto> list() {
         return repository.findAllByOrderByProjectAscProductAscPartNumberAsc().stream()
-                .map(this::toDto)
+                .map(finishedProductMapper::toDto)
                 .collect(Collectors.toList());
+    }
+
+    @GetMapping("/export")
+    public ResponseEntity<byte[]> exportFile(@RequestParam(value = "projects", required = false) List<String> projects,
+                                             @RequestAttribute("authenticatedUser") Object userAttribute) {
+        AppUser user = (AppUser) userAttribute;
+        Set<String> projectFilter = projects == null ? new HashSet<>() : projects.stream()
+                .map(this::normalizedKey)
+                .filter(value -> value != null)
+                .collect(Collectors.toSet());
+        List<FinishedProductReference> references = repository.findAllByOrderByProjectAscProductAscPartNumberAsc().stream()
+                .filter(reference -> projectFilter.isEmpty() || projectFilter.contains(normalizedKey(reference.getProject())))
+                .filter(reference -> accessControlService.canManageFinishedProduct(user, reference.getProject()))
+                .collect(Collectors.toList());
+
+        try {
+            byte[] content = exportWorkbook(references);
+            String fileName = projectFilter.isEmpty() ? "produits-finis.xlsx" : "produits-finis-projets.xlsx";
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+            headers.setContentDisposition(ContentDisposition.attachment().filename(fileName).build());
+            headers.setContentLength(content.length);
+            return new ResponseEntity<>(content, headers, HttpStatus.OK);
+        } catch (IOException exception) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
     }
 
     @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -102,7 +134,7 @@ public class FinishedProductReferenceController {
     public ResponseEntity<Object> create(@Valid @RequestBody FinishedProductReferenceDto finishedProduct,
                                     @RequestAttribute("authenticatedUser") Object userAttribute) {
                                         AppUser user = (AppUser) userAttribute;
-        FinishedProductReference entity = toEntity(finishedProduct);
+        FinishedProductReference entity = finishedProductMapper.toEntity(finishedProduct);
         normalize(entity);
         if (!accessControlService.canManageFinishedProduct(user, entity.getProject())) {
             return ResponseEntity.status(403).build();
@@ -121,7 +153,7 @@ public class FinishedProductReferenceController {
             return ResponseEntity.status(HttpStatus.CONFLICT).body("Part number ou code réduit déjà existant.");
         }
         auditLogService.recordBusinessEvent(user, "AJOUT_PRODUIT_FINI", "produit_fini", saved.getId() == null ? null : String.valueOf(saved.getId()), "Ajout du produit fini: " + saved.getPartNumber());
-        return ResponseEntity.ok(toDto(saved));
+        return ResponseEntity.ok(finishedProductMapper.toDto(saved));
     }
 
     @PutMapping("/{id}")
@@ -129,7 +161,7 @@ public class FinishedProductReferenceController {
                                     @Valid @RequestBody FinishedProductReferenceDto updatedFinishedProduct,
                                     @RequestAttribute("authenticatedUser") Object userAttribute) {
                                         AppUser user = (AppUser) userAttribute;
-        FinishedProductReference updatedEntity = toEntity(updatedFinishedProduct);
+        FinishedProductReference updatedEntity = finishedProductMapper.toEntity(updatedFinishedProduct);
         normalize(updatedEntity);
         if (!accessControlService.canManageFinishedProduct(user, updatedEntity.getProject())) {
             return ResponseEntity.status(403).build();
@@ -143,9 +175,9 @@ public class FinishedProductReferenceController {
         }
         return repository.findById(id)
                 .<ResponseEntity<Object>>map(finishedProduct -> {
-                    copyInto(updatedEntity, finishedProduct);
+                    finishedProductMapper.copyInto(updatedEntity, finishedProduct);
                     try {
-                        return ResponseEntity.ok((Object) toDto(repository.save(finishedProduct)));
+                        return ResponseEntity.ok((Object) finishedProductMapper.toDto(repository.save(finishedProduct)));
                     } catch (DataIntegrityViolationException exception) {
                         return ResponseEntity.status(HttpStatus.CONFLICT).body("Part number ou code réduit déjà existant.");
                     }
@@ -207,56 +239,6 @@ public class FinishedProductReferenceController {
             return null;
         }
         return value.trim();
-    }
-
-    private FinishedProductReference toEntity(FinishedProductReferenceDto dto) {
-        FinishedProductReference entity = new FinishedProductReference();
-        entity.setClient(dto.getClient());
-        entity.setProject(dto.getProject());
-        entity.setPartNumber(dto.getPartNumber());
-        entity.setDesignation(dto.getDesignation());
-        entity.setCustomerPn(dto.getCustomerPn());
-        entity.setProduct(dto.getProduct());
-        entity.setCoiffeIndex(dto.getCoiffeIndex());
-        entity.setDrawingIndex(dto.getDrawingIndex());
-        entity.setReducedCode(dto.getReducedCode());
-        entity.setSalePrice(dto.getSalePrice());
-        entity.setProductionIntegrationDate(dto.getProductionIntegrationDate());
-        entity.setComments(dto.getComments());
-        return entity;
-    }
-
-    private FinishedProductReferenceDto toDto(FinishedProductReference entity) {
-        FinishedProductReferenceDto dto = new FinishedProductReferenceDto();
-        dto.setId(entity.getId());
-        dto.setClient(entity.getClient());
-        dto.setProject(entity.getProject());
-        dto.setPartNumber(entity.getPartNumber());
-        dto.setDesignation(entity.getDesignation());
-        dto.setCustomerPn(entity.getCustomerPn());
-        dto.setProduct(entity.getProduct());
-        dto.setCoiffeIndex(entity.getCoiffeIndex());
-        dto.setDrawingIndex(entity.getDrawingIndex());
-        dto.setReducedCode(entity.getReducedCode());
-        dto.setSalePrice(entity.getSalePrice());
-        dto.setProductionIntegrationDate(entity.getProductionIntegrationDate());
-        dto.setComments(entity.getComments());
-        return dto;
-    }
-
-    private void copyInto(FinishedProductReference source, FinishedProductReference target) {
-        target.setClient(source.getClient());
-        target.setProject(source.getProject());
-        target.setPartNumber(source.getPartNumber());
-        target.setDesignation(trimToNull(source.getDesignation()));
-        target.setCustomerPn(trimToNull(source.getCustomerPn()));
-        target.setProduct(source.getProduct());
-        target.setCoiffeIndex(trimToNull(source.getCoiffeIndex()));
-        target.setDrawingIndex(trimToNull(source.getDrawingIndex()));
-        target.setReducedCode(source.getReducedCode());
-        target.setSalePrice(source.getSalePrice());
-        target.setProductionIntegrationDate(source.getProductionIntegrationDate());
-        target.setComments(trimToNull(source.getComments()));
     }
 
     private void importSheet(Sheet sheet, FinishedProductImportResult result, AppUser user) {
@@ -396,7 +378,7 @@ public class FinishedProductReferenceController {
                                      Set<String> filePartNumbers, Set<String> fileReducedCodes) {
         try {
             FinishedProductReference saved = repository.save(finishedProduct);
-            result.created(saved);
+            result.created(saved, finishedProductMapper);
             addImportKeys(saved, existingPartNumbers, existingReducedCodes, filePartNumbers, fileReducedCodes);
         } catch (DataIntegrityViolationException exception) {
             result.skip(excelRow, "partNumber ou code reduit deja existant");
@@ -411,6 +393,71 @@ public class FinishedProductReferenceController {
         existingReducedCodes.add(reducedCodeKey);
         filePartNumbers.add(partNumberKey);
         fileReducedCodes.add(reducedCodeKey);
+    }
+
+    private byte[] exportWorkbook(List<FinishedProductReference> references) throws IOException {
+        try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            Sheet sheet = workbook.createSheet("Produits finis");
+            String[] headers = {
+                    "client",
+                    "project",
+                    "partNumber",
+                    "designation",
+                    "customerPn",
+                    "product",
+                    "coiffeIndex",
+                    "drawingIndex",
+                    "reducedCode",
+                    "salePrice",
+                    "productionIntegrationDate",
+                    "comments"
+            };
+            Row headerRow = sheet.createRow(0);
+            for (int column = 0; column < headers.length; column++) {
+                headerRow.createCell(column).setCellValue(headers[column]);
+            }
+            org.apache.poi.ss.usermodel.CellStyle dateStyle = workbook.createCellStyle();
+            dateStyle.setDataFormat(workbook.getCreationHelper().createDataFormat().getFormat("yyyy-mm-dd"));
+            org.apache.poi.ss.usermodel.CellStyle amountStyle = workbook.createCellStyle();
+            amountStyle.setDataFormat(workbook.getCreationHelper().createDataFormat().getFormat("#,##0.000"));
+
+            for (int index = 0; index < references.size(); index++) {
+                Row row = sheet.createRow(index + 1);
+                FinishedProductReference reference = references.get(index);
+                writeText(row, 0, reference.getClient());
+                writeText(row, 1, reference.getProject());
+                writeText(row, 2, reference.getPartNumber());
+                writeText(row, 3, reference.getDesignation());
+                writeText(row, 4, reference.getCustomerPn());
+                writeText(row, 5, reference.getProduct());
+                writeText(row, 6, reference.getCoiffeIndex());
+                writeText(row, 7, reference.getDrawingIndex());
+                writeText(row, 8, reference.getReducedCode());
+                if (reference.getSalePrice() != null) {
+                    Cell salePriceCell = row.createCell(9);
+                    salePriceCell.setCellValue(reference.getSalePrice().doubleValue());
+                    salePriceCell.setCellStyle(amountStyle);
+                }
+                if (reference.getProductionIntegrationDate() != null) {
+                    Cell dateCell = row.createCell(10);
+                    dateCell.setCellValue(java.sql.Date.valueOf(reference.getProductionIntegrationDate()));
+                    dateCell.setCellStyle(dateStyle);
+                }
+                writeText(row, 11, reference.getComments());
+            }
+            for (int column = 0; column < headers.length; column++) {
+                sheet.autoSizeColumn(column);
+            }
+            workbook.write(outputStream);
+            return outputStream.toByteArray();
+        }
+    }
+
+    private void writeText(Row row, int column, String value) {
+        if (value != null) {
+            row.createCell(column).setCellValue(value);
+        }
     }
 
     private Map<String, Integer> headerColumns(Row headerRow) {
@@ -627,23 +674,9 @@ public class FinishedProductReferenceController {
             return issues;
         }
 
-        public void created(FinishedProductReference product) {
+        public void created(FinishedProductReference product, FinishedProductReferenceMapper mapper) {
             createdCount++;
-            FinishedProductReferenceDto dto = new FinishedProductReferenceDto();
-            dto.setId(product.getId());
-            dto.setClient(product.getClient());
-            dto.setProject(product.getProject());
-            dto.setPartNumber(product.getPartNumber());
-            dto.setDesignation(product.getDesignation());
-            dto.setCustomerPn(product.getCustomerPn());
-            dto.setProduct(product.getProduct());
-            dto.setCoiffeIndex(product.getCoiffeIndex());
-            dto.setDrawingIndex(product.getDrawingIndex());
-            dto.setReducedCode(product.getReducedCode());
-            dto.setSalePrice(product.getSalePrice());
-            dto.setProductionIntegrationDate(product.getProductionIntegrationDate());
-            dto.setComments(product.getComments());
-            createdProducts.add(dto);
+            createdProducts.add(mapper.toDto(product));
         }
 
         public void skip(int rowNumber, String message) {

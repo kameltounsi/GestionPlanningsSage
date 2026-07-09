@@ -43,7 +43,7 @@ async function request(path, options = {}) {
     }
   });
   if (!response.ok) {
-    if (response.status === 401 && clearSessionOnUnauthorized) {
+    if (response.status === 401 && (clearSessionOnUnauthorized || path !== "/auth/login")) {
       clearSession();
     }
     throw new Error(await errorMessage(response));
@@ -69,6 +69,27 @@ async function multipartRequest(path, formData) {
     throw new Error(await errorMessage(response));
   }
   return response.json();
+}
+
+async function downloadRequest(path) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      ...authHeaders()
+    }
+  });
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearSession();
+    }
+    throw new Error(await errorMessage(response));
+  }
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const fileNameMatch = disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i);
+  return {
+    blob: await response.blob(),
+    fileName: fileNameMatch ? decodeURIComponent(fileNameMatch[1].replace(/"/g, "")) : "export.xlsx",
+    type: response.headers.get("Content-Type") || "application/octet-stream"
+  };
 }
 
 async function errorMessage(response) {
@@ -415,6 +436,13 @@ export function importFinishedProductReferences(file) {
   const formData = new FormData();
   formData.append("file", file);
   return multipartRequest("/preferentials/finished-products/import", formData);
+}
+
+export function exportFinishedProductReferences(projects = []) {
+  const params = new URLSearchParams();
+  projects.filter(Boolean).forEach((project) => params.append("projects", project));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return downloadRequest(`/preferentials/finished-products/export${query}`);
 }
 
 export function createFinishedProductReference(payload) {

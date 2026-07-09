@@ -21,17 +21,19 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/preferentials/roles")
 public class RoleReferenceController {
     private final RoleReferenceRepository repository;
+    private final ReferenceMapper referenceMapper;
     private final AccessControlService accessControlService;
 
-    public RoleReferenceController(RoleReferenceRepository repository, AccessControlService accessControlService) {
+    public RoleReferenceController(RoleReferenceRepository repository, ReferenceMapper referenceMapper, AccessControlService accessControlService) {
         this.repository = repository;
+        this.referenceMapper = referenceMapper;
         this.accessControlService = accessControlService;
     }
 
     @GetMapping
     public List<ReferenceDto> list() {
         return repository.findAllByOrderByNameAsc().stream()
-                .map(this::toDto)
+                .map(referenceMapper::toDto)
                 .collect(Collectors.toList());
     }
 
@@ -42,9 +44,8 @@ public class RoleReferenceController {
         if (!accessControlService.isAdmin(user)) {
             return ResponseEntity.status(403).<ReferenceDto>build();
         }
-        RoleReference entity = new RoleReference();
-        entity.setName(role.getName().trim());
-        return ResponseEntity.ok(toDto(repository.save(entity)));
+        RoleReference entity = referenceMapper.toRoleEntity(role);
+        return ResponseEntity.ok(referenceMapper.toDto(repository.save(entity)));
     }
 
     @PutMapping("/{id}")
@@ -56,8 +57,8 @@ public class RoleReferenceController {
         }
         return repository.findById(id)
                 .map(role -> {
-                    role.setName(updatedRole.getName().trim());
-                    return ResponseEntity.ok(toDto(repository.save(role)));
+                    referenceMapper.updateRoleEntity(role, updatedRole);
+                    return ResponseEntity.ok(referenceMapper.toDto(repository.save(role)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -75,7 +76,4 @@ public class RoleReferenceController {
         return ResponseEntity.noContent().build();
     }
 
-    private ReferenceDto toDto(RoleReference role) {
-        return new ReferenceDto(role.getId(), role.getName());
-    }
 }

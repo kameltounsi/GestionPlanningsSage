@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Pencil, Plus, Save, Search, Trash2, Upload, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Pencil, Plus, Save, Search, Trash2, Upload, X } from "lucide-react";
 import { EmptyState } from "../../components/common/EmptyState";
 import { PageHeader } from "../../components/common/PageHeader";
 import { emptyFinishedProductForm } from "../../constants/forms";
@@ -85,6 +85,10 @@ function toggleMultiValue(value, option, checked) {
   const selected = parseMultiValue(value);
   const nextValues = checked ? uniqueSorted([...selected, option]) : selected.filter((item) => item !== option);
   return nextValues.join("; ");
+}
+
+function toggleArrayValue(values, option, checked) {
+  return checked ? uniqueSorted([...values, option]) : values.filter((item) => item !== option);
 }
 
 function normalizeSearchText(value) {
@@ -383,6 +387,7 @@ export function PreferentialsPage({
   onEditProduct,
   onEditProject,
   onEditRole,
+  onExportFinishedProducts,
   onImportFinishedProducts,
   onSubmitClient,
   onSubmitFinishedProduct,
@@ -498,6 +503,7 @@ export function PreferentialsPage({
           onCancelEdit={onCancelFinishedProductEdit}
           onDelete={onDeleteFinishedProduct}
           onEdit={onEditFinishedProduct}
+          onExport={onExportFinishedProducts}
           onImport={onImportFinishedProducts}
           onSubmit={onSubmitFinishedProduct}
           setForm={setFinishedProductForm}
@@ -527,14 +533,24 @@ export function PreferentialsPage({
 }
 
 
-function FinishedProductPreferentialPanel({ clients = [], editing, form, products, projects, references, saving, onCancelEdit, onDelete, onEdit, onImport, onSubmit, setForm }) {
+function FinishedProductPreferentialPanel({ clients = [], editing, form, products, projects, references, saving, onCancelEdit, onDelete, onEdit, onExport, onImport, onSubmit, setForm }) {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportAllProjects, setExportAllProjects] = useState(true);
+  const [exportProjectSelection, setExportProjectSelection] = useState([]);
+  const [showAllProjects, setShowAllProjects] = useState(true);
+  const [projectFilterSelection, setProjectFilterSelection] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const importInputRef = useRef(null);
   const clientNames = uniqueSorted(clients.map((client) => client.name));
   const projectNames = uniqueSorted(projects.map((project) => project.name));
   const productNames = uniqueSorted(products.map((product) => product.name));
-  const filteredReferences = useFilteredItems(references, searchTerm, (reference) => [
+  const projectFilteredReferences = useMemo(() => {
+    if (showAllProjects) return references;
+    const selectedProjects = new Set(projectFilterSelection);
+    return references.filter((reference) => selectedProjects.has(reference.project));
+  }, [projectFilterSelection, references, showAllProjects]);
+  const filteredReferences = useFilteredItems(projectFilteredReferences, searchTerm, (reference) => [
     reference.client,
     reference.project,
     reference.partNumber,
@@ -558,6 +574,12 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
     onCancelEdit();
     setForm(emptyFinishedProductForm);
     setDialogOpen(true);
+  }
+
+  function openExportDialog() {
+    setExportAllProjects(showAllProjects);
+    setExportProjectSelection(showAllProjects ? [] : projectFilterSelection);
+    setExportDialogOpen(true);
   }
 
   function closeDialog() {
@@ -586,6 +608,22 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
     }
   }
 
+  function submitExport(event) {
+    event.preventDefault();
+    const selectedProjects = exportAllProjects ? [] : exportProjectSelection;
+    const exportResult = onExport?.(selectedProjects);
+    if (exportResult?.then) {
+      exportResult.then(() => setExportDialogOpen(false)).catch(() => {});
+    } else {
+      setExportDialogOpen(false);
+    }
+  }
+
+  function toggleProjectFilter(project, checked) {
+    setShowAllProjects(false);
+    setProjectFilterSelection((current) => toggleArrayValue(current, project, checked));
+  }
+
   return (
     <section className="panel preferential-panel">
       <div className="section-title">
@@ -594,6 +632,10 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
           <span>{references.length} element{references.length > 1 ? "s" : ""}</span>
         </div>
         <div className="row-actions">
+          <button className="secondary-action compact-action" disabled={saving || references.length === 0} type="button" onClick={openExportDialog}>
+            <Download size={16} />
+            Exporter Excel
+          </button>
           <button className="secondary-action compact-action" disabled={saving} type="button" onClick={() => importInputRef.current?.click()}>
             <Upload size={16} />
             Importer Excel
@@ -608,6 +650,40 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
       {clientNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un client.</p>}
       {projectNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un projet.</p>}
       {productNames.length === 0 && <p className="form-hint">Ajoutez d'abord au moins un produit.</p>}
+      {projectNames.length > 0 && (
+        <fieldset className="finished-product-project-filter">
+          <legend>Filtrer par projet</legend>
+          <label>
+            <input
+              checked={showAllProjects}
+              type="checkbox"
+              onChange={(event) => {
+                setShowAllProjects(event.target.checked);
+                setProjectFilterSelection([]);
+              }}
+            />
+            Tous les projets
+          </label>
+          {projectNames.map((project) => (
+            <label key={project}>
+              <input
+                checked={showAllProjects || projectFilterSelection.includes(project)}
+                type="checkbox"
+                onChange={(event) => {
+                  if (showAllProjects) {
+                    setShowAllProjects(false);
+                    setProjectFilterSelection(event.target.checked ? projectNames : projectNames.filter((item) => item !== project));
+                    return;
+                  }
+                  toggleProjectFilter(project, event.target.checked);
+                }}
+              />
+              {project}
+            </label>
+          ))}
+          <span>{filteredReferences.length} produit{filteredReferences.length > 1 ? "s" : ""} affiche{filteredReferences.length > 1 ? "s" : ""}</span>
+        </fieldset>
+      )}
       <label className="preferential-search">
         Rechercher
         <div className="input-with-icon">
@@ -665,7 +741,82 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
           setForm={setForm}
         />
       )}
+      {exportDialogOpen && (
+        <FinishedProductExportDialog
+          allProjects={exportAllProjects}
+          projectNames={projectNames}
+          saving={saving}
+          selectedProjects={exportProjectSelection}
+          onClose={() => setExportDialogOpen(false)}
+          onSubmit={submitExport}
+          setAllProjects={setExportAllProjects}
+          setSelectedProjects={setExportProjectSelection}
+        />
+      )}
     </section>
+  );
+}
+
+function FinishedProductExportDialog({ allProjects, projectNames, saving, selectedProjects, onClose, onSubmit, setAllProjects, setSelectedProjects }) {
+  return (
+    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+      <form
+        aria-labelledby="finished-product-export-title"
+        aria-modal="true"
+        className="dialog-card preferential-dialog panel form-page"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={onSubmit}
+        role="dialog"
+      >
+        <div className="form-intro">
+          <div>
+            <p className="eyebrow">Export Excel</p>
+            <h2 id="finished-product-export-title">Exporter les produits finis</h2>
+          </div>
+          <button className="ghost-icon" type="button" onClick={onClose} title="Fermer">
+            <X size={18} />
+          </button>
+        </div>
+        <fieldset className="project-team-field">
+          <legend>Perimetre d'extraction</legend>
+          <label className="project-team-option">
+            <input
+              checked={allProjects}
+              type="checkbox"
+              onChange={(event) => {
+                setAllProjects(event.target.checked);
+                if (event.target.checked) setSelectedProjects([]);
+              }}
+            />
+            <span><strong>Extraction totale de tous les produits finis</strong></span>
+          </label>
+          {!allProjects && (
+            <div className="project-team-list">
+              {projectNames.map((project) => (
+                <label className="project-team-option" key={project}>
+                  <input
+                    checked={selectedProjects.includes(project)}
+                    type="checkbox"
+                    onChange={(event) => setSelectedProjects((current) => toggleArrayValue(current, project, event.target.checked))}
+                  />
+                  <span><strong>{project}</strong></span>
+                </label>
+              ))}
+            </div>
+          )}
+          {!allProjects && selectedProjects.length === 0 && (
+            <p className="form-hint project-team-warning">Selectionnez au moins un projet ou activez l'extraction totale.</p>
+          )}
+        </fieldset>
+        <div className="button-row">
+          <button className="primary-action" disabled={saving || (!allProjects && selectedProjects.length === 0)} type="submit">
+            <Download size={16} />
+            Exporter
+          </button>
+          <button className="secondary-action" type="button" onClick={onClose}>Annuler</button>
+        </div>
+      </form>
+    </div>
   );
 }
 

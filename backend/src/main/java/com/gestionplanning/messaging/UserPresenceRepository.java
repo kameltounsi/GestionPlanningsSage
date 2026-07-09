@@ -8,4 +8,5 @@ import java.util.Optional;
 public interface UserPresenceRepository extends JpaRepository<UserPresence, Long> {
     Optional<UserPresence> findByUser(AppUser user);
     Optional<UserPresence> findByUser_Id(Long userId);
+    void deleteByUser(AppUser user);
 }

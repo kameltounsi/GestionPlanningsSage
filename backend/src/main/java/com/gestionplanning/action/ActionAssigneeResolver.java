@@ -86,6 +86,27 @@ public class ActionAssigneeResolver {
                 .orElse(value);
     }
 
+    public String projectRoleOrName(EcrRequest request, String roleOrName) {
+        String value = clean(roleOrName);
+        if (value == null || value.isEmpty() || request == null || roleFrom(value).isPresent()) {
+            return value;
+        }
+        String normalizedName = normalize(value);
+        return projectRepository.findById(request.getModificationProject())
+                .map(ProjectReference::getProjectTeam)
+                .map(this::teamEntries)
+                .orElse(Collections.emptyList())
+                .stream()
+                .filter(entry -> normalize(entry.name).equals(normalizedName) || findUserByTeamName(entry.name)
+                        .map(user -> normalize(displayName(user)).equals(normalizedName)
+                                || normalize(user.getUsername()).equals(normalizedName)
+                                || normalize(user.getEmail()).equals(normalizedName))
+                        .orElse(false))
+                .flatMap(entry -> entry.roles.stream())
+                .findFirst()
+                .orElse(value);
+    }
+
     private Optional<AppUser> findProjectMemberByRole(EcrRequest request, UserRole role) {
         Optional<AppUser> projectRoleUser = findProjectMemberByProjectRole(request, roleLabel(role));
         if (projectRoleUser.isPresent()) {

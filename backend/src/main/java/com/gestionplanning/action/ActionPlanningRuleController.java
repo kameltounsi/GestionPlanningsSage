@@ -1,8 +1,6 @@
 package com.gestionplanning.action;
 
-import com.gestionplanning.ecr.EcrRequestRepository;
-import com.gestionplanning.ecr.EcrStage;
-import com.gestionplanning.ecr.EcrTemplateService;
+import com.gestionplanning.action.ActionPlanningRulePropagationService.CloudAssetReference;
 import com.gestionplanning.storage.CloudinaryStorageService;
 import com.gestionplanning.storage.CloudinaryStorageService.DownloadedAsset;
 import com.gestionplanning.storage.StoredAsset;
@@ -10,11 +8,14 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.validation.Valid;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -22,45 +23,42 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/action-planning-rules")
 public class ActionPlanningRuleController {
     private final ActionPlanningRuleRepository ruleRepository;
-    private final EcrRequestRepository requestRepository;
-    private final ActionPlanningService planningService;
-    private final EcrTemplateService templateService;
     private final CloudinaryStorageService storageService;
     private final ActionPlanningRuleProofDocumentRepository proofDocumentRepository;
+    private final ActionPlanningRuleMapper ruleMapper;
+    private final ActionPlanningRulePropagationService propagationService;
 
-    public ActionPlanningRuleController(ActionPlanningRuleRepository ruleRepository, EcrRequestRepository requestRepository,
-                                        ActionPlanningService planningService, EcrTemplateService templateService,
+    public ActionPlanningRuleController(ActionPlanningRuleRepository ruleRepository,
                                         CloudinaryStorageService storageService,
-                                        ActionPlanningRuleProofDocumentRepository proofDocumentRepository) {
+                                        ActionPlanningRuleProofDocumentRepository proofDocumentRepository,
+                                        ActionPlanningRuleMapper ruleMapper,
+                                        ActionPlanningRulePropagationService propagationService) {
         this.ruleRepository = ruleRepository;
-        this.requestRepository = requestRepository;
-        this.planningService = planningService;
-        this.templateService = templateService;
         this.storageService = storageService;
         this.proofDocumentRepository = proofDocumentRepository;
+        this.ruleMapper = ruleMapper;
+        this.propagationService = propagationService;
     }
 
     @GetMapping
     public List<ActionPlanningRuleDto> list() {
         return ruleRepository.findAllByOrderByStageAscActionTitleAsc().stream()
-                .map(ActionPlanningRuleDto::from)
+                .map(ruleMapper::toDto)
                 .collect(Collectors.toList());
     }
 
     @PostMapping
     public ResponseEntity<ActionPlanningRuleDto> create(@Valid @RequestBody ActionPlanningRuleDto ruleDto) {
-        ActionPlanningRule rule = toEntity(ruleDto);
+        ActionPlanningRule rule = ruleMapper.toEntity(ruleDto);
         ActionPlanningRule savedRule = ruleRepository.save(normalize(rule));
-        recalculateAllRequests();
-        return ResponseEntity.created(URI.create("/api/action-planning-rules/" + savedRule.getId())).body(ActionPlanningRuleDto.from(savedRule));
+        return ResponseEntity.created(URI.create("/api/action-planning-rules/" + savedRule.getId())).body(ruleMapper.toDto(savedRule));
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<ActionPlanningRuleDto> update(@PathVariable Long id, @Valid @RequestBody ActionPlanningRuleDto updatedRuleDto) {
-        ActionPlanningRule updatedRule = toEntity(updatedRuleDto);
+        ActionPlanningRule updatedRule = ruleMapper.toEntity(updatedRuleDto);
         return ruleRepository.findById(id)
                 .map(rule -> {
-                    ActionPlanningRule previousRule = snapshotRule(rule);
                     rule.setStage(updatedRule.getStage());
                     rule.setAppliesToModification(updatedRule.isAppliesToModification());
                     rule.setAppliesToNewProject(updatedRule.isAppliesToNewProject());
@@ -86,8 +84,7 @@ public class ActionPlanningRuleController {
                     rule.setRoutineAction(updatedRule.isRoutineAction());
                     rule.setRecurrenceIntervalDays(updatedRule.getRecurrenceIntervalDays());
                     ActionPlanningRule savedRule = ruleRepository.save(normalize(rule));
-                    recalculateAllRequests(previousRule, savedRule);
-                    return ResponseEntity.ok(ActionPlanningRuleDto.from(savedRule));
+                    return ResponseEntity.ok(ruleMapper.toDto(savedRule));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -118,8 +115,7 @@ public class ActionPlanningRuleController {
                     rule.setProofDocumentResourceType(asset.getResourceType());
                     rule.setEvidenceRequired(true);
                     ActionPlanningRule savedRule = ruleRepository.save(rule);
-                    recalculateAllRequests();
-                    return ResponseEntity.ok(ActionPlanningRuleDto.from(savedRule));
+                    return ResponseEntity.ok(ruleMapper.toDto(savedRule));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -151,8 +147,7 @@ public class ActionPlanningRuleController {
                     rule.setProofDocumentResourceType("link");
                     rule.setEvidenceRequired(true);
                     ActionPlanningRule savedRule = ruleRepository.save(rule);
-                    recalculateAllRequests();
-                    return ResponseEntity.ok(ActionPlanningRuleDto.from(savedRule));
+                    return ResponseEntity.ok(ruleMapper.toDto(savedRule));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -211,8 +206,7 @@ public class ActionPlanningRuleController {
                     proofDocumentRepository.deleteByRule_Id(id);
                     clearProofDocument(rule);
                     ActionPlanningRule savedRule = ruleRepository.save(rule);
-                    recalculateAllRequests();
-                    return ResponseEntity.ok(ActionPlanningRuleDto.from(savedRule));
+                    return ResponseEntity.ok(ruleMapper.toDto(savedRule));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -228,8 +222,7 @@ public class ActionPlanningRuleController {
                     proofDocumentRepository.flush();
                     syncLatestProofDocumentMetadata(rule);
                     ActionPlanningRule savedRule = ruleRepository.save(rule);
-                    recalculateAllRequests();
-                    return ResponseEntity.ok(ActionPlanningRuleDto.from(savedRule));
+                    return ResponseEntity.ok(ruleMapper.toDto(savedRule));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -239,12 +232,10 @@ public class ActionPlanningRuleController {
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         return ruleRepository.findById(id)
                 .map(rule -> {
-                    storageService.deleteQuietly(rule.getProofDocumentPublicId(), rule.getProofDocumentResourceType());
-                    proofDocumentRepository.findByRule_IdOrderByUploadedAtDescIdDesc(id)
-                            .forEach(proofDocument -> storageService.deleteQuietly(proofDocument.getPublicId(), proofDocument.getResourceType()));
+                    List<CloudAssetReference> cloudAssets = cloudAssetsForRule(rule);
                     proofDocumentRepository.deleteByRule_Id(id);
                     ruleRepository.delete(rule);
-                    recalculateAllRequests();
+                    runAfterCommit(() -> propagationService.deleteCloudAssets(cloudAssets));
                     return ResponseEntity.noContent().<Void>build();
                 })
                 .orElse(ResponseEntity.notFound().build());
@@ -274,74 +265,31 @@ public class ActionPlanningRuleController {
         return rule;
     }
 
-    private ActionPlanningRule toEntity(ActionPlanningRuleDto dto) {
-        ActionPlanningRule rule = new ActionPlanningRule();
-        rule.setStage(dto.getStage());
-        rule.setAppliesToModification(dto.isAppliesToModification());
-        rule.setAppliesToNewProject(dto.isAppliesToNewProject());
-        rule.setActionTitle(dto.getActionTitle());
-        rule.setTopicRisk(dto.getTopicRisk());
-        rule.setResponsible(dto.getResponsible());
-        rule.setValidator(dto.getValidator());
-        rule.setCriticality(dto.getCriticality());
-        rule.setExpectedEvidence(dto.getExpectedEvidence());
-        rule.setProofDocument(dto.getProofDocument());
-        rule.setProofDocumentFileName(dto.getProofDocumentFileName());
-        rule.setProofDocumentContentType(dto.getProofDocumentContentType());
-        rule.setProofDocumentFileSize(dto.getProofDocumentFileSize());
-        rule.setProofDocumentFileUrl(dto.getProofDocumentFileUrl());
-        rule.setProofDocumentPublicId(dto.getProofDocumentPublicId());
-        rule.setProofDocumentResourceType(dto.getProofDocumentResourceType());
-        rule.setEvidenceRequired(dto.isEvidenceRequired());
-        rule.setDependencyActionTitle(dto.getDependencyActionTitle());
-        rule.setDependencyAnchor(dto.getDependencyAnchor());
-        rule.setDurationDays(dto.getDurationDays());
-        rule.setRoutineAction(dto.isRoutineAction());
-        rule.setRecurrenceIntervalDays(dto.getRecurrenceIntervalDays());
-        return rule;
+    private List<CloudAssetReference> cloudAssetsForRule(ActionPlanningRule rule) {
+        List<CloudAssetReference> assets = new ArrayList<>();
+        addCloudAsset(assets, rule.getProofDocumentPublicId(), rule.getProofDocumentResourceType());
+        proofDocumentRepository.findByRule_IdOrderByUploadedAtDescIdDesc(rule.getId())
+                .forEach(proofDocument -> addCloudAsset(assets, proofDocument.getPublicId(), proofDocument.getResourceType()));
+        return assets;
     }
 
-    private void recalculateAllRequests() {
-        recalculateAllRequests(null, null);
+    private void addCloudAsset(List<CloudAssetReference> assets, String publicId, String resourceType) {
+        if (publicId != null && !publicId.trim().isEmpty()) {
+            assets.add(new CloudAssetReference(publicId, resourceType));
+        }
     }
 
-    private void recalculateAllRequests(ActionPlanningRule previousRule, ActionPlanningRule updatedRule) {
-        requestRepository.findAll().stream()
-                .filter(request -> request.getCurrentStage() != EcrStage.CLOSED && request.getCurrentStage() != EcrStage.CANCELLED)
-                .forEach(request -> {
-                    if (updatedRule != null) {
-                        templateService.syncActionRuleFor(request, previousRule, updatedRule);
-                    }
-                    templateService.ensureMissingActionsFor(request);
-                    planningService.recalculateRequest(request);
-                });
-    }
-
-    private ActionPlanningRule snapshotRule(ActionPlanningRule source) {
-        ActionPlanningRule snapshot = new ActionPlanningRule();
-        snapshot.setStage(source.getStage());
-        snapshot.setAppliesToModification(source.isAppliesToModification());
-        snapshot.setAppliesToNewProject(source.isAppliesToNewProject());
-        snapshot.setActionTitle(source.getActionTitle());
-        snapshot.setTopicRisk(source.getTopicRisk());
-        snapshot.setResponsible(source.getResponsible());
-        snapshot.setValidator(source.getValidator());
-        snapshot.setCriticality(source.getCriticality());
-        snapshot.setExpectedEvidence(source.getExpectedEvidence());
-        snapshot.setEvidenceRequired(source.isEvidenceRequired());
-        snapshot.setDependencyActionTitle(source.getDependencyActionTitle());
-        snapshot.setDependencyAnchor(source.getDependencyAnchor());
-        snapshot.setDurationDays(source.getDurationDays());
-        snapshot.setRoutineAction(source.isRoutineAction());
-        snapshot.setRecurrenceIntervalDays(source.getRecurrenceIntervalDays());
-        snapshot.setProofDocument(source.getProofDocument());
-        snapshot.setProofDocumentFileName(source.getProofDocumentFileName());
-        snapshot.setProofDocumentContentType(source.getProofDocumentContentType());
-        snapshot.setProofDocumentFileSize(source.getProofDocumentFileSize());
-        snapshot.setProofDocumentFileUrl(source.getProofDocumentFileUrl());
-        snapshot.setProofDocumentPublicId(source.getProofDocumentPublicId());
-        snapshot.setProofDocumentResourceType(source.getProofDocumentResourceType());
-        return snapshot;
+    private void runAfterCommit(Runnable task) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
     }
 
     private void clearProofDocument(ActionPlanningRule rule) {

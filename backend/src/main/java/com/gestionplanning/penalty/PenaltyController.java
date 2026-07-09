@@ -13,17 +13,19 @@ import java.util.stream.Collectors;
 @RequestMapping("/api")
 public class PenaltyController {
     private final PenaltyRepository penaltyRepository;
+    private final PenaltyMapper penaltyMapper;
     private final EcrRequestRepository requestRepository;
 
-    public PenaltyController(PenaltyRepository penaltyRepository, EcrRequestRepository requestRepository) {
+    public PenaltyController(PenaltyRepository penaltyRepository, PenaltyMapper penaltyMapper, EcrRequestRepository requestRepository) {
         this.penaltyRepository = penaltyRepository;
+        this.penaltyMapper = penaltyMapper;
         this.requestRepository = requestRepository;
     }
 
     @GetMapping("/penalties")
     public List<PenaltyDto> list() {
         return penaltyRepository.findAll().stream()
-                .map(this::toDto)
+                .map(penaltyMapper::toDto)
                 .collect(Collectors.toList());
     }
 
@@ -33,7 +35,7 @@ public class PenaltyController {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(penaltyRepository.findByRequest_IdOrderByDateDescIdDesc(requestId).stream()
-                .map(this::toDto)
+                .map(penaltyMapper::toDto)
                 .collect(Collectors.toList()));
     }
 
@@ -41,10 +43,10 @@ public class PenaltyController {
     public ResponseEntity<PenaltyDto> create(@PathVariable Long requestId, @Valid @RequestBody PenaltyDto penaltyDto) {
         return requestRepository.findById(requestId)
                 .map(request -> {
-                    Penalty penalty = toEntity(penaltyDto);
+                    Penalty penalty = penaltyMapper.toEntity(penaltyDto);
                     penalty.setRequest(request);
                     Penalty saved = penaltyRepository.save(penalty);
-                    return ResponseEntity.created(URI.create("/api/penalties/" + saved.getId())).body(toDto(saved));
+                    return ResponseEntity.created(URI.create("/api/penalties/" + saved.getId())).body(penaltyMapper.toDto(saved));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -58,25 +60,4 @@ public class PenaltyController {
         return ResponseEntity.noContent().build();
     }
 
-    private Penalty toEntity(PenaltyDto dto) {
-        Penalty penalty = new Penalty();
-        penalty.setPilot(dto.getPilot());
-        penalty.setDelayType(dto.getDelayType());
-        penalty.setAmount(dto.getAmount());
-        penalty.setDate(dto.getDate());
-        penalty.setComment(dto.getComment());
-        return penalty;
-    }
-
-    private PenaltyDto toDto(Penalty penalty) {
-        PenaltyDto dto = new PenaltyDto();
-        dto.setId(penalty.getId());
-        dto.setRequestId(penalty.getRequestId());
-        dto.setPilot(penalty.getPilot());
-        dto.setDelayType(penalty.getDelayType());
-        dto.setAmount(penalty.getAmount());
-        dto.setDate(penalty.getDate());
-        dto.setComment(penalty.getComment());
-        return dto;
-    }
 }

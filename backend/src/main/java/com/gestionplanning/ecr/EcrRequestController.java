@@ -48,6 +48,7 @@ public class EcrRequestController {
     private final AuditLogService auditLogService;
     private final AccountMailService accountMailService;
     private final FinishedProductReferenceRepository finishedProductRepository;
+    private final EcrRequestMapper requestMapper;
 
     @SuppressWarnings("java:S107")
     public EcrRequestController(EcrRequestRepository requestRepository, ChecklistItemRepository checklistItemRepository,
@@ -55,7 +56,8 @@ public class EcrRequestController {
                                 ActionPlanningService planningService, EcrActionRepository actionRepository, AccessControlService accessControlService,
                                 PhaseValidationRequestRepository validationRepository, AuditLogService auditLogService,
                                 AccountMailService accountMailService,
-                                FinishedProductReferenceRepository finishedProductRepository) {
+                                FinishedProductReferenceRepository finishedProductRepository,
+                                EcrRequestMapper requestMapper) {
         this.requestRepository = requestRepository;
         this.checklistItemRepository = checklistItemRepository;
         this.storageService = storageService;
@@ -67,6 +69,7 @@ public class EcrRequestController {
         this.auditLogService = auditLogService;
         this.accountMailService = accountMailService;
         this.finishedProductRepository = finishedProductRepository;
+        this.requestMapper = requestMapper;
     }
 
     @GetMapping
@@ -86,7 +89,7 @@ public class EcrRequestController {
                 : accessControlService.filterPersonalRequests(user, requests);
         return visibleRequests.stream()
                 .filter(request -> matchesView(request, normalizedView, admin))
-                .map(EcrRequestDto::fromListItem)
+                .map(requestMapper::toListItemDto)
                 .collect(java.util.stream.Collectors.toList());
     }
 
@@ -95,7 +98,7 @@ public class EcrRequestController {
         AppUser user = (AppUser) userAttribute;
         return requestRepository.findById(id)
                 .filter(request -> accessControlService.canAccessRequest(user, request))
-                .map(request -> ResponseEntity.ok(EcrRequestDto.from(request)))
+                .map(request -> ResponseEntity.ok(requestMapper.toDto(request)))
                 .orElse(ResponseEntity.status(403).build());
     }
 
@@ -150,7 +153,7 @@ public class EcrRequestController {
                 saved.getId() == null ? null : String.valueOf(saved.getId()),
                 "Création de la modification: " + requestLabel(saved)
         );
-        return ResponseEntity.created(URI.create("/api/ecr-requests/" + saved.getId())).body(EcrRequestDto.from(saved));
+        return ResponseEntity.created(URI.create("/api/ecr-requests/" + saved.getId())).body(requestMapper.toDto(saved));
     }
 
     @PutMapping("/{id}")
@@ -221,7 +224,7 @@ public class EcrRequestController {
                             saved.getId() == null ? null : String.valueOf(saved.getId()),
                             "Modification mise à jour: " + requestLabel(saved)
                     );
-                    return ResponseEntity.ok(EcrRequestDto.from(saved));
+                    return ResponseEntity.ok(requestMapper.toDto(saved));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
@@ -262,7 +265,7 @@ public class EcrRequestController {
                     } else {
                         return ResponseEntity.badRequest().<EcrRequestDto>build();
                     }
-                    return ResponseEntity.ok(EcrRequestDto.from(requestRepository.save(request)));
+                    return ResponseEntity.ok(requestMapper.toDto(requestRepository.save(request)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -356,7 +359,7 @@ public class EcrRequestController {
                                 "Phase rouverte: " + stageLabel(stage) + MODIFICATION_DETAIL_SEPARATOR + requestLabel(saved)
                         );
                     }
-                    return ResponseEntity.ok(EcrRequestDto.from(saved));
+                    return ResponseEntity.ok(requestMapper.toDto(saved));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
@@ -392,7 +395,7 @@ public class EcrRequestController {
                             requestLabel(saved),
                             "Modification annulée: " + requestLabel(saved)
                     );
-                    return ResponseEntity.ok(EcrRequestDto.from(saved));
+                    return ResponseEntity.ok(requestMapper.toDto(saved));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
@@ -422,7 +425,7 @@ public class EcrRequestController {
                             requestLabel(saved),
                             "Demande de cloture: " + requestLabel(saved)
                     );
-                    return ResponseEntity.ok(EcrRequestDto.from(saved));
+                    return ResponseEntity.ok(requestMapper.toDto(saved));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
@@ -455,7 +458,7 @@ public class EcrRequestController {
                             requestLabel(saved),
                             "Modification marquee terminee/cloturee: " + requestLabel(saved)
                     );
-                    return ResponseEntity.ok(EcrRequestDto.from(saved));
+                    return ResponseEntity.ok(requestMapper.toDto(saved));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }
@@ -479,7 +482,7 @@ public class EcrRequestController {
                             requestLabel(saved),
                             (archived ? "Modification archivée: " : "Modification désarchivée: ") + requestLabel(saved)
                     );
-                    return ResponseEntity.ok(EcrRequestDto.from(saved));
+                    return ResponseEntity.ok(requestMapper.toDto(saved));
                 })
                 .orElse(ResponseEntity.status(403).build());
     }

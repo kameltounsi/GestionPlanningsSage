@@ -19,12 +19,14 @@ import java.util.stream.Collectors;
 @RequestMapping("/api")
 public class EcrDocumentController {
     private final EcrDocumentRepository documentRepository;
+    private final EcrDocumentMapper documentMapper;
     private final EcrRequestRepository requestRepository;
     private final CloudinaryStorageService storageService;
 
-    public EcrDocumentController(EcrDocumentRepository documentRepository, EcrRequestRepository requestRepository,
+    public EcrDocumentController(EcrDocumentRepository documentRepository, EcrDocumentMapper documentMapper, EcrRequestRepository requestRepository,
                                  CloudinaryStorageService storageService) {
         this.documentRepository = documentRepository;
+        this.documentMapper = documentMapper;
         this.requestRepository = requestRepository;
         this.storageService = storageService;
     }
@@ -35,7 +37,7 @@ public class EcrDocumentController {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(documentRepository.findByRequest_IdOrderByUploadedAtDescIdDesc(requestId).stream()
-                .map(this::toDto)
+                .map(documentMapper::toDto)
                 .collect(Collectors.toList()));
     }
 
@@ -43,10 +45,10 @@ public class EcrDocumentController {
     public ResponseEntity<EcrDocumentDto> create(@PathVariable Long requestId, @Valid @RequestBody EcrDocumentDto documentDto) {
         return requestRepository.findById(requestId)
                 .map(request -> {
-                    EcrDocument document = toEntity(documentDto);
+                    EcrDocument document = documentMapper.toEntity(documentDto);
                     document.setRequest(request);
                     EcrDocument saved = documentRepository.save(document);
-                    return ResponseEntity.created(URI.create("/api/documents/" + saved.getId())).body(toDto(saved));
+                    return ResponseEntity.created(URI.create("/api/documents/" + saved.getId())).body(documentMapper.toDto(saved));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -71,7 +73,7 @@ public class EcrDocumentController {
                     document.setFileSize(asset.getSize());
                     document.setUploadedBy(uploadedBy);
                     EcrDocument saved = documentRepository.save(document);
-                    return ResponseEntity.created(URI.create("/api/documents/" + saved.getId())).body(toDto(saved));
+                    return ResponseEntity.created(URI.create("/api/documents/" + saved.getId())).body(documentMapper.toDto(saved));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -115,30 +117,4 @@ public class EcrDocumentController {
         return disposition + "; filename=\"" + safeFileName(fileName) + "\"";
     }
 
-    private EcrDocument toEntity(EcrDocumentDto dto) {
-        EcrDocument document = new EcrDocument();
-        document.setFileName(dto.getFileName());
-        document.setFileUrl(dto.getFileUrl());
-        document.setPublicId(dto.getPublicId());
-        document.setResourceType(dto.getResourceType());
-        document.setFileType(dto.getFileType());
-        document.setFileSize(dto.getFileSize());
-        document.setUploadedBy(dto.getUploadedBy());
-        return document;
-    }
-
-    private EcrDocumentDto toDto(EcrDocument document) {
-        EcrDocumentDto dto = new EcrDocumentDto();
-        dto.setId(document.getId());
-        dto.setRequestId(document.getRequestId());
-        dto.setFileName(document.getFileName());
-        dto.setFileUrl(document.getFileUrl());
-        dto.setPublicId(document.getPublicId());
-        dto.setResourceType(document.getResourceType());
-        dto.setFileType(document.getFileType());
-        dto.setFileSize(document.getFileSize());
-        dto.setUploadedBy(document.getUploadedBy());
-        dto.setUploadedAt(document.getUploadedAt());
-        return dto;
-    }
 }

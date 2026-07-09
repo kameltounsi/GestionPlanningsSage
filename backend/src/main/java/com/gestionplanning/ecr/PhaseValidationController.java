@@ -32,6 +32,8 @@ public class PhaseValidationController {
     private final AccountMailService accountMailService;
     private final AuditLogService auditLogService;
     private final PhaseSoundAlertService phaseSoundAlertService;
+    private final PhaseValidationRequestMapper validationMapper;
+    private final EcrRequestMapper requestMapper;
 
     public PhaseValidationController(EcrRequestRepository requestRepository,
                                      EcrActionRepository actionRepository,
@@ -39,7 +41,9 @@ public class PhaseValidationController {
                                      AccessControlService accessControlService,
                                      AccountMailService accountMailService,
                                      AuditLogService auditLogService,
-                                     PhaseSoundAlertService phaseSoundAlertService) {
+                                     PhaseSoundAlertService phaseSoundAlertService,
+                                     PhaseValidationRequestMapper validationMapper,
+                                     EcrRequestMapper requestMapper) {
         this.requestRepository = requestRepository;
         this.actionRepository = actionRepository;
         this.validationRepository = validationRepository;
@@ -47,6 +51,8 @@ public class PhaseValidationController {
         this.accountMailService = accountMailService;
         this.auditLogService = auditLogService;
         this.phaseSoundAlertService = phaseSoundAlertService;
+        this.validationMapper = validationMapper;
+        this.requestMapper = requestMapper;
     }
 
     @GetMapping
@@ -98,7 +104,7 @@ public class PhaseValidationController {
                                 .orElseThrow(() -> new IllegalStateException("Aucun destinataire de validation trouve pour l'action: " + action.getTitle()));
                         accountMailService.sendActionValidationEmail(request, stage, action, recipient);
                     }
-                    return ResponseEntity.ok(toDto(enrichValidation(saved)));
+                    return ResponseEntity.ok(validationMapper.toDto(enrichValidation(saved)));
                 })
                 .orElse(ResponseEntity.status(403).<PhaseValidationRequestDto>build());
     }
@@ -133,7 +139,7 @@ public class PhaseValidationController {
                     actionRepository.save(action);
                     accessControlService.validationRecipientFor(action)
                             .ifPresent(recipient -> accountMailService.sendActionValidationEmail(validation.getRequest(), validation.getStage(), action, recipient));
-                    return ResponseEntity.ok(toDto(enrichValidation(validation)));
+                    return ResponseEntity.ok(validationMapper.toDto(enrichValidation(validation)));
                 })
                 .orElse(ResponseEntity.status(403).<PhaseValidationRequestDto>build());
     }
@@ -192,7 +198,7 @@ public class PhaseValidationController {
                                 "Validation de la phase: " + stageLabel(updatedValidation.getStage(), request.isNewVersion()) + MODIFICATION_DETAIL_SEPARATOR + requestLabel(request)
                         );
                     }
-                    return ResponseEntity.ok(toDto(enrichValidation(updatedValidation)));
+                    return ResponseEntity.ok(validationMapper.toDto(enrichValidation(updatedValidation)));
                 })
                 .orElse(ResponseEntity.status(403).<PhaseValidationRequestDto>build());
     }
@@ -240,7 +246,7 @@ public class PhaseValidationController {
                             action.getId() == null ? null : String.valueOf(action.getId()),
                             "Refus de validation de l'action: " + actionLabel(action) + MODIFICATION_DETAIL_SEPARATOR + requestLabel(action.getRequest()) + " - Motif: " + reason.trim()
                     );
-                    return ResponseEntity.ok(toDto(enrichValidation(validation)));
+                    return ResponseEntity.ok(validationMapper.toDto(enrichValidation(validation)));
                 })
                 .orElse(ResponseEntity.status(403).<PhaseValidationRequestDto>build());
     }
@@ -271,7 +277,7 @@ public class PhaseValidationController {
                             requestLabel(request),
                             "Validation de la phase: " + stageLabel(validation.getStage(), request.isNewVersion()) + MODIFICATION_DETAIL_SEPARATOR + requestLabel(request)
                     );
-                    return ResponseEntity.ok(EcrRequestDto.from(savedRequest));
+                    return ResponseEntity.ok(requestMapper.toDto(savedRequest));
                 })
                 .orElse(ResponseEntity.status(403).<EcrRequestDto>build());
     }
@@ -303,17 +309,13 @@ public class PhaseValidationController {
                                     validation.getRefusalReason(),
                                     validation.getActionsToRevisit()
                             ));
-                    return ResponseEntity.ok(toDto(saved));
+                    return ResponseEntity.ok(validationMapper.toDto(saved));
                 })
                 .orElse(ResponseEntity.status(403).<PhaseValidationRequestDto>build());
     }
 
     private List<PhaseValidationRequestDto> toDtos(List<PhaseValidationRequest> validations) {
-        return validations.stream().map(this::toDto).collect(java.util.stream.Collectors.toList());
-    }
-
-    private PhaseValidationRequestDto toDto(PhaseValidationRequest validation) {
-        return PhaseValidationRequestDto.from(validation);
+        return validations.stream().map(validationMapper::toDto).collect(java.util.stream.Collectors.toList());
     }
 
     private boolean allStageActionsDone(Long requestId, EcrStage stage) {

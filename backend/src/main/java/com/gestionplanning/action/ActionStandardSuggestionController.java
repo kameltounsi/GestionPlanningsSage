@@ -2,6 +2,8 @@ package com.gestionplanning.action;
 
 import com.gestionplanning.auth.AccessControlService;
 import com.gestionplanning.auth.AuthenticatedUserService;
+import com.gestionplanning.ecr.EcrRequest;
+import com.gestionplanning.ecr.EcrRequestRepository;
 import com.gestionplanning.user.AppUser;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,17 +21,29 @@ import java.util.stream.Collectors;
 public class ActionStandardSuggestionController {
     private final ActionStandardSuggestionRepository suggestionRepository;
     private final ActionPlanningRuleRepository ruleRepository;
+    private final EcrRequestRepository requestRepository;
+    private final ActionAssigneeResolver assigneeResolver;
     private final AccessControlService accessControlService;
     private final AuthenticatedUserService authenticatedUserService;
+    private final ActionStandardSuggestionMapper suggestionMapper;
+    private final ActionPlanningRuleMapper ruleMapper;
 
     public ActionStandardSuggestionController(ActionStandardSuggestionRepository suggestionRepository,
                                               ActionPlanningRuleRepository ruleRepository,
+                                              EcrRequestRepository requestRepository,
+                                              ActionAssigneeResolver assigneeResolver,
                                               AccessControlService accessControlService,
-                                              AuthenticatedUserService authenticatedUserService) {
+                                              AuthenticatedUserService authenticatedUserService,
+                                              ActionStandardSuggestionMapper suggestionMapper,
+                                              ActionPlanningRuleMapper ruleMapper) {
         this.suggestionRepository = suggestionRepository;
         this.ruleRepository = ruleRepository;
+        this.requestRepository = requestRepository;
+        this.assigneeResolver = assigneeResolver;
         this.accessControlService = accessControlService;
         this.authenticatedUserService = authenticatedUserService;
+        this.suggestionMapper = suggestionMapper;
+        this.ruleMapper = ruleMapper;
     }
 
     @GetMapping
@@ -39,7 +53,7 @@ public class ActionStandardSuggestionController {
             return ResponseEntity.status(403).<List<ActionStandardSuggestionDto>>build();
         }
         return ResponseEntity.ok(suggestionRepository.findByStatusOrderByCreatedAtDescIdDesc(ActionStandardSuggestionStatus.PENDING).stream()
-                .map(ActionStandardSuggestionDto::from)
+                .map(suggestionMapper::toDto)
                 .collect(Collectors.toList()));
     }
 
@@ -62,8 +76,9 @@ public class ActionStandardSuggestionController {
                     rule.setAppliesToModification(!suggestion.isNewProject());
                     rule.setActionTitle(suggestion.getActionTitle());
                     rule.setTopicRisk(suggestion.getTopicRisk());
-                    rule.setResponsible(suggestion.getResponsible());
-                    rule.setValidator(suggestion.getValidator());
+                    EcrRequest request = suggestion.getRequestId() == null ? null : requestRepository.findById(suggestion.getRequestId()).orElse(null);
+                    rule.setResponsible(assigneeResolver.projectRoleOrName(request, suggestion.getResponsible()));
+                    rule.setValidator(assigneeResolver.projectRoleOrName(request, suggestion.getValidator()));
                     rule.setCriticality(suggestion.getCriticality());
                     rule.setExpectedEvidence(suggestion.getExpectedEvidence());
                     rule.setEvidenceRequired(suggestion.isEvidenceRequired());
@@ -81,7 +96,7 @@ public class ActionStandardSuggestionController {
                     suggestion.setReviewedBy(displayName(user));
                     suggestion.setReviewedAt(LocalDateTime.now(ZoneId.systemDefault()));
                     suggestionRepository.save(suggestion);
-                    return ResponseEntity.created(URI.create("/api/action-planning-rules/" + savedRule.getId())).body(ActionPlanningRuleDto.from(savedRule));
+                    return ResponseEntity.created(URI.create("/api/action-planning-rules/" + savedRule.getId())).body(ruleMapper.toDto(savedRule));
                 })
                 .orElse(ResponseEntity.status(404).<ActionPlanningRuleDto>build());
     }
@@ -99,7 +114,7 @@ public class ActionStandardSuggestionController {
                     suggestion.setStatus(ActionStandardSuggestionStatus.IGNORED);
                     suggestion.setReviewedBy(displayName(user));
                     suggestion.setReviewedAt(LocalDateTime.now(ZoneId.systemDefault()));
-                    return ResponseEntity.ok(ActionStandardSuggestionDto.from(suggestionRepository.save(suggestion)));
+                    return ResponseEntity.ok(suggestionMapper.toDto(suggestionRepository.save(suggestion)));
                 })
                 .orElse(ResponseEntity.status(404).<ActionStandardSuggestionDto>build());
     }

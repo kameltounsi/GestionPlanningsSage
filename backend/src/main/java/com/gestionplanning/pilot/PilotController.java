@@ -10,21 +10,23 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/pilots")
 public class PilotController {
     private final PilotRepository pilotRepository;
+    private final PilotMapper pilotMapper;
 
-    public PilotController(PilotRepository pilotRepository) {
+    public PilotController(PilotRepository pilotRepository, PilotMapper pilotMapper) {
         this.pilotRepository = pilotRepository;
+        this.pilotMapper = pilotMapper;
     }
 
     @GetMapping
     public List<PilotDto> list() {
         return pilotRepository.findAllByOrderByNameAsc().stream()
-                .map(this::toDto)
+                .map(pilotMapper::toDto)
                 .collect(Collectors.toList());
     }
 
     @PostMapping
     public ResponseEntity<PilotDto> create(@RequestBody PilotDto pilot) {
-        return ResponseEntity.ok(toDto(pilotRepository.save(toEntity(pilot))));
+        return ResponseEntity.ok(pilotMapper.toDto(pilotRepository.save(pilotMapper.toEntity(pilot))));
     }
 
     @PutMapping("/{name}")
@@ -32,7 +34,7 @@ public class PilotController {
         return pilotRepository.findById(name)
                 .map(pilot -> {
                     pilot.setManager(updatedPilot.getManager());
-                    return ResponseEntity.ok(toDto(pilotRepository.save(pilot)));
+                    return ResponseEntity.ok(pilotMapper.toDto(pilotRepository.save(pilot)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -46,14 +48,4 @@ public class PilotController {
         return ResponseEntity.noContent().build();
     }
 
-    private Pilot toEntity(PilotDto dto) {
-        Pilot pilot = new Pilot();
-        pilot.setName(dto.getName());
-        pilot.setManager(dto.getManager());
-        return pilot;
-    }
-
-    private PilotDto toDto(Pilot pilot) {
-        return new PilotDto(pilot.getName(), pilot.getManager());
-    }
 }

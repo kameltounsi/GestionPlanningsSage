@@ -9,4 +9,6 @@ public interface ActionDeadlineAlertRepository extends JpaRepository<ActionDeadl
     Optional<ActionDeadlineAlert> findByAction_IdAndRecipientEmailAndAlertType(Long actionId, String recipientEmail, ActionDeadlineAlertType alertType);
 
     List<ActionDeadlineAlert> findByRecipientEmailAndSoundAcknowledgedAtIsNullOrderByCreatedAtAscIdAsc(String recipientEmail);
+
+    void deleteByAction_Id(Long actionId);
 }

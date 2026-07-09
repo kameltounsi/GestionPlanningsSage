@@ -1,7 +1,16 @@
 package com.gestionplanning.user;
 
 import com.gestionplanning.auth.AccessControlService;
+import com.gestionplanning.auth.AuthTokenRepository;
 import com.gestionplanning.auth.PasswordService;
+import com.gestionplanning.auth.PasswordResetCodeRepository;
+import com.gestionplanning.messaging.ChatGroup;
+import com.gestionplanning.messaging.ChatGroupReadStateRepository;
+import com.gestionplanning.messaging.ChatGroupRepository;
+import com.gestionplanning.messaging.ChatMessageRepository;
+import com.gestionplanning.messaging.UserPresenceRepository;
+import com.gestionplanning.project.ProjectReference;
+import com.gestionplanning.project.ProjectReferenceRepository;
 import com.gestionplanning.storage.CloudinaryStorageService;
 import com.gestionplanning.storage.StoredAsset;
 import org.springframework.http.ResponseEntity;
@@ -11,38 +20,62 @@ import org.springframework.web.multipart.MultipartFile;
 
 import javax.validation.Valid;
 import java.net.URI;
+import java.text.Normalizer;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/users")
 public class AppUserController {
     private final AppUserRepository userRepository;
+    private final AppUserMapper userMapper;
     private final CloudinaryStorageService storageService;
     private final PasswordService passwordService;
     private final AccountMailService accountMailService;
     private final AccessControlService accessControlService;
+    private final AuthTokenRepository authTokenRepository;
+    private final PasswordResetCodeRepository passwordResetCodeRepository;
+    private final UserPresenceRepository presenceRepository;
+    private final ChatGroupRepository chatGroupRepository;
+    private final ChatGroupReadStateRepository chatGroupReadStateRepository;
+    private final ChatMessageRepository chatMessageRepository;
+    private final ProjectReferenceRepository projectRepository;
 
-    public AppUserController(AppUserRepository userRepository, CloudinaryStorageService storageService, PasswordService passwordService, AccountMailService accountMailService, AccessControlService accessControlService) {
+    public AppUserController(AppUserRepository userRepository, AppUserMapper userMapper, CloudinaryStorageService storageService, PasswordService passwordService,
+                             AccountMailService accountMailService, AccessControlService accessControlService,
+                             AuthTokenRepository authTokenRepository, PasswordResetCodeRepository passwordResetCodeRepository,
+                             UserPresenceRepository presenceRepository, ChatGroupRepository chatGroupRepository,
+                             ChatGroupReadStateRepository chatGroupReadStateRepository, ChatMessageRepository chatMessageRepository,
+                             ProjectReferenceRepository projectRepository) {
         this.userRepository = userRepository;
+        this.userMapper = userMapper;
         this.storageService = storageService;
         this.passwordService = passwordService;
         this.accountMailService = accountMailService;
         this.accessControlService = accessControlService;
+        this.authTokenRepository = authTokenRepository;
+        this.passwordResetCodeRepository = passwordResetCodeRepository;
+        this.presenceRepository = presenceRepository;
+        this.chatGroupRepository = chatGroupRepository;
+        this.chatGroupReadStateRepository = chatGroupReadStateRepository;
+        this.chatMessageRepository = chatMessageRepository;
+        this.projectRepository = projectRepository;
     }
 
     @GetMapping
     public List<AppUserDto> list() {
         return userRepository.findAll().stream()
-                .map(this::toDto)
+                .map(userMapper::toDto)
                 .collect(Collectors.toList());
     }
 
     @PostMapping
     @Transactional
     public ResponseEntity<Object> create(@Valid @RequestBody AppUserDto userDto) {
-        AppUser user = toEntity(userDto);
+        AppUser user = userMapper.toEntity(userDto);
         normalize(user);
         String validationError = validateUser(user, null);
         if (validationError != null) {
@@ -52,14 +85,14 @@ public class AppUserController {
         user.setPassword(passwordService.encode(user.getPassword()));
         AppUser saved = userRepository.save(user);
         accountMailService.sendAccountCreatedEmail(saved, initialPassword);
-        return ResponseEntity.created(URI.create("/api/users/" + saved.getId())).body(toDto(saved));
+        return ResponseEntity.created(URI.create("/api/users/" + saved.getId())).body(userMapper.toDto(saved));
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<Object> update(@PathVariable Long id, @RequestBody AppUserDto updatedUserDto,
                                              @RequestAttribute("authenticatedUser") Object authenticatedUserAttribute) {
                                                  AppUser authenticatedUser = (AppUser) authenticatedUserAttribute;
-        AppUser updatedUser = toEntity(updatedUserDto);
+        AppUser updatedUser = userMapper.toEntity(updatedUserDto);
         return userRepository.findById(id)
                 .map(user -> {
                     normalize(updatedUser);
@@ -70,20 +103,11 @@ public class AppUserController {
                     if (hasRequestedPassword(updatedUser) && !canChangePassword(authenticatedUser, id)) {
                         return ResponseEntity.status(403).<Object>build();
                     }
-                    user.setFullName(updatedUser.getFullName());
-                    user.setUsername(updatedUser.getUsername());
-                    user.setJobTitle(updatedUser.getJobTitle());
-                    user.setMatricule(updatedUser.getMatricule());
-                    user.setEmail(updatedUser.getEmail());
+                    userMapper.copyAccountFields(updatedUser, user);
                     if (hasRequestedPassword(updatedUser)) {
                         user.setPassword(passwordService.encode(updatedUser.getPassword()));
                     }
-                    user.setPhone(updatedUser.getPhone());
-                    user.setChef1(updatedUser.getChef1());
-                    user.setChef2(updatedUser.getChef2());
-                    user.setRole(updatedUser.getRole());
-                    user.setEnabled(updatedUser.isEnabled());
-                    return ResponseEntity.ok((Object) toDto(userRepository.save(user)));
+                    return ResponseEntity.ok((Object) userMapper.toDto(userRepository.save(user)));
                 })
                 .orElse(ResponseEntity.status(404).<Object>build());
     }
@@ -91,14 +115,14 @@ public class AppUserController {
     @GetMapping("/me")
     public ResponseEntity<AppUserDto> currentUser(@RequestAttribute(value = "authenticatedUser", required = false) Object userAttribute) {
         AppUser user = (AppUser) userAttribute;
-        return user == null ? ResponseEntity.status(401).build() : ResponseEntity.ok(toDto(user));
+        return user == null ? ResponseEntity.status(401).build() : ResponseEntity.ok(userMapper.toDto(user));
     }
 
     @PutMapping("/{id}/profile")
     public ResponseEntity<AppUserDto> updateProfile(@PathVariable Long id, @RequestBody AppUserDto updatedUserDto,
                                                     @RequestAttribute("authenticatedUser") Object authenticatedUserAttribute) {
                                                         AppUser authenticatedUser = (AppUser) authenticatedUserAttribute;
-        AppUser updatedUser = toEntity(updatedUserDto);
+        AppUser updatedUser = userMapper.toEntity(updatedUserDto);
         if (!canUpdateProfile(authenticatedUser, id)) {
             return ResponseEntity.status(403).build();
         }
@@ -115,7 +139,7 @@ public class AppUserController {
                     user.setJobTitle(updatedUser.getJobTitle());
                     user.setEmail(updatedUser.getEmail());
                     user.setPhone(updatedUser.getPhone());
-                    return ResponseEntity.ok(toDto(userRepository.save(user)));
+                    return ResponseEntity.ok(userMapper.toDto(userRepository.save(user)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -133,7 +157,7 @@ public class AppUserController {
         return userRepository.findById(id)
                 .map(user -> {
                     user.setPassword(passwordService.encode(request.getPassword()));
-                    return ResponseEntity.ok(toDto(userRepository.save(user)));
+                    return ResponseEntity.ok(userMapper.toDto(userRepository.save(user)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -160,59 +184,108 @@ public class AppUserController {
                     user.setProfilePhotoUrl(asset.getUrl());
                     user.setProfilePhotoPublicId(asset.getPublicId());
                     user.setProfilePhotoResourceType(asset.getResourceType());
-                    return ResponseEntity.ok(toDto(userRepository.save(user)));
+                    return ResponseEntity.ok(userMapper.toDto(userRepository.save(user)));
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        if (!userRepository.existsById(id)) {
-            return ResponseEntity.notFound().build();
+    @Transactional
+    public ResponseEntity<Void> delete(@PathVariable Long id,
+                                       @RequestAttribute("authenticatedUser") Object authenticatedUserAttribute) {
+        AppUser authenticatedUser = (AppUser) authenticatedUserAttribute;
+        if (!accessControlService.isAdmin(authenticatedUser)) {
+            return ResponseEntity.status(403).build();
         }
-        userRepository.deleteById(id);
-        return ResponseEntity.noContent().build();
+        if (authenticatedUser != null && authenticatedUser.getId() != null && authenticatedUser.getId().equals(id)) {
+            return ResponseEntity.status(403).build();
+        }
+        return userRepository.findById(id)
+                .map(user -> {
+                    deleteUserDependencies(user, authenticatedUser);
+                    storageService.deleteQuietly(user.getProfilePhotoPublicId(), user.getProfilePhotoResourceType());
+                    userRepository.delete(user);
+                    return ResponseEntity.noContent().<Void>build();
+                })
+                .orElse(ResponseEntity.notFound().build());
     }
 
-    private AppUser toEntity(AppUserDto dto) {
-        AppUser user = new AppUser();
-        if (dto == null) {
-            return user;
+    private void deleteUserDependencies(AppUser user, AppUser authenticatedUser) {
+        removeUserFromProjectTeams(user);
+        authTokenRepository.deleteByUser(user);
+        passwordResetCodeRepository.deleteByUser(user);
+        presenceRepository.deleteByUser(user);
+        chatGroupReadStateRepository.deleteByUser(user);
+        chatMessageRepository.deleteBySenderOrRecipient(user, user);
+
+        chatGroupRepository.findForUser(user.getId()).stream()
+                .forEach(group -> {
+                    group.getMembers().removeIf(member -> isSameUser(member, user));
+                    chatGroupRepository.save(group);
+                });
+
+        List<ChatGroup> createdGroups = chatGroupRepository.findByCreatedBy(user);
+        if (createdGroups.isEmpty()) {
+            return;
         }
-        user.setFullName(dto.getFullName());
-        user.setUsername(dto.getUsername());
-        user.setJobTitle(dto.getJobTitle());
-        user.setMatricule(dto.getMatricule());
-        user.setEmail(dto.getEmail());
-        user.setPassword(dto.getPassword());
-        user.setPhone(dto.getPhone());
-        user.setChef1(dto.getChef1());
-        user.setChef2(dto.getChef2());
-        user.setRole(dto.getRole());
-        user.setEnabled(dto.isEnabled());
-        return user;
+        createdGroups.forEach(group -> group.setCreatedBy(authenticatedUser));
+        chatGroupRepository.saveAll(createdGroups);
     }
 
-    private AppUserDto toDto(AppUser user) {
-        AppUserDto dto = new AppUserDto();
-        dto.setId(user.getId());
-        dto.setFullName(user.getFullName());
-        dto.setUsername(user.getUsername());
-        dto.setJobTitle(user.getJobTitle());
-        dto.setMatricule(user.getMatricule());
-        dto.setEmail(user.getEmail());
-        dto.setPhone(user.getPhone());
-        dto.setChef1(user.getChef1());
-        dto.setChef2(user.getChef2());
-        dto.setProfilePhotoFileName(user.getProfilePhotoFileName());
-        dto.setProfilePhotoContentType(user.getProfilePhotoContentType());
-        dto.setProfilePhotoFileSize(user.getProfilePhotoFileSize());
-        dto.setProfilePhotoUrl(storageService.publicUrl(user.getProfilePhotoPublicId(), user.getProfilePhotoResourceType(), user.getProfilePhotoUrl()));
-        dto.setRole(user.getRole());
-        dto.setEnabled(user.isEnabled());
-        dto.setCreatedAt(user.getCreatedAt());
-        dto.setUpdatedAt(user.getUpdatedAt());
-        return dto;
+    private void removeUserFromProjectTeams(AppUser user) {
+        Set<String> identities = userIdentities(user);
+        if (identities.isEmpty()) {
+            return;
+        }
+        List<ProjectReference> projectsToUpdate = projectRepository.findAll().stream()
+                .filter(project -> removeUserFromProjectTeam(project, identities))
+                .collect(Collectors.toList());
+        if (!projectsToUpdate.isEmpty()) {
+            projectRepository.saveAll(projectsToUpdate);
+        }
+    }
+
+    private boolean removeUserFromProjectTeam(ProjectReference project, Set<String> userIdentities) {
+        if (project == null || project.getProjectTeam() == null || project.getProjectTeam().trim().isEmpty()) {
+            return false;
+        }
+        List<String> remainingEntries = Arrays.stream(project.getProjectTeam().split("[;\\n]"))
+                .map(String::trim)
+                .filter(entry -> !entry.isEmpty())
+                .flatMap(entry -> entry.contains("::") ? Arrays.stream(new String[]{entry}) : Arrays.stream(entry.split(",")))
+                .map(String::trim)
+                .filter(entry -> !entry.isEmpty())
+                .filter(entry -> !projectTeamEntryMatchesUser(entry, userIdentities))
+                .collect(Collectors.toList());
+        String updatedProjectTeam = String.join("; ", remainingEntries);
+        if (updatedProjectTeam.equals(project.getProjectTeam())) {
+            return false;
+        }
+        project.setProjectTeam(updatedProjectTeam.isEmpty() ? null : updatedProjectTeam);
+        return true;
+    }
+
+    private boolean projectTeamEntryMatchesUser(String entry, Set<String> userIdentities) {
+        String[] parts = entry.split("::", 2);
+        return userIdentities.contains(normalizeIdentity(parts[0]));
+    }
+
+    private Set<String> userIdentities(AppUser user) {
+        return Arrays.asList(user.getFullName(), user.getUsername(), user.getEmail())
+                .stream()
+                .map(this::normalizeIdentity)
+                .filter(value -> !value.isEmpty())
+                .collect(Collectors.toSet());
+    }
+
+    private String normalizeIdentity(String value) {
+        String text = Normalizer.normalize(String.valueOf(value == null ? "" : value), Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "");
+        return text.trim().toLowerCase(Locale.ROOT).replace('_', ' ');
+    }
+
+    private boolean isSameUser(AppUser first, AppUser second) {
+        return first != null && second != null && first.getId() != null && first.getId().equals(second.getId());
     }
 
     private void normalize(AppUser user) {

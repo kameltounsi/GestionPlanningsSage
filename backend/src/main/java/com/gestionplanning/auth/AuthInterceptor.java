@@ -70,7 +70,11 @@ public class AuthInterceptor implements HandlerInterceptor {
 
     private void sendError(HttpServletResponse response, int status) {
         try {
-            response.sendError(status);
+            response.setStatus(status);
+            response.setContentType("text/plain;charset=UTF-8");
+            response.getWriter().write(status == HttpServletResponse.SC_UNAUTHORIZED
+                    ? "Session expiree. Connectez-vous a nouveau."
+                    : "Vous n'avez pas les droits pour effectuer cette action.");
         } catch (Exception ignored) {
             // Best-effort operation: the request will still be rejected.
         }

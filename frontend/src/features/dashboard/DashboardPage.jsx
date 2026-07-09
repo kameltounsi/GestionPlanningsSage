@@ -48,6 +48,19 @@ function userMatchesAssignment(user, assignment) {
     .some((value) => normalizeRoleToken(value).split(/\s+/).includes(token));
 }
 
+function userMatchesIdentity(user, assignment) {
+  const token = normalizeRoleToken(assignment);
+  if (!token || !user) return false;
+  const exactMatch = [user.fullName, user.username, user.email]
+    .filter(Boolean)
+    .some((value) => normalizeRoleToken(value) === token);
+  if (exactMatch) return true;
+  if (token.length < 3) return false;
+  return [user.fullName, user.username, String(user.email || "").split("@")[0]]
+    .filter(Boolean)
+    .some((value) => normalizeRoleToken(value).split(/\s+/).includes(token));
+}
+
 function parseProjectTeamEntries(projectTeam) {
   return String(projectTeam || "")
     .split(/[;\n]+/)
@@ -81,21 +94,35 @@ function canCreateRequest(user, projects = []) {
   return isAdminUser(user) || isProjectLeadForAnyProject(user, projects);
 }
 
-function isRequestPilot(user, request) {
-  return userMatchesAssignment(user, request?.pilot);
+function userMatchesProjectRoleAssignment(user, request, assignment, projects = []) {
+  const token = normalizeRoleToken(assignment).replaceAll("_", " ");
+  if (!token || !user || !request) return false;
+  const project = projects.find((item) => item.name === request.modificationProject);
+  return parseProjectTeamEntries(project?.projectTeam).some((entry) =>
+    userMatchesIdentity(user, entry.name)
+    && entry.roles.some((role) => normalizeRoleToken(role).replaceAll("_", " ") === token)
+  );
 }
 
-function isActionParticipantForUser(user, action) {
-  if (isAdminUser(user)) return true;
-  return userMatchesAssignment(user, action?.responsible)
-    || userMatchesAssignment(user, action?.validator)
-    || userMatchesAssignment(user, action?.validatorRole)
-    || userMatchesAssignment(user, action?.validatorDisplayName);
+function userMatchesRequestAssignment(user, request, assignment, projects = []) {
+  return userMatchesIdentity(user, assignment) || userMatchesProjectRoleAssignment(user, request, assignment, projects);
 }
 
-function isRequestParticipantForUser(user, request, actions = []) {
+function isRequestPilot(user, request, projects = []) {
+  return userMatchesRequestAssignment(user, request, request?.pilot, projects);
+}
+
+function isActionParticipantForUser(user, action, request, projects = []) {
   if (isAdminUser(user)) return true;
-  return isRequestPilot(user, request) || actions.some((action) => isActionParticipantForUser(user, action));
+  return userMatchesRequestAssignment(user, request, action?.responsible, projects)
+    || userMatchesRequestAssignment(user, request, action?.validator, projects)
+    || userMatchesRequestAssignment(user, request, action?.validatorRole, projects)
+    || userMatchesRequestAssignment(user, request, action?.validatorDisplayName, projects);
+}
+
+function isRequestParticipantForUser(user, request, actions = [], projects = []) {
+  if (isAdminUser(user)) return true;
+  return isRequestPilot(user, request, projects) || actions.some((action) => isActionParticipantForUser(user, action, request, projects));
 }
 
 function isActionDone(action) {
@@ -263,7 +290,7 @@ export function DashboardPage({
   const dashboardRequests = adminView
     ? dashboardCandidateRequests
     : dashboardCandidateRequests.filter((request) => !Object.hasOwn(dashboardActionsByRequestId, request.id)
-      || isRequestParticipantForUser(currentUser, request, dashboardActionsByRequestId[request.id] || []));
+      || isRequestParticipantForUser(currentUser, request, dashboardActionsByRequestId[request.id] || [], projects));
   const activeRequests = dashboardRequests.filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED");
   const closedRequests = dashboardRequests.filter((request) => request.currentStage === "CLOSED");
   const cancelledRequests = dashboardRequests.filter((request) => request.currentStage === "CANCELLED");
@@ -323,7 +350,7 @@ export function DashboardPage({
     request.currentStage !== "CLOSED" &&
     request.currentStage !== "CANCELLED" &&
     !isActionDone(action) &&
-    (adminView || isActionParticipantForUser(currentUser, action))
+    (adminView || isActionParticipantForUser(currentUser, action, request, projects))
   ));
   const lateActionRows = openActionRows
     .filter(({ action }) => isDashboardActionLate(action, today))

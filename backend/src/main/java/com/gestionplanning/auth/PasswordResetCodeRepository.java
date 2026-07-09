@@ -9,5 +9,7 @@ import java.util.Optional;
 public interface PasswordResetCodeRepository extends JpaRepository<PasswordResetCode, Long> {
     Optional<PasswordResetCode> findFirstByUserAndUsedFalseOrderByCreatedAtDescIdDesc(AppUser user);
 
+    void deleteByUser(AppUser user);
+
     void deleteByExpiresAtBefore(LocalDateTime dateTime);
 }

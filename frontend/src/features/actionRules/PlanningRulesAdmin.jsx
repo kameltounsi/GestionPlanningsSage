@@ -214,24 +214,37 @@ function sortActionRules(first, second) {
   return String(first.actionTitle || "").localeCompare(String(second.actionTitle || ""));
 }
 
-function previousDependencyOptions(rules, form) {
-  const candidates = rules
+function dependencyOptionsForPhase(rules, form) {
+  return rules
     .filter((rule) => rule.stage === form.stage)
     .filter((rule) => rule.actionTitle !== form.actionTitle)
     .filter((rule) => (
       (form.appliesToModification && rule.appliesToModification) ||
       (form.appliesToNewProject && rule.appliesToNewProject)
     ))
+    .filter((rule) => !ruleDependencyCreatesCycle(rules, form, rule))
     .sort(sortActionRules);
+}
 
-  const currentNumber = actionSequenceNumber(form.actionTitle);
-  if (currentNumber !== null) {
-    return candidates.filter((rule) => {
-      const ruleNumber = actionSequenceNumber(rule.actionTitle);
-      return ruleNumber === null || ruleNumber < currentNumber;
-    });
+function ruleDependencyCreatesCycle(rules, form, candidate) {
+  const currentTitle = String(form.actionTitle || "").trim();
+  if (!currentTitle) return false;
+  const rulesByTitle = new Map(
+    rules
+      .filter((rule) => rule.stage === form.stage)
+      .map((rule) => [String(rule.actionTitle || "").trim().toLocaleLowerCase(), rule])
+  );
+  const visited = new Set();
+  let current = candidate;
+  while (current) {
+    const title = String(current.actionTitle || "").trim().toLocaleLowerCase();
+    if (!title || visited.has(title)) return false;
+    if (title === currentTitle.toLocaleLowerCase()) return true;
+    visited.add(title);
+    const dependencyTitle = String(current.dependencyActionTitle || "").trim().toLocaleLowerCase();
+    current = dependencyTitle ? rulesByTitle.get(dependencyTitle) : null;
   }
-  return candidates;
+  return false;
 }
 
 function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNewProject, onClose, onDeleteProofDocument, onDeleteProofDocumentItem, onSubmit, setForm }) {
@@ -242,7 +255,7 @@ function ActionRuleDialog({ actionRoleOptions = [], form, rules, saving, stageNe
       (form.appliesToNewProject && rule.appliesToNewProject)
     ))
     .sort(sortActionRules);
-  const dependencyOptions = previousDependencyOptions(rules, form);
+  const dependencyOptions = dependencyOptionsForPhase(rules, form);
   const selectedProofDocumentFiles = filesFromValue(form.proofDocumentFile);
   const savedProofDocuments = planningRuleProofDocuments(form);
   const hasProofDocumentLink = Boolean(String(form.proofDocumentLinkUrl || "").trim());

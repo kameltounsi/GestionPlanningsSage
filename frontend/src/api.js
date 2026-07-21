@@ -26,27 +26,43 @@ export function clearSession() {
   localStorage.removeItem(SESSION_KEY);
 }
 
-function authHeaders() {
-  const session = getStoredSession();
-  return session?.token ? { Authorization: `Bearer ${session.token}` } : {};
+function authContext() {
+  const token = getStoredSession()?.token || "";
+  return {
+    token,
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
+  };
+}
+
+function clearSessionForToken(token) {
+  if (token && getStoredSession()?.token === token) {
+    clearSession();
+  }
+}
+
+async function responseError(response) {
+  const error = new Error(await errorMessage(response));
+  error.status = response.status;
+  return error;
 }
 
 async function request(path, options = {}) {
   const { clearSessionOnUnauthorized = false, ...fetchOptions } = options;
   const { headers, ...requestOptions } = fetchOptions;
+  const auth = authContext();
   const response = await fetch(`${API_BASE}${path}`, {
     ...requestOptions,
     headers: {
       "Content-Type": "application/json",
-      ...authHeaders(),
+      ...auth.headers,
       ...(headers || {})
     }
   });
   if (!response.ok) {
     if (response.status === 401 && (clearSessionOnUnauthorized || path !== "/auth/login")) {
-      clearSession();
+      clearSessionForToken(auth.token);
     }
-    throw new Error(await errorMessage(response));
+    throw await responseError(response);
   }
   if (response.status === 204) {
     return null;
@@ -55,33 +71,35 @@ async function request(path, options = {}) {
 }
 
 async function multipartRequest(path, formData) {
+  const auth = authContext();
   const response = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: {
-      ...authHeaders()
+      ...auth.headers
     },
     body: formData
   });
   if (!response.ok) {
     if (response.status === 401) {
-      clearSession();
+      clearSessionForToken(auth.token);
     }
-    throw new Error(await errorMessage(response));
+    throw await responseError(response);
   }
   return response.json();
 }
 
 async function downloadRequest(path) {
+  const auth = authContext();
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
-      ...authHeaders()
+      ...auth.headers
     }
   });
   if (!response.ok) {
     if (response.status === 401) {
-      clearSession();
+      clearSessionForToken(auth.token);
     }
-    throw new Error(await errorMessage(response));
+    throw await responseError(response);
   }
   const disposition = response.headers.get("Content-Disposition") || "";
   const fileNameMatch = disposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i);

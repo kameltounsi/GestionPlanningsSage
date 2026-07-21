@@ -296,6 +296,7 @@ public class WeeklyModificationProgressMailService {
 
     private boolean isActiveModification(EcrRequest request) {
         return request != null
+                && !request.isArchived()
                 && !request.isClosureStatus()
                 && !request.isCancelledStatus()
                 && request.getCurrentStage() != EcrStage.CLOSED

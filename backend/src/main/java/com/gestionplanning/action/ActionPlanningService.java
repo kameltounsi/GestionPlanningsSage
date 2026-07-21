@@ -102,9 +102,12 @@ public class ActionPlanningService {
         if (stageActions.isEmpty()) {
             return nextPhaseStart;
         }
-        LocalDate actionStart = nextPhaseStart;
+        Map<Long, EcrAction> stageActionsById = stageActions.stream()
+                .filter(action -> action.getId() != null)
+                .collect(Collectors.toMap(EcrAction::getId, Function.identity(), (first, second) -> first));
+        Set<Long> plannedActionIds = new HashSet<>();
         for (EcrAction action : stageActions) {
-            actionStart = recalculateAction(request, rules, actionStart, action);
+            recalculateAction(request, rules, nextPhaseStart, action, stageActionsById, plannedActionIds, new HashSet<>());
         }
         return stageActions.stream()
                 .map(EcrAction::getEndDate)
@@ -114,14 +117,36 @@ public class ActionPlanningService {
                 .orElse(nextPhaseStart);
     }
 
-    private LocalDate recalculateAction(EcrRequest request, Map<String, ActionPlanningRule> rules, LocalDate actionStart, EcrAction action) {
+    private void recalculateAction(EcrRequest request, Map<String, ActionPlanningRule> rules, LocalDate phaseStart,
+                                   EcrAction action, Map<Long, EcrAction> stageActionsById,
+                                   Set<Long> plannedActionIds, Set<Long> visitingActionIds) {
         if (action == null) {
-            return actionStart;
+            return;
+        }
+        Long actionId = action.getId();
+        if (actionId != null && plannedActionIds.contains(actionId)) {
+            return;
+        }
+
+        LocalDate actionStart = phaseStart;
+        Long dependencyId = action.getDependsOnActionId();
+        EcrAction dependency = dependencyId == null ? null : stageActionsById.get(dependencyId);
+        if (dependency != null && !Objects.equals(actionId, dependencyId)) {
+            boolean cycle = !visitingActionIds.add(dependencyId);
+            if (!cycle) {
+                recalculateAction(request, rules, phaseStart, dependency, stageActionsById, plannedActionIds, visitingActionIds);
+                if (dependency.getEndDate() != null) {
+                    actionStart = dependency.getEndDate().plusDays(1);
+                }
+                visitingActionIds.remove(dependencyId);
+            }
         }
         resolveOpenActionAssignees(request, action);
         action.setWorkDurationDays(durationFor(action, rules.get(actionKey(action))));
         shiftActionTo(action, actionStart);
-        return action.getEndDate() == null ? actionStart : action.getEndDate().plusDays(1);
+        if (actionId != null) {
+            plannedActionIds.add(actionId);
+        }
     }
 
     private void resolveOpenActionAssignees(EcrRequest request, EcrAction action) {

@@ -5432,6 +5432,56 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   white-space: nowrap;
 }
 
+.meta-reference-summary {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.meta-reference-summary strong {
+  flex: 1;
+}
+
+.meta-reference-expand {
+  flex: 0 0 auto;
+  height: 26px;
+  min-height: 26px;
+  width: 26px;
+}
+
+.reference-list-dialog {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 28px 70px rgba(15, 23, 42, .25);
+  display: grid;
+  gap: 14px;
+  max-height: min(82vh, 720px);
+  overflow: hidden;
+  padding: 18px;
+  width: min(92vw, 680px);
+}
+
+.reference-dialog-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  overflow-y: auto;
+  padding: 0 4px 0 32px;
+}
+
+.reference-dialog-list li {
+  background: #f7f9fb;
+  border: 1px solid #e2e8ef;
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 760;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+}
+
 .meta-grid .meta-grid-type ul {
   color: var(--ink);
   font-size: 12px;
@@ -6132,6 +6182,67 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   min-height: 40px;
 }
 
+.action-create-dialog {
+  max-width: 1120px;
+  width: min(100%, 1120px);
+}
+
+.action-create-form {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.action-create-form .proof-document-picker-field {
+  align-items: center;
+  grid-column: span 3;
+  grid-template-columns: minmax(190px, 0.8fr) minmax(0, 2fr);
+}
+
+.action-create-form .proof-document-picker {
+  margin: 0;
+}
+
+.action-create-form .proof-document-link-inputs {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.action-create-form .selected-file-list {
+  grid-column: 1 / -1;
+}
+
+.action-create-form .asset-required-field {
+  align-self: stretch;
+  justify-content: center;
+  min-height: 58px;
+}
+
+@media (max-width: 900px) {
+  .action-create-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .action-create-form .planning-action-title-field,
+  .action-create-form .proof-document-picker-field {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 620px) {
+  .action-create-form,
+  .action-create-form .proof-document-picker-field,
+  .action-create-form .proof-document-link-inputs {
+    grid-template-columns: 1fr;
+  }
+
+  .action-create-form .planning-action-title-field,
+  .action-create-form .proof-document-picker-field,
+  .action-create-form .asset-required-field {
+    grid-column: 1;
+  }
+}
+
 .selected-file-list {
   display: grid;
   gap: 6px;
@@ -6286,19 +6397,25 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 .actions-dialog .action-row {
   align-items: center;
   box-sizing: border-box;
+  flex: 0 0 auto;
   gap: 7px;
   grid-template-columns: 22px minmax(210px, 300px) minmax(0, 1fr);
-  min-height: 0;
-  overflow: hidden;
+  min-height: max-content;
+  overflow: visible;
   padding: 7px 9px;
 }
 
 .actions-dialog .action-list.expanded {
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
   max-height: none;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding-right: 5px;
+  scrollbar-gutter: stable;
 }
 
 .actions-dialog .action-check {

@@ -59,14 +59,14 @@ public class ActionDeadlineAlertService {
 
     private void generateDueAlertsInternal() {
         LocalDate today = LocalDate.now(ZoneId.systemDefault());
-        List<EcrAction> actions = actionRepository.findByEndDateBetweenAndStatusNotInOrderByEndDateAscIdAsc(today.minusDays(2), today.plusDays(2), DONE_STATUSES);
+        List<EcrAction> actions = actionRepository.findByRequest_ArchivedFalseAndEndDateBetweenAndStatusNotInOrderByEndDateAscIdAsc(today.minusDays(2), today.plusDays(2), DONE_STATUSES);
         for (EcrAction action : actions) {
             generateDueAlertFor(action, today);
         }
     }
 
     private void generateDueAlertFor(EcrAction action, LocalDate today) {
-        if (isDone(action) || action.getEndDate() == null || action.getRequest() == null) {
+        if (isDone(action) || action.getEndDate() == null || isArchived(action)) {
             return;
         }
         ActionDeadlineAlertType alertType = alertTypeFor(today, action.getEndDate());
@@ -91,7 +91,7 @@ public class ActionDeadlineAlertService {
         List<ActionDeadlineAlert> alerts = alertRepository.findByRecipientEmailAndSoundAcknowledgedAtIsNullOrderByCreatedAtAscIdAsc(normalizeEmail(user.getEmail()));
         List<ActionDeadlineAlert> activeAlerts = new ArrayList<>();
         for (ActionDeadlineAlert alert : alerts) {
-            if (alert.getAction() != null && !isDone(alert.getAction())) {
+            if (alert.getAction() != null && !isDone(alert.getAction()) && !isArchived(alert.getAction())) {
                 activeAlerts.add(alert);
             } else {
                 alert.setSoundAcknowledgedAt(now);
@@ -133,7 +133,7 @@ public class ActionDeadlineAlertService {
     }
 
     private void sendMailIfNeeded(ActionDeadlineAlert alert, AppUser recipient) {
-        if (alert.getMailSentAt() != null || alert.getAction() == null || alert.getAction().getRequest() == null || recipient == null) {
+        if (alert.getMailSentAt() != null || isArchived(alert.getAction()) || recipient == null) {
             return;
         }
         LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
@@ -217,6 +217,10 @@ public class ActionDeadlineAlertService {
 
     private boolean isDone(EcrAction action) {
         return action.isChecked() || action.getStatus() == ActionStatus.DONE || action.getStatus() == ActionStatus.DONE_LATE;
+    }
+
+    private boolean isArchived(EcrAction action) {
+        return action == null || action.getRequest() == null || action.getRequest().isArchived();
     }
 
     private boolean isEscalationAlert(ActionDeadlineAlertType type) {

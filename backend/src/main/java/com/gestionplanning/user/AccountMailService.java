@@ -110,11 +110,11 @@ public class AccountMailService {
     }
 
     public void sendPhaseReadyEmail(EcrRequest request, EcrStage stage, Collection<AppUser> recipients) {
+        if (request == null || request.isArchived()) {
+            return;
+        }
         if (!alertMailEnabled) {
             throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
-        }
-        if (request == null) {
-            return;
         }
         if (recipients == null || recipients.isEmpty()) {
             throw new MailDeliveryException("Aucun validateur/manager destinataire pour l'email de validation.");
@@ -151,11 +151,11 @@ public class AccountMailService {
     }
 
     public void sendActionValidationEmail(EcrRequest request, EcrStage stage, EcrAction action, AppUser recipient) {
+        if (request == null || request.isArchived() || action == null) {
+            return;
+        }
         if (!alertMailEnabled) {
             throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
-        }
-        if (request == null || action == null) {
-            return;
         }
         if (recipient == null || isBlank(recipient.getEmail())) {
             throw new MailDeliveryException("Le destinataire de validation n'a pas d'adresse email renseignée.");
@@ -185,11 +185,11 @@ public class AccountMailService {
     }
 
     public void sendActionRejectedEmail(EcrRequest request, EcrStage stage, EcrAction action, AppUser recipient, String reason) {
+        if (request == null || request.isArchived() || action == null) {
+            return;
+        }
         if (!alertMailEnabled) {
             throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
-        }
-        if (request == null || action == null) {
-            return;
         }
         if (recipient == null || isBlank(recipient.getEmail())) {
             throw new MailDeliveryException("Le destinataire du refus d'action n'a pas d'adresse email renseignée.");
@@ -233,11 +233,11 @@ public class AccountMailService {
     }
 
     public void sendActionDeadlineEmail(EcrRequest request, EcrAction action, AppUser recipient, Collection<AppUser> ccRecipients, String timingLabel, String timingMessage, boolean escalation) {
+        if (request == null || request.isArchived() || action == null) {
+            return;
+        }
         if (!alertMailEnabled) {
             throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
-        }
-        if (request == null || action == null) {
-            return;
         }
         if (recipient == null || isBlank(recipient.getEmail())) {
             throw new MailDeliveryException("Le pilote destinataire n'a pas d'adresse email renseignée.");
@@ -276,11 +276,11 @@ public class AccountMailService {
     }
 
     public void sendPhaseRejectedEmail(EcrRequest request, EcrStage stage, AppUser recipient, String reason, String actionsToRevisit) {
+        if (request == null || request.isArchived()) {
+            return;
+        }
         if (!alertMailEnabled) {
             throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
-        }
-        if (request == null) {
-            return;
         }
         if (recipient == null || isBlank(recipient.getEmail())) {
             throw new MailDeliveryException("Le chef de projet destinataire n'a pas d'adresse email renseignée.");
@@ -310,11 +310,11 @@ public class AccountMailService {
     }
 
     public void sendModificationCompletedEmail(EcrRequest request, Collection<AppUser> recipients) {
+        if (request == null || request.isArchived()) {
+            return;
+        }
         if (!alertMailEnabled) {
             throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
-        }
-        if (request == null) {
-            return;
         }
         if (recipients == null || recipients.isEmpty()) {
             throw new MailDeliveryException("Aucun pilote/admin destinataire pour l'email de clôture.");
@@ -355,11 +355,11 @@ public class AccountMailService {
     }
 
     public void sendModificationClosureRequestedEmail(EcrRequest request, AppUser requester, Collection<AppUser> recipients) {
+        if (request == null || request.isArchived()) {
+            return;
+        }
         if (!alertMailEnabled) {
             throw new MailDeliveryException("L'envoi des alertes email est désactivé par APP_ALERT_MAIL_ENABLED.");
-        }
-        if (request == null) {
-            return;
         }
         if (recipients == null || recipients.isEmpty()) {
             throw new MailDeliveryException("Aucun admin destinataire pour l'email de demande de clôture.");
@@ -435,11 +435,11 @@ public class AccountMailService {
     }
 
     public void sendModificationProgressExcelEmail(EcrRequest request, Collection<AppUser> recipients, byte[] excelContent, String filename) {
+        if (request == null || request.isArchived()) {
+            return;
+        }
         if (!alertMailEnabled) {
             throw new MailDeliveryException("L'envoi des alertes email est desactive par APP_ALERT_MAIL_ENABLED.");
-        }
-        if (request == null) {
-            return;
         }
         if (recipients == null || recipients.isEmpty()) {
             throw new MailDeliveryException("Aucun admin/chef de projet destinataire pour le dossier Excel.");

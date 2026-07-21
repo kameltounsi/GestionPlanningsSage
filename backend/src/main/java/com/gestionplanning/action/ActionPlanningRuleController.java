@@ -49,14 +49,20 @@ public class ActionPlanningRuleController {
 
     @PostMapping
     public ResponseEntity<ActionPlanningRuleDto> create(@Valid @RequestBody ActionPlanningRuleDto ruleDto) {
-        ActionPlanningRule rule = ruleMapper.toEntity(ruleDto);
-        ActionPlanningRule savedRule = ruleRepository.save(normalize(rule));
+        ActionPlanningRule rule = normalize(ruleMapper.toEntity(ruleDto));
+        if (!hasValidDependencyGraph(rule, null)) {
+            return ResponseEntity.unprocessableEntity().build();
+        }
+        ActionPlanningRule savedRule = ruleRepository.save(rule);
         return ResponseEntity.created(URI.create("/api/action-planning-rules/" + savedRule.getId())).body(ruleMapper.toDto(savedRule));
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<ActionPlanningRuleDto> update(@PathVariable Long id, @Valid @RequestBody ActionPlanningRuleDto updatedRuleDto) {
-        ActionPlanningRule updatedRule = ruleMapper.toEntity(updatedRuleDto);
+        ActionPlanningRule updatedRule = normalize(ruleMapper.toEntity(updatedRuleDto));
+        if (!hasValidDependencyGraph(updatedRule, id)) {
+            return ResponseEntity.unprocessableEntity().build();
+        }
         return ruleRepository.findById(id)
                 .map(rule -> {
                     rule.setStage(updatedRule.getStage());
@@ -263,6 +269,42 @@ public class ActionPlanningRuleController {
             rule.setAppliesToModification(true);
         }
         return rule;
+    }
+
+    private boolean hasValidDependencyGraph(ActionPlanningRule candidate, Long candidateId) {
+        String candidateTitle = normalizedTitle(candidate.getActionTitle());
+        String dependencyTitle = normalizedTitle(candidate.getDependencyActionTitle());
+        if (dependencyTitle == null) {
+            return true;
+        }
+        if (candidateTitle == null || candidateTitle.equals(dependencyTitle)) {
+            return false;
+        }
+        java.util.Map<String, ActionPlanningRule> rulesByTitle = ruleRepository.findAll().stream()
+                .filter(rule -> rule.getStage() == candidate.getStage())
+                .filter(rule -> candidateId == null || !candidateId.equals(rule.getId()))
+                .filter(rule -> normalizedTitle(rule.getActionTitle()) != null)
+                .collect(Collectors.toMap(
+                        rule -> normalizedTitle(rule.getActionTitle()),
+                        rule -> rule,
+                        (first, second) -> first
+                ));
+        rulesByTitle.put(candidateTitle, candidate);
+        java.util.Set<String> visited = new java.util.HashSet<>();
+        String currentTitle = dependencyTitle;
+        while (currentTitle != null && visited.add(currentTitle)) {
+            if (candidateTitle.equals(currentTitle)) {
+                return false;
+            }
+            ActionPlanningRule current = rulesByTitle.get(currentTitle);
+            currentTitle = current == null ? null : normalizedTitle(current.getDependencyActionTitle());
+        }
+        return true;
+    }
+
+    private String normalizedTitle(String value) {
+        String title = normalizeText(value);
+        return title == null ? null : title.toLowerCase(java.util.Locale.ROOT);
     }
 
     private List<CloudAssetReference> cloudAssetsForRule(ActionPlanningRule rule) {

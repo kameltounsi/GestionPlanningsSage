@@ -1264,6 +1264,7 @@ function ModificationsPage(props) {
   const [listOpen, setListOpen] = useState(false);
   const [userSidebarOpen, setUserSidebarOpen] = useState(true);
   const [previewImage, setPreviewImage] = useState(null);
+  const [referenceDialog, setReferenceDialog] = useState(null);
   const [dossierDialogOpen, setDossierDialogOpen] = useState(false);
   const [detailsCollapsed, setDetailsCollapsed] = useState(false);
   const {
@@ -1602,8 +1603,42 @@ function ModificationsPage(props) {
                 <div className="meta-grid">
                   <div><ClipboardList size={16} /><span>Projet</span><strong>{selectedRequest.modificationProject || "À définir"}</strong></div>
                   <div><ClipboardList size={16} /><span>Client</span><strong>{selectedRequest.client || "-"}</strong></div>
-                  <div><ClipboardList size={16} /><span>Produit</span><strong>{selectedRequest.product || "-"}</strong></div>
-                  <div><ClipboardList size={16} /><span>Produits finis</span><strong>{selectedRequest.finishedProducts || "-"}</strong></div>
+                  <div>
+                    <ClipboardList size={16} />
+                    <span>Produit</span>
+                    <span className="meta-reference-summary">
+                      <strong>{parseSelectedProducts(selectedRequest.product)[0] || "-"}</strong>
+                      {parseSelectedProducts(selectedRequest.product).length > 1 && (
+                        <button
+                          className="ghost-icon meta-reference-expand"
+                          type="button"
+                          onClick={() => setReferenceDialog({ title: "Produits", items: parseSelectedProducts(selectedRequest.product) })}
+                          title="Afficher tous les produits"
+                          aria-label="Afficher tous les produits"
+                        >
+                          <Maximize2 size={14} />
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                  <div>
+                    <ClipboardList size={16} />
+                    <span>Produits finis</span>
+                    <span className="meta-reference-summary">
+                      <strong>{parseSelectedProducts(selectedRequest.finishedProducts)[0] || "-"}</strong>
+                      {parseSelectedProducts(selectedRequest.finishedProducts).length > 1 && (
+                        <button
+                          className="ghost-icon meta-reference-expand"
+                          type="button"
+                          onClick={() => setReferenceDialog({ title: "Produits finis", items: parseSelectedProducts(selectedRequest.finishedProducts) })}
+                          title="Afficher tous les produits finis"
+                          aria-label="Afficher tous les produits finis"
+                        >
+                          <Maximize2 size={14} />
+                        </button>
+                      )}
+                    </span>
+                  </div>
                   <div><Gauge size={16} /><span>Pilote</span><strong>{selectedRequest.pilot || "À définir"}</strong></div>
                   <div><CalendarDays size={16} /><span>Réception</span><strong>{selectedRequest.receptionDate || "-"}</strong></div>
                   <div><CalendarDays size={16} /><span>SOP</span><strong>{selectedRequest.sopDate || "-"}</strong></div>
@@ -1851,6 +1886,31 @@ function ModificationsPage(props) {
             <div className="image-preview-frame">
               <img alt={previewImage.title} src={previewImage.url} />
             </div>
+          </section>
+        </div>
+      )}
+      {referenceDialog && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={() => setReferenceDialog(null)}>
+          <section
+            aria-labelledby="reference-list-dialog-title"
+            aria-modal="true"
+            className="reference-list-dialog"
+            role="dialog"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="actions-dialog-header">
+              <div>
+                <p className="eyebrow">Liste complète</p>
+                <h2 id="reference-list-dialog-title">{referenceDialog.title}</h2>
+                <span>{referenceDialog.items.length} élément{referenceDialog.items.length > 1 ? "s" : ""}</span>
+              </div>
+              <button className="ghost-icon" type="button" onClick={() => setReferenceDialog(null)} title="Fermer">
+                <X size={18} />
+              </button>
+            </header>
+            <ol className="reference-dialog-list">
+              {referenceDialog.items.map((item) => <li key={item}>{item}</li>)}
+            </ol>
           </section>
         </div>
       )}
@@ -2557,8 +2617,7 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
   const hasProofDocumentLink = Boolean(String(actionForm.proofDocumentLinkUrl || "").trim());
   const dependencyOptions = actions
     .filter((action) => action.stage === selectedActionStage)
-    .filter((action) => action.id)
-    .sort(compareActionDisplayOrder);
+    .filter((action) => action.id);
 
   function addProofDocumentFiles(event) {
     const selectedFiles = Array.from(event.currentTarget.files || []);
@@ -2573,7 +2632,7 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
       <form
         aria-labelledby="create-action-title"
         aria-modal="true"
-        className="dialog-card action-rule-dialog panel form-page"
+        className="dialog-card action-rule-dialog action-create-dialog panel form-page"
         noValidate
         onSubmit={onSubmit}
         role="dialog"
@@ -2587,7 +2646,7 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
             <X size={18} />
           </button>
         </div>
-        <div className="planning-rule-form dialog-rule-form">
+        <div className="planning-rule-form dialog-rule-form action-create-form">
           <label>
             <span>Phase</span>
             <select value={selectedActionStage} onChange={(event) => updateActionForm("stage", event.target.value)}>
@@ -2624,8 +2683,8 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
             <span>Bloquee par</span>
             <select value={actionForm.dependsOnActionId || ""} onChange={(event) => updateActionForm("dependsOnActionId", event.target.value)}>
               <option value="">Aucune action</option>
-              {dependencyOptions.map((action, index) => (
-                <option key={action.id} value={action.id}>Action {index + 1} - {action.title}</option>
+              {dependencyOptions.map((action) => (
+                <option key={action.id} value={action.id}>{action.title}</option>
               ))}
             </select>
           </label>
@@ -2666,20 +2725,6 @@ function ActionCreateDialog({ actionForm, actionRoleOptions, actions = [], isCri
                 onChange={(event) => updateActionForm("proofDocumentLinkUrl", event.target.value)}
               />
             </div>
-          </div>
-          <div className="asset-link-inputs action-evidence-link-inputs">
-            <input
-              aria-label="Nom du lien asset"
-              placeholder="Nom du lien asset"
-              value={actionForm.evidenceLinkName || ""}
-              onChange={(event) => updateActionForm("evidenceLinkName", event.target.value)}
-            />
-            <input
-              aria-label="Lien asset partage"
-              placeholder="Lien asset partagé"
-              value={actionForm.evidenceLinkUrl || ""}
-              onChange={(event) => updateActionForm("evidenceLinkUrl", event.target.value)}
-            />
           </div>
           <label className="asset-required-field user-enabled-field">
             <input

@@ -39,6 +39,8 @@ public interface EcrActionRepository extends JpaRepository<EcrAction, Long> {
 
     List<EcrAction> findByEndDateBetweenAndStatusNotInOrderByEndDateAscIdAsc(LocalDate startDate, LocalDate endDate, List<ActionStatus> statuses);
 
+    List<EcrAction> findByRequest_ArchivedFalseAndEndDateBetweenAndStatusNotInOrderByEndDateAscIdAsc(LocalDate startDate, LocalDate endDate, List<ActionStatus> statuses);
+
     List<EcrAction> findByDependsOnActionId(Long actionId);
 
     List<EcrAction> findByDependsOnActionIdIn(Collection<Long> actionIds);

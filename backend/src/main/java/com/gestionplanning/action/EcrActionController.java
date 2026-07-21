@@ -188,7 +188,7 @@ public class EcrActionController {
                     action.setRequest(request);
                     action.setStage(actionStage);
                     action.setDurationOverridden(true);
-                    if (!isValidPreviousDependency(action, action.getDependsOnActionId(), actionStage)) {
+                    if (!isValidDependency(action, action.getDependsOnActionId(), actionStage)) {
                         return ResponseEntity.status(422).<EcrActionDto>build();
                     }
                     if (isDone(action) && !isDependencyCompleted(action)) {
@@ -273,7 +273,7 @@ public class EcrActionController {
                     action.setWorkDurationDays(updatedAction.getWorkDurationDays());
                     action.setDurationOverridden(action.isDurationOverridden() || !Objects.equals(defaultDuration(previousDuration), defaultDuration(updatedAction.getWorkDurationDays())));
                     EcrStage updatedStage = updatedAction.getStage() == null ? action.getStage() : updatedAction.getStage();
-                    if (!isValidPreviousDependency(action, updatedAction.getDependsOnActionId(), updatedStage)) {
+                    if (!isValidDependency(action, updatedAction.getDependsOnActionId(), updatedStage)) {
                         return ResponseEntity.status(422).<EcrActionDto>build();
                     }
                     action.setDependsOnActionId(updatedAction.getDependsOnActionId());
@@ -930,7 +930,7 @@ public class EcrActionController {
         return !isDone(currentAction) && isDone(updatedAction);
     }
 
-    private boolean isValidPreviousDependency(EcrAction action, Long dependencyId, EcrStage proposedStage) {
+    private boolean isValidDependency(EcrAction action, Long dependencyId, EcrStage proposedStage) {
         if (dependencyId == null) {
             return true;
         }
@@ -944,48 +944,24 @@ public class EcrActionController {
                 .filter(dependency -> dependency.getRequest() != null)
                 .filter(dependency -> Objects.equals(dependency.getRequest().getId(), action.getRequest().getId()))
                 .filter(dependency -> dependency.getStage() == proposedStage)
-                .map(dependency -> isDependencyBeforeAction(dependency, action))
+                .map(dependency -> !createsDependencyCycle(action.getId(), dependency))
                 .orElse(false);
     }
 
-    private boolean isDependencyBeforeAction(EcrAction dependency, EcrAction action) {
-        if (dependency == null) {
+    private boolean createsDependencyCycle(Long actionId, EcrAction dependency) {
+        if (actionId == null) {
             return false;
         }
-        if (action.getId() == null) {
-            return true;
-        }
-        LocalDate dependencyOrderDate = actionOrderDate(dependency);
-        LocalDate actionOrderDate = actionOrderDate(action);
-        if (dependencyOrderDate != null && actionOrderDate != null) {
-            int dateComparison = dependencyOrderDate.compareTo(actionOrderDate);
-            if (dateComparison != 0) {
-                return dateComparison < 0;
+        java.util.Set<Long> visited = new java.util.HashSet<>();
+        EcrAction current = dependency;
+        while (current != null && current.getId() != null && visited.add(current.getId())) {
+            if (Objects.equals(current.getId(), actionId)) {
+                return true;
             }
+            Long nextDependencyId = current.getDependsOnActionId();
+            current = nextDependencyId == null ? null : actionRepository.findById(nextDependencyId).orElse(null);
         }
-        if (dependency.getCreatedAt() != null && action.getCreatedAt() != null) {
-            int dateComparison = dependency.getCreatedAt().compareTo(action.getCreatedAt());
-            if (dateComparison != 0) {
-                return dateComparison < 0;
-            }
-        }
-        if (dependency.getId() == null || action.getId() == null) {
-            return false;
-        }
-        return dependency.getId() < action.getId();
-    }
-
-    private LocalDate actionOrderDate(EcrAction action) {
-        if (action == null) {
-            return null;
-        }
-        if (action.getStartDate() != null) {
-            return action.getStartDate();
-        }
-        if (action.getEndDate() != null) {
-            return action.getEndDate();
-        }
-        return action.getDeadline();
+        return false;
     }
 
     private boolean isActionStartBeforeNextPhase(com.gestionplanning.ecr.EcrRequest request, EcrAction action, Long excludedActionId) {

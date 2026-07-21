@@ -3416,11 +3416,16 @@ function AppRoot() {
     }
     setLoading(true);
     loadInitialData()
-      .catch(() => {
-        clearSession();
-        setAuthSession(null);
-        setCurrentUser(null);
-        setError("Session expirée ou API indisponible. Connectez-vous à nouveau.");
+      .then(() => setError(""))
+      .catch((exception) => {
+        if (Number(exception?.status) === 401) {
+          clearSession();
+          setAuthSession(null);
+          setCurrentUser(null);
+          setError("Session expirée. Connectez-vous à nouveau.");
+          return;
+        }
+        setError("Chargement des données impossible. Vérifiez la connexion à l'API puis réessayez.");
       })
       .finally(() => setLoading(false));
   }, [authSession?.token]);
@@ -3451,7 +3456,7 @@ function AppRoot() {
       })
       .catch((exception) => {
         if (requestSequence !== selectedDetailsRequestId.current) return;
-        if (String(exception?.message || "").includes("Session")) {
+        if (Number(exception?.status) === 401) {
           clearSession();
           setAuthSession(null);
           setCurrentUser(null);

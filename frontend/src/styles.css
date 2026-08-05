@@ -5878,6 +5878,12 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   border-left-color: var(--danger);
 }
 
+.action-row.focused {
+  box-shadow: 0 0 0 3px rgba(61, 142, 109, 0.28), 0 8px 22px rgba(29, 85, 62, 0.16);
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 .action-row:has(.action-check input:checked) {
   background: var(--action-done-soft);
   border-left-color: var(--action-done);

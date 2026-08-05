@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 @Service
 public class AccessControlService {
     private static final String DEFAULT_ADMIN_USERNAME = "fchelbi";
-    private static final String DEFAULT_ADMIN_EMAIL = "f.chalbi@sagetunisia.com";
+    private static final String DEFAULT_ADMIN_EMAIL = "f.chalbi1@sagetunisia.com";
 
     private final ProjectReferenceRepository projectRepository;
     private final AppUserRepository userRepository;
@@ -338,6 +338,7 @@ public class AccessControlService {
 
     private String roleLabel(UserRole role) {
         if (role == UserRole.ADMIN) return "Admin";
+        if (role == UserRole.ENGINEERING_MANAGER) return "Engineering Manager";
         if (role == UserRole.CHEF_DE_PROJET) return "Chef de projet";
         if (role == UserRole.VALIDATEUR) return "Validateur";
         if (role == UserRole.MANAGER) return "Manager";

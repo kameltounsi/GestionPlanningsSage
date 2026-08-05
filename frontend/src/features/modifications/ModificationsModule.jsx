@@ -1280,6 +1280,7 @@ function ModificationsPage(props) {
     downloadTextFile,
     errorAlert,
     filteredRequests,
+    focusedActionId,
     handleArchiveEcr,
     handleCancelEcr,
     handleCreateAction,
@@ -1741,6 +1742,7 @@ function ModificationsPage(props) {
                   actionForm={actionForm}
                   actionRoleOptions={actionRoleOptions}
                   actions={visibleActions}
+                  focusedActionId={focusedActionId}
                   currentUser={currentUser}
                   doneCount={visibleActions.filter(isActionDone).length}
                   handleCreateAction={handleCreateAction}
@@ -2114,7 +2116,7 @@ function actionValidationDisplay(status) {
   return { className: "in_progress", label: "En attente" };
 }
 
-function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, handleCreateAction, handleDeleteAction, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, handleAddEvidenceLink, isCriticalAction, lateActions, phaseValidation, phaseValidations = [], projects = [], readOnly = false, requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm, removeActionProofDocumentFile, users = [] }) {
+function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, focusedActionId, handleCreateAction, handleDeleteAction, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, handleAddEvidenceLink, isCriticalAction, lateActions, phaseValidation, phaseValidations = [], projects = [], readOnly = false, requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm, removeActionProofDocumentFile, users = [] }) {
   const [expanded, setExpanded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const stageTitle = stageLabel(selectedStage, stageNewProject);
@@ -2150,6 +2152,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
       <ActionList
         actionRoleOptions={actionRoleOptions}
         actions={actions}
+        focusedActionId={focusedActionId}
         currentUser={currentUser}
         phaseValidation={phaseValidation}
         handleApproveActionValidation={handleApproveActionValidation}
@@ -2270,7 +2273,7 @@ ActionsPanel.propTypes = {
   users: PropTypes.array
 };
 
-function ActionList({ actions, canAdmin = false, currentUser, expanded = false, phaseValidation, phaseValidations = [], projects = [], readOnly = false, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteAction, handleDeleteActionAsset, handleUploadEvidence, handleAddEvidenceLink, requiresEvidence, saving, selectedRequest, users = [] }) {
+function ActionList({ actions, canAdmin = false, currentUser, expanded = false, focusedActionId, phaseValidation, phaseValidations = [], projects = [], readOnly = false, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteAction, handleDeleteActionAsset, handleUploadEvidence, handleAddEvidenceLink, requiresEvidence, saving, selectedRequest, users = [] }) {
   const [durationValues, setDurationValues] = useState({});
   const [assetLinks, setAssetLinks] = useState({});
 
@@ -2283,6 +2286,14 @@ function ActionList({ actions, canAdmin = false, currentUser, expanded = false, 
       return nextValues;
     });
   }, [actions]);
+
+  useEffect(() => {
+    if (!focusedActionId || !actions.some((action) => Number(action.id) === Number(focusedActionId))) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`action-${focusedActionId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [actions, focusedActionId]);
 
   function updateAssetLink(actionId, field, value) {
     setAssetLinks((current) => ({
@@ -2341,7 +2352,11 @@ function ActionList({ actions, canAdmin = false, currentUser, expanded = false, 
             const validationDisplay = actionValidationDisplay(action.validationStatus);
 
             return (
-            <article className={action.late ? "action-row late" : "action-row"} key={action.id}>
+            <article
+              className={`action-row${action.late ? " late" : ""}${Number(action.id) === Number(focusedActionId) ? " focused" : ""}`}
+              id={`action-${action.id}`}
+              key={action.id}
+            >
               <label className="action-check" title={isActionDone(action) ? "Marquer non terminée" : "Marquer terminée"}>
                 <input aria-label={`Changer le statut de ${action.title || "l'action"}`} checked={isActionDone(action)} disabled={saving || !canToggleAction} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
               </label>

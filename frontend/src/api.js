@@ -34,6 +34,10 @@ function authContext() {
   };
 }
 
+export function ssoExchange(ticket) {
+  return request("/auth/sso", { method: "POST", body: JSON.stringify({ ticket }) });
+}
+
 function clearSessionForToken(token) {
   if (token && getStoredSession()?.token === token) {
     clearSession();

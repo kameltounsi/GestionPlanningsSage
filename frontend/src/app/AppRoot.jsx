@@ -72,6 +72,7 @@ import {
   planningEventsUrl,
   requestPasswordReset,
   storeSession,
+  ssoExchange,
   updateAction,
   updateActionPlanningRule,
   updateClientReference,
@@ -2456,7 +2457,22 @@ const {
 
 function AppRoot() {
   const [authSession, setAuthSession] = useState(getStoredSession());
+  const [ssoPending, setSsoPending] = useState(() => new URLSearchParams(window.location.search).has("ticket"));
+  const ssoExchangeStarted = useRef(false);
   const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+
+  useEffect(() => {
+    if (ssoExchangeStarted.current) return;
+    ssoExchangeStarted.current = true;
+    const ticket = new URLSearchParams(window.location.search).get("ticket");
+    if (!ticket) return;
+    ssoExchange(ticket).then((session) => {
+      storeSession(session);
+      setAuthSession(session);
+      window.history.replaceState({}, "", "/");
+    }).catch(() => setError("Connexion SSO expirée. Revenez au portail SAGE INDEX."))
+      .finally(() => setSsoPending(false));
+  }, []);
   const [passwordResetStep, setPasswordResetStep] = useState("login");
   const [passwordResetEmail, setPasswordResetEmail] = useState("");
   const [passwordResetCode, setPasswordResetCode] = useState(["", "", "", ""]);
@@ -2495,6 +2511,7 @@ function AppRoot() {
   const [currentUser, setCurrentUser] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [selectedStage, setSelectedStage] = useState("FEASIBILITY_VALIDATION");
+  const [focusedActionId, setFocusedActionId] = useState(null);
   const [checklist, setChecklist] = useState([]);
   const [actions, setActions] = useState([]);
   const [actionsByRequestId, setActionsByRequestId] = useState({});
@@ -3756,11 +3773,12 @@ function AppRoot() {
       .finally(() => setSaving(false));
   }
 
-  function openRequest(request, stageOverride) {
+  function openRequest(request, stageOverride, actionId = null) {
     if (isClosedRequest(request)) {
       warningAlert("Modification cloturee", "C'est une modification cloturee et vous ne pouvez plus la modifier.");
     }
     setSelectedId(request.id);
+    setFocusedActionId(actionId);
     const participantStage = isAdminUser(currentUser) ? firstActionParticipantStage(currentUser, actionsByRequestId[request.id] || []) : null;
     setSelectedStage(safeStage(stageOverride || participantStage || request.currentStage, Boolean(request.newVersion)));
     setShowCreateForm(false);
@@ -5351,6 +5369,8 @@ function AppRoot() {
     return <main className="centered">Chargement...</main>;
   }
 
+  if (ssoPending) return <main className="login-screen"><section className="login-panel"><h1>Connexion unifiée</h1><p>Ouverture sécurisée de Gestion des plannings…</p></section></main>;
+
   if (!authSession?.token) {
     return (
       <LoginPage
@@ -5452,6 +5472,7 @@ function AppRoot() {
           errorAlert={errorAlert}
           filteredAuditLogs={filteredAuditLogs}
           filteredRequests={filteredRequests}
+          focusedActionId={focusedActionId}
           finishedProductReferenceForm={finishedProductReferenceForm}
           finishedProductReferences={finishedProductReferences}
           handleAddChatGroupMember={handleAddChatGroupMember}

@@ -64,6 +64,7 @@ public class AuthInterceptor implements HandlerInterceptor {
         String method = request.getMethod();
         return HttpMethod.OPTIONS.matches(method)
                 || "/api/auth/login".equals(path)
+                || "/api/auth/sso".equals(path)
                 || HttpMethod.POST.matches(method) && path.matches("/api/auth/password-reset/(request|verify|confirm)")
                 || HttpMethod.GET.matches(method) && ("/api/events".equals(path) || "/ws/events".equals(path) || matchesAny(path, PUBLIC_GET_PATTERNS));
     }

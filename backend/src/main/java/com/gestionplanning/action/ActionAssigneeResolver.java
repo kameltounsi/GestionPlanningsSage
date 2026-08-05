@@ -221,6 +221,7 @@ public class ActionAssigneeResolver {
 
     private String roleLabel(UserRole role) {
         if (role == UserRole.ADMIN) return "Admin";
+        if (role == UserRole.ENGINEERING_MANAGER) return "Engineering Manager";
         if (role == UserRole.CHEF_DE_PROJET) return "Chef de projet";
         if (role == UserRole.VALIDATEUR) return "Validateur";
         if (role == UserRole.MANAGER) return "Manager";

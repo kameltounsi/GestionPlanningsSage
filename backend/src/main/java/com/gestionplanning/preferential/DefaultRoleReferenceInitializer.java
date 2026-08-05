@@ -10,6 +10,7 @@ import java.util.List;
 public class DefaultRoleReferenceInitializer implements CommandLineRunner {
     private static final List<String> DEFAULT_ROLES = Arrays.asList(
             "Admin",
+            "Engineering Manager",
             "Chef de projet",
             "Manager",
             "Superviseur couture",

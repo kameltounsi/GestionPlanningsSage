@@ -12,12 +12,19 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.beans.factory.annotation.Value;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Base64;
 import java.util.Locale;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -32,12 +39,14 @@ public class AuthController {
     private final AccountMailService accountMailService;
     private final AuthenticatedUserService authenticatedUserService;
     private final AppUserMapper userMapper;
+    private final ObjectMapper objectMapper;
+    @Value("${portal.sso.exchange-url:http://sageindeex-backend-1:8080/api/sso/exchange}") private String portalExchangeUrl;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthController(AppUserRepository userRepository, AuthTokenRepository tokenRepository,
                           PasswordResetCodeRepository resetCodeRepository, PasswordService passwordService,
                           AccountMailService accountMailService, AuthenticatedUserService authenticatedUserService,
-                          AppUserMapper userMapper) {
+                          AppUserMapper userMapper, ObjectMapper objectMapper) {
         this.userRepository = userRepository;
         this.tokenRepository = tokenRepository;
         this.resetCodeRepository = resetCodeRepository;
@@ -45,6 +54,26 @@ public class AuthController {
         this.accountMailService = accountMailService;
         this.authenticatedUserService = authenticatedUserService;
         this.userMapper = userMapper;
+        this.objectMapper = objectMapper;
+    }
+
+    @PostMapping("/sso")
+    @Transactional
+    public ResponseEntity<AuthResponse> sso(@RequestBody Map<String,String> request) throws Exception {
+        String body = objectMapper.writeValueAsString(Map.of("application", "PLANNING", "ticket", request.get("ticket")));
+        HttpRequest validation = HttpRequest.newBuilder(URI.create(portalExchangeUrl))
+                .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build();
+        HttpResponse<String> response = HttpClient.newHttpClient().send(validation, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) return ResponseEntity.status(401).build();
+        String matricule = objectMapper.readTree(response.body()).get("matricule").asText();
+        return userRepository.findByMatricule(matricule).filter(AppUser::isEnabled).map(user -> {
+            AuthToken authToken = new AuthToken();
+            authToken.setUser(user);
+            authToken.setToken(generateToken());
+            authToken.setExpiresAt(LocalDateTime.now(ZoneId.systemDefault()).plusHours(12));
+            AuthToken saved = tokenRepository.save(authToken);
+            return ResponseEntity.ok(new AuthResponse(saved.getToken(), saved.getExpiresAt(), userMapper.toDto(user)));
+        }).orElse(ResponseEntity.status(401).build());
     }
 
     @PostMapping("/login")

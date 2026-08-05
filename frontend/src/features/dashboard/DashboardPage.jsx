@@ -90,6 +90,11 @@ function isProjectLeadForAnyProject(user, projects = []) {
   return projects.some((project) => isProjectLeadForProject(user, project));
 }
 
+function isProjectLeadForRequest(user, request, projects = []) {
+  const project = projects.find((item) => item.name === request?.modificationProject);
+  return isProjectLeadForProject(user, project);
+}
+
 function canCreateRequest(user, projects = []) {
   return isAdminUser(user) || isProjectLeadForAnyProject(user, projects);
 }
@@ -252,6 +257,7 @@ export function DashboardPage({
   const [dashboardActionsByRequestId, setDashboardActionsByRequestId] = useState({});
   const [dashboardDialog, setDashboardDialog] = useState(null);
   const adminView = isAdminUser(currentUser);
+  const projectLeadView = hasApplicationRole(currentUser, "CHEF_DE_PROJET", "Chef de projet");
   const dashboardCandidateRequests = requests.filter((request) => !request.archived);
   const dashboardRequestIds = dashboardCandidateRequests.map((request) => request.id).filter(Boolean).sort((first, second) => Number(first) - Number(second));
   const dashboardRequestIdsKey = dashboardRequestIds.join("|");
@@ -444,12 +450,14 @@ export function DashboardPage({
     .filter((request) => request.currentStage !== "CLOSED" && request.currentStage !== "CANCELLED")
     .slice(0, 5);
   const recentRequests = visibleRequests.length > 0 ? visibleRequests : dashboardRequests.slice(0, 5);
-  const projectOptions = useMemo(() => Array.from(new Set([
-    ...projects.map((project) => project.name),
-    ...dashboardRequests.map((request) => request.modificationProject)
-  ].filter(Boolean))).sort((first, second) => first.localeCompare(second, "fr", { sensitivity: "base" })), [projects, dashboardRequests]);
+  const dossierScopeRequests = adminView
+    ? dashboardRequests
+    : dashboardCandidateRequests.filter((request) => isProjectLeadForRequest(currentUser, request, projects));
+  const projectOptions = useMemo(() => Array.from(new Set(
+    dossierScopeRequests.map((request) => request.modificationProject).filter(Boolean)
+  )).sort((first, second) => first.localeCompare(second, "fr", { sensitivity: "base" })), [dossierScopeRequests]);
   const exportingAllProjects = dossierProject === allProjectsValue;
-  const dossierRequests = exportingAllProjects ? dashboardRequests : dashboardRequests.filter((request) => request.modificationProject === dossierProject);
+  const dossierRequests = exportingAllProjects ? dossierScopeRequests : dossierScopeRequests.filter((request) => request.modificationProject === dossierProject);
   const dossierExportLabel = exportingAllProjects ? "Tous les projets" : dossierProject;
 
   useEffect(() => {
@@ -467,7 +475,7 @@ export function DashboardPage({
   function handleDashboardDialogOpen(item) {
     if (!dashboardDialog) return;
     if (dashboardDialog.type === "actions") {
-      onOpenRequest(item.request, item.action?.stage);
+      onOpenRequest(item.request, item.action?.stage, item.action?.id);
     } else {
       onOpenRequest(item);
     }
@@ -524,7 +532,7 @@ export function DashboardPage({
         title={adminView ? "Dashboard direction ECR" : "Dashboard personnel ECR"}
         subtitle={adminView ? "Pilotage de toutes les modifications, priorités et charges projet." : "Synthèse des modifications où vous intervenez comme membre, pilote, responsable ou validateur."}
       />
-      {isAdminUser(currentUser) && (
+      {(adminView || projectLeadView) && (
         <section className="panel">
           <div className="section-title">
             <div>
@@ -595,9 +603,10 @@ export function DashboardPage({
         <DashboardActionWatchCard
           title="Actions deja en retard"
           subtitle={`${lateActionRows.length} action${lateActionRows.length > 1 ? "s" : ""} a traiter`}
-          items={lateActionRows.slice(0, 8)}
+          items={lateActionRows}
           mode="late"
           onOpenRequest={onOpenRequest}
+          paginated
         />
         <DashboardActionWatchCard
           title="Actions qui expirent dans 3 jours"
@@ -966,7 +975,16 @@ function dashboardFinishedProductGroups(requests = [], mode = "project", limit =
       .slice(0, limit);
 }
 
-function DashboardActionWatchCard({ title, subtitle, items = [], mode = "late", onOpenRequest }) {
+function DashboardActionWatchCard({ title, subtitle, items = [], mode = "late", onOpenRequest, paginated = false }) {
+  const pageSize = 8;
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+  const visibleItems = paginated ? items.slice(page * pageSize, page * pageSize + pageSize) : items;
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount - 1));
+  }, [pageCount]);
+
   return (
     <article className={`panel dashboard-action-watch ${mode}`}>
       <div className="section-title">
@@ -974,15 +992,26 @@ function DashboardActionWatchCard({ title, subtitle, items = [], mode = "late", 
           <h2>{title}</h2>
           <span>{subtitle}</span>
         </div>
+        {paginated && items.length > pageSize && (
+          <div className="dashboard-pager" aria-label={`Pagination ${title}`}>
+            <button type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0} aria-label="Page precedente">
+              <ChevronLeft size={16} />
+            </button>
+            <span>{page + 1} / {pageCount}</span>
+            <button type="button" onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))} disabled={page >= pageCount - 1} aria-label="Page suivante">
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        )}
       </div>
       <div className="dashboard-action-watch-list">
         {items.length === 0 ? (
           <EmptyState title="Aucune action" text={mode === "late" ? "Aucun retard action detecte." : "Aucune action n'expire dans les 3 jours."} compact />
-        ) : items.map(({ action, request }) => {
+        ) : visibleItems.map(({ action, request }) => {
           const dueDate = dashboardActionDueDate(action);
           const dayDelta = dueDate ? daysBetween(startOfLocalDay(new Date()), dueDate) : null;
           return (
-            <button className="dashboard-action-watch-row" key={`${request.id}-${action.id}`} type="button" onClick={() => onOpenRequest(request)}>
+            <button className="dashboard-action-watch-row" key={`${request.id}-${action.id}`} type="button" onClick={() => onOpenRequest(request, action.stage, action.id)}>
               <span className="watch-indicator" />
               <strong>{action.title || "Action sans titre"}</strong>
               <small>{requestDisplayName(request)} | Pilote: {action.responsible || "-"} | {request.modificationProject || "-"} | {stageLabel(action.stage, Boolean(request.newVersion))}</small>

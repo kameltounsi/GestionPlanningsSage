@@ -3,27 +3,43 @@ package com.gestionplanning.project;
 import com.gestionplanning.user.AppUser;
 import com.gestionplanning.user.AppUserRepository;
 import org.springframework.stereotype.Component;
+import org.springframework.boot.CommandLineRunner;
 
 import java.text.Normalizer;
 import java.util.Arrays;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 @Component
-public class ProjectReferenceMapper {
+public class ProjectReferenceMapper implements CommandLineRunner {
     private static final String PERMANENT_ADMIN_USERNAME = "fchelbi";
-    private static final String PERMANENT_ADMIN_EMAIL = "f.chalbi@sagetunisia.com";
+    private static final String PERMANENT_ADMIN_EMAIL = "f.chalbi1@sagetunisia.com";
     private static final String PERMANENT_ADMIN_FALLBACK_NAME = "Fethi Chelbi";
     private static final String PERMANENT_ADMIN_PROJECT_ROLE = "Admin";
+    private static final String PERMANENT_ENGINEERING_MANAGER_PROJECT_ROLE = "Engineering Manager";
 
     private final AppUserRepository userRepository;
+    private final ProjectReferenceRepository projectRepository;
 
-    public ProjectReferenceMapper(AppUserRepository userRepository) {
+    public ProjectReferenceMapper(AppUserRepository userRepository, ProjectReferenceRepository projectRepository) {
         this.userRepository = userRepository;
+        this.projectRepository = projectRepository;
+    }
+
+    @Override
+    public void run(String... args) {
+        projectRepository.findAll().forEach(project -> {
+            String updatedTeam = withPermanentAdmin(project.getProjectTeam());
+            if (!Objects.equals(project.getProjectTeam(), updatedTeam)) {
+                project.setProjectTeam(updatedTeam);
+                projectRepository.save(project);
+            }
+        });
     }
 
     public ProjectReference toEntity(ProjectReferenceDto dto) {
@@ -47,10 +63,15 @@ public class ProjectReferenceMapper {
 
     private String withPermanentAdmin(String projectTeam) {
         List<ProjectTeamEntry> entries = parseTeamEntries(projectTeam);
-        if (entries.stream().anyMatch(entry -> isPermanentAdminName(entry.name))) {
-            return normalizeProjectTeam(projectTeam);
+        Optional<ProjectTeamEntry> permanentAdmin = entries.stream()
+                .filter(entry -> isPermanentAdminName(entry.name))
+                .findFirst();
+        if (permanentAdmin.isPresent()) {
+            permanentAdmin.get().roles.add(normalize(PERMANENT_ADMIN_PROJECT_ROLE));
+            permanentAdmin.get().roles.add(normalize(PERMANENT_ENGINEERING_MANAGER_PROJECT_ROLE));
+            return normalizeProjectTeam(entries);
         }
-        String permanentAdminEntry = permanentAdminDisplayName() + "::" + PERMANENT_ADMIN_PROJECT_ROLE;
+        String permanentAdminEntry = permanentAdminDisplayName() + "::" + PERMANENT_ADMIN_PROJECT_ROLE + "|" + PERMANENT_ENGINEERING_MANAGER_PROJECT_ROLE;
         String normalizedProjectTeam = normalizeProjectTeam(projectTeam);
         if (normalizedProjectTeam.isEmpty()) {
             return permanentAdminEntry;
@@ -59,8 +80,14 @@ public class ProjectReferenceMapper {
     }
 
     private String normalizeProjectTeam(String projectTeam) {
-        return parseTeamEntries(projectTeam).stream()
-                .map(entry -> entry.name + "::" + String.join("|", entry.roles))
+        return normalizeProjectTeam(parseTeamEntries(projectTeam));
+    }
+
+    private String normalizeProjectTeam(List<ProjectTeamEntry> entries) {
+        return entries.stream()
+                .map(entry -> entry.name + "::" + entry.roles.stream()
+                        .map(ProjectReferenceMapper::projectRoleLabel)
+                        .collect(Collectors.joining("|")))
                 .collect(Collectors.joining("; "));
     }
 
@@ -108,8 +135,8 @@ public class ProjectReferenceMapper {
                 .map(value -> {
                     String[] parts = value.split("::", 2);
                     Set<String> roles = parts.length > 1
-                            ? Arrays.stream(parts[1].split("[,|]")).map(ProjectReferenceMapper::normalize).filter(role -> !role.isEmpty()).collect(Collectors.toSet())
-                            : new HashSet<>();
+                            ? Arrays.stream(parts[1].split("[,|]")).map(ProjectReferenceMapper::normalize).filter(role -> !role.isEmpty()).collect(Collectors.toCollection(LinkedHashSet::new))
+                            : new LinkedHashSet<>();
                     return new ProjectTeamEntry(parts[0].trim(), roles);
                 })
                 .collect(Collectors.toList());
@@ -119,6 +146,16 @@ public class ProjectReferenceMapper {
         String text = Normalizer.normalize(String.valueOf(value == null ? "" : value), Normalizer.Form.NFD)
                 .replaceAll("\\p{M}", "");
         return text.trim().toLowerCase(Locale.ROOT).replace('_', ' ');
+    }
+
+    private static String projectRoleLabel(String role) {
+        if (normalize(role).equals(normalize(PERMANENT_ADMIN_PROJECT_ROLE))) {
+            return PERMANENT_ADMIN_PROJECT_ROLE;
+        }
+        if (normalize(role).equals(normalize(PERMANENT_ENGINEERING_MANAGER_PROJECT_ROLE))) {
+            return PERMANENT_ENGINEERING_MANAGER_PROJECT_ROLE;
+        }
+        return role;
     }
 
     private static class ProjectTeamEntry {

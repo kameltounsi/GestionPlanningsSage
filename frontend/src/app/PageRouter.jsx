@@ -56,6 +56,7 @@ export function PageRouter({
   errorAlert,
   filteredAuditLogs,
   filteredRequests,
+  focusedActionId,
   finishedProductReferenceForm,
   finishedProductReferences,
   handleAddChatGroupMember,
@@ -392,6 +393,7 @@ export function PageRouter({
           downloadTextFile={downloadTextFile}
           errorAlert={errorAlert}
           filteredRequests={filteredRequests}
+          focusedActionId={focusedActionId}
           currentUser={currentUser}
           lateActions={lateActions}
           phaseValidations={phaseValidations}

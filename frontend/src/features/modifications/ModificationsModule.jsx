@@ -2119,8 +2119,52 @@ function actionValidationDisplay(status) {
 function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, currentUser, doneCount, focusedActionId, handleCreateAction, handleDeleteAction, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteActionAsset, handleUploadEvidence, handleAddEvidenceLink, isCriticalAction, lateActions, phaseValidation, phaseValidations = [], projects = [], readOnly = false, requiresEvidence, saving, selectedRequest, selectedStages, selectedStage, stageNewProject, updateActionForm, removeActionProofDocumentFile, users = [] }) {
   const [expanded, setExpanded] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [actionSearch, setActionSearch] = useState("");
   const stageTitle = stageLabel(selectedStage, stageNewProject);
   const canCreateAction = !readOnly && (canAdmin || isRequestPilot(currentUser, selectedRequest, projects));
+  const canSearchActions = canAdmin || isProjectLead(currentUser);
+  const normalizedActionSearch = normalizeSearchText(actionSearch).toLocaleLowerCase("fr");
+  const actionSearchResult = useMemo(() => {
+    if (!canSearchActions || !normalizedActionSearch) {
+      return { directMatchCount: 0, directMatchIds: new Set(), displayedActions: actions };
+    }
+    const directMatches = actions.filter((action) => [
+      action.id,
+      action.title,
+      action.description,
+      action.responsible,
+      action.responsibleRole,
+      action.status,
+      action.comment
+    ].some((value) => normalizeSearchText(value).toLocaleLowerCase("fr").includes(normalizedActionSearch)));
+    const relatedIds = new Set(directMatches.map((action) => String(action.id)));
+    let relationAdded = true;
+    while (relationAdded) {
+      relationAdded = false;
+      actions.forEach((action) => {
+        const actionId = String(action.id);
+        const parentId = action.dependsOnActionId == null ? "" : String(action.dependsOnActionId);
+        if (relatedIds.has(actionId) && parentId && !relatedIds.has(parentId)) {
+          relatedIds.add(parentId);
+          relationAdded = true;
+        } else if (parentId && relatedIds.has(parentId) && !relatedIds.has(actionId)) {
+          relatedIds.add(actionId);
+          relationAdded = true;
+        }
+      });
+    }
+    return {
+      directMatchCount: directMatches.length,
+      directMatchIds: new Set(directMatches.map((action) => String(action.id))),
+      displayedActions: actions.filter((action) => relatedIds.has(String(action.id)))
+    };
+  }, [actions, canSearchActions, normalizedActionSearch]);
+  const { directMatchCount, directMatchIds, displayedActions } = actionSearchResult;
+  const relatedActionCount = displayedActions.length - directMatchCount;
+
+  useEffect(() => {
+    setActionSearch("");
+  }, [selectedRequest?.id, selectedStage]);
 
   function openCreateAction() {
     updateActionForm("stage", selectedRequest?.currentStage || selectedStage);
@@ -2149,9 +2193,25 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
           </button>
         </div>
       </div>
+      {canSearchActions && (
+        <label className="search action-search">
+          <Search size={17} />
+          <input
+            aria-label="Rechercher une action"
+            placeholder="Rechercher une action"
+            type="search"
+            value={actionSearch}
+            onChange={(event) => setActionSearch(event.target.value)}
+          />
+          {normalizedActionSearch && (
+            <span>{directMatchCount} trouvée{directMatchCount > 1 ? "s" : ""}{relatedActionCount > 0 ? ` + ${relatedActionCount} liée${relatedActionCount > 1 ? "s" : ""}` : ""}</span>
+          )}
+        </label>
+      )}
       <ActionList
         actionRoleOptions={actionRoleOptions}
-        actions={actions}
+        actions={displayedActions}
+        directMatchIds={directMatchIds}
         focusedActionId={focusedActionId}
         currentUser={currentUser}
         phaseValidation={phaseValidation}
@@ -2170,6 +2230,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
         phaseValidations={phaseValidations}
         projects={projects}
         readOnly={readOnly}
+        searchActive={Boolean(normalizedActionSearch)}
         saving={saving}
         selectedRequest={selectedRequest}
         users={users}
@@ -2192,9 +2253,25 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
                 <X size={18} />
               </button>
             </header>
+            {canSearchActions && (
+              <label className="search action-search expanded-action-search">
+                <Search size={17} />
+                <input
+                  aria-label="Rechercher une action"
+                  placeholder="Rechercher une action"
+                  type="search"
+                  value={actionSearch}
+                  onChange={(event) => setActionSearch(event.target.value)}
+                />
+                {normalizedActionSearch && (
+                  <span>{directMatchCount} trouvée{directMatchCount > 1 ? "s" : ""}{relatedActionCount > 0 ? ` + ${relatedActionCount} liée${relatedActionCount > 1 ? "s" : ""}` : ""}</span>
+                )}
+              </label>
+            )}
             <ActionList
               actionRoleOptions={actionRoleOptions}
-              actions={actions}
+              actions={displayedActions}
+              directMatchIds={directMatchIds}
               currentUser={currentUser}
               phaseValidation={phaseValidation}
               handleApproveActionValidation={handleApproveActionValidation}
@@ -2213,6 +2290,7 @@ function ActionsPanel({ actionForm, actionRoleOptions, actions, canAdmin, curren
               phaseValidations={phaseValidations}
               projects={projects}
               readOnly={readOnly}
+              searchActive={Boolean(normalizedActionSearch)}
               saving={saving}
               selectedRequest={selectedRequest}
               users={users}
@@ -2273,9 +2351,62 @@ ActionsPanel.propTypes = {
   users: PropTypes.array
 };
 
-function ActionList({ actions, canAdmin = false, currentUser, expanded = false, focusedActionId, phaseValidation, phaseValidations = [], projects = [], readOnly = false, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteAction, handleDeleteActionAsset, handleUploadEvidence, handleAddEvidenceLink, requiresEvidence, saving, selectedRequest, users = [] }) {
+function hierarchicalActionRows(actions = []) {
+  const orderedActions = [...actions].sort(compareActionDisplayOrder);
+  const actionsById = new Map(orderedActions.map((action) => [String(action.id), action]));
+  const childrenByParentId = new Map();
+  const roots = [];
+
+  orderedActions.forEach((action) => {
+    const parentId = action.dependsOnActionId == null ? "" : String(action.dependsOnActionId);
+    if (!parentId || parentId === String(action.id) || !actionsById.has(parentId)) {
+      roots.push(action);
+      return;
+    }
+    childrenByParentId.set(parentId, [...(childrenByParentId.get(parentId) || []), action]);
+  });
+
+  const rows = [];
+  const visited = new Set();
+  function appendBranch(action, depth, orderPath, rootId) {
+    const actionId = String(action.id);
+    if (visited.has(actionId)) return;
+    visited.add(actionId);
+    rows.push({ action, depth, orderPath, rootId });
+    (childrenByParentId.get(actionId) || []).forEach((child, childIndex) => {
+      appendBranch(child, depth + 1, `${orderPath}.${childIndex + 1}`, rootId);
+    });
+  }
+  roots.forEach((action, rootIndex) => appendBranch(action, 0, String(rootIndex + 1), String(action.id)));
+  orderedActions.forEach((action) => {
+    if (!visited.has(String(action.id))) appendBranch(action, 0, String(rows.filter((row) => row.depth === 0).length + 1), String(action.id));
+  });
+  return rows;
+}
+
+function ActionList({ actions, canAdmin = false, currentUser, directMatchIds = new Set(), expanded = false, focusedActionId, phaseValidation, phaseValidations = [], projects = [], readOnly = false, searchActive = false, handleToggleAction, handleUpdateActionDuration, handleApproveActionValidation, handleRejectActionValidation, handleRequestActionValidation, handleDeleteAction, handleDeleteActionAsset, handleUploadEvidence, handleAddEvidenceLink, requiresEvidence, saving, selectedRequest, users = [] }) {
   const [durationValues, setDurationValues] = useState({});
   const [assetLinks, setAssetLinks] = useState({});
+  const [collapsedRootIds, setCollapsedRootIds] = useState(() => new Set());
+  const hierarchyRows = useMemo(() => hierarchicalActionRows(actions), [actions]);
+  const rootsWithChildren = useMemo(() => new Set(
+    hierarchyRows.filter((row) => row.depth > 0).map((row) => row.rootId)
+  ), [hierarchyRows]);
+  const allBranchesCollapsed = rootsWithChildren.size > 0
+    && [...rootsWithChildren].every((rootId) => collapsedRootIds.has(rootId));
+
+  function toggleRoot(rootId) {
+    setCollapsedRootIds((current) => {
+      const next = new Set(current);
+      if (next.has(rootId)) next.delete(rootId);
+      else next.add(rootId);
+      return next;
+    });
+  }
+
+  function toggleAllBranches() {
+    setCollapsedRootIds(allBranchesCollapsed ? new Set() : new Set(rootsWithChildren));
+  }
 
   useEffect(() => {
     setDurationValues((current) => {
@@ -2289,11 +2420,20 @@ function ActionList({ actions, canAdmin = false, currentUser, expanded = false, 
 
   useEffect(() => {
     if (!focusedActionId || !actions.some((action) => Number(action.id) === Number(focusedActionId))) return;
+    const focusedRow = hierarchyRows.find((row) => Number(row.action.id) === Number(focusedActionId));
+    if (focusedRow?.depth > 0) {
+      setCollapsedRootIds((current) => {
+        if (!current.has(focusedRow.rootId)) return current;
+        const next = new Set(current);
+        next.delete(focusedRow.rootId);
+        return next;
+      });
+    }
     const frame = window.requestAnimationFrame(() => {
       document.getElementById(`action-${focusedActionId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [actions, focusedActionId]);
+  }, [actions, focusedActionId, hierarchyRows]);
 
   function updateAssetLink(actionId, field, value) {
     setAssetLinks((current) => ({
@@ -2317,14 +2457,22 @@ function ActionList({ actions, canAdmin = false, currentUser, expanded = false, 
 
   return (
     <>
+      {rootsWithChildren.size > 0 && (
+        <div className="action-hierarchy-toolbar">
+          <button className="secondary-action compact-action" type="button" onClick={toggleAllBranches}>
+            {allBranchesCollapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+            {allBranchesCollapsed ? "Afficher toutes les actions" : "Reduire toutes les sous-actions"}
+          </button>
+        </div>
+      )}
       <div className={expanded ? "action-list expanded" : "action-list"}>
         {actions.length === 0 ? (
           <EmptyState
-            title="Aucune action pour cette phase"
-            text={canAdmin ? "Ajoutez une action ou utilisez les actions generees lors de la creation ECR." : "Vous n'avez aucune action affectee dans la phase active."}
+            title={searchActive ? "Aucune action trouvée" : "Aucune action pour cette phase"}
+            text={searchActive ? "Essayez un autre titre, responsable, statut ou numéro d'action." : canAdmin ? "Ajoutez une action ou utilisez les actions generees lors de la creation ECR." : "Vous n'avez aucune action affectee dans la phase active."}
           />
         ) : (
-          [...actions].sort(compareActionDisplayOrder).map((action, index) => {
+          hierarchyRows.filter((row) => row.depth === 0 || !collapsedRootIds.has(row.rootId)).map(({ action, depth, orderPath, rootId }) => {
             const blockingAction = blockingActionFor(action, actions);
             const isBlocked = Boolean(action.dependsOnActionId && (!blockingAction || !isActionDone(blockingAction)));
             const canDeleteAction = !readOnly && canDeleteActionForUser(currentUser, action, selectedRequest, phaseValidations, projects);
@@ -2353,14 +2501,29 @@ function ActionList({ actions, canAdmin = false, currentUser, expanded = false, 
 
             return (
             <article
-              className={`action-row${action.late ? " late" : ""}${Number(action.id) === Number(focusedActionId) ? " focused" : ""}`}
+              className={`action-row${depth > 0 ? " sub-action" : " global-action"}${action.late ? " late" : ""}${directMatchIds.has(String(action.id)) ? " search-match" : ""}${Number(action.id) === Number(focusedActionId) ? " focused" : ""}`}
               id={`action-${action.id}`}
               key={action.id}
+              style={{ "--action-depth": Math.min(depth, 6) }}
             >
+              {depth === 0 && rootsWithChildren.has(rootId) && (
+                <button
+                  aria-label={collapsedRootIds.has(rootId) ? "Afficher les sous-actions" : "Reduire les sous-actions"}
+                  className="action-collapse-button floating"
+                  title={collapsedRootIds.has(rootId) ? "Afficher les sous-actions" : "Reduire les sous-actions"}
+                  type="button"
+                  onClick={() => toggleRoot(rootId)}
+                >
+                  {collapsedRootIds.has(rootId) ? <ChevronDown size={17} /> : <ChevronUp size={17} />}
+                </button>
+              )}
               <label className="action-check" title={isActionDone(action) ? "Marquer non terminée" : "Marquer terminée"}>
                 <input aria-label={`Changer le statut de ${action.title || "l'action"}`} checked={isActionDone(action)} disabled={saving || !canToggleAction} onChange={(event) => handleToggleAction(action, event.target.checked)} type="checkbox" />
               </label>
               <div className="action-main">
+                <div className="action-hierarchy-heading">
+                  <span className="action-hierarchy-badge">{depth > 0 ? "Sous-action" : "Action globale"}</span>
+                </div>
                 <h3>{action.title}</h3>
                 <p>{action.topicRisk || "-"}</p>
                 {action.routineAction && (
@@ -2370,7 +2533,7 @@ function ActionList({ actions, canAdmin = false, currentUser, expanded = false, 
                 )}
               </div>
               <div className="action-meta">
-                <span><em>Ordre</em><strong>Action {index + 1}</strong></span>
+                <span><em>Ordre</em><strong>Action {orderPath}</strong></span>
                 <span><em>Pilote</em><strong>{responsibleDisplay}</strong></span>
                 <span><em>Validateur</em><strong>{validatorDisplay}</strong></span>
                 <span><em>Criticité</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>

@@ -2245,6 +2245,8 @@ function canDeleteActionForUser(user, action, request, phaseValidations = [], pr
   if (isTerminalRequest(request)) return false;
   if (request?.currentStage === "CANCELLED" && action?.stage !== "CANCELLED") return false;
   if (!canDeleteActionInPhase(action)) return false;
+  if (request?.currentStage !== "CANCELLED"
+    && criticalityClass(action?.criticality) === "critical") return false;
   if (isAdminUser(user)) return true;
   if (isRequestPilot(user, request, projects)) return true;
   return isActionPilotForUser(user, action, request, projects);
@@ -4210,6 +4212,11 @@ function AppRoot() {
     if (!selectedRequest || !action?.id) return;
     if (isTerminalRequest(selectedRequest)) {
       warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. Les actions sont en lecture seule.");
+      return;
+    }
+    if (selectedRequest.currentStage !== "CANCELLED"
+      && criticalityClass(action?.criticality) === "critical") {
+      warningAlert("Action critique protegee", "Une action critique ne peut pas etre supprimee pendant une modification active, y compris par un administrateur.");
       return;
     }
     if (!canDeleteActionInPhase(action)) {

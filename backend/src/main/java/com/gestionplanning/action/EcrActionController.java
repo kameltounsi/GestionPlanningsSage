@@ -713,6 +713,10 @@ public class EcrActionController {
         if (!canDeleteActionState(action)) {
             return false;
         }
+        if (action.getRequest().getCurrentStage() != EcrStage.CANCELLED
+                && isCriticalAction(action)) {
+            return false;
+        }
         if (accessControlService.isAdmin(user)) {
             return true;
         }
@@ -735,6 +739,12 @@ public class EcrActionController {
             return false;
         }
         return !isDone(action);
+    }
+
+    private boolean isCriticalAction(EcrAction action) {
+        return action != null
+                && action.getCriticality() != null
+                && action.getCriticality().trim().startsWith("1");
     }
 
     private boolean canMutateAction(EcrAction action) {

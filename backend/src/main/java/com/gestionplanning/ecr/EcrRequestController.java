@@ -128,6 +128,11 @@ public class EcrRequestController {
                                              @RequestAttribute("authenticatedUser") Object userAttribute) {
                                                  AppUser user = (AppUser) userAttribute;
         EcrRequest request = requestDto.toEntity();
+        if (!validProgressMailInterval(request.getProgressMailIntervalDays())) {
+            return ResponseEntity.badRequest().build();
+        }
+        request.setProgressMailScheduleStartDate(request.getProgressMailIntervalDays() == null
+                ? null : LocalDate.now(ZoneId.of("Africa/Tunis")));
         normalizeRequestFields(request);
         if (!accessControlService.canCreateRequest(user, request)) {
             return ResponseEntity.status(403).build();
@@ -177,6 +182,9 @@ public class EcrRequestController {
                             && !canManageDossierReview(user, request)) {
                         return ResponseEntity.status(403).<EcrRequestDto>build();
                     }
+                    if (!validProgressMailInterval(updatedRequest.getProgressMailIntervalDays())) {
+                        return ResponseEntity.badRequest().<EcrRequestDto>build();
+                    }
                     normalizeRequestFields(updatedRequest);
                     if (requestRepository.existsByModificationNumberIgnoreCaseAndIdNot(updatedRequest.getModificationNumber(), id)
                             || !finishedProductsSelectionValid(updatedRequest)) {
@@ -188,6 +196,15 @@ public class EcrRequestController {
                     request.setFinishedProducts(updatedRequest.getFinishedProducts());
                     request.setModificationProject(updatedRequest.getModificationProject());
                     request.setReceptionDate(updatedRequest.getReceptionDate());
+                    Integer previousMailInterval = request.getProgressMailIntervalDays();
+                    Integer nextMailInterval = updatedRequest.getProgressMailIntervalDays();
+                    request.setProgressMailIntervalDays(nextMailInterval);
+                    if (nextMailInterval == null) {
+                        request.setProgressMailScheduleStartDate(null);
+                    } else if (!Objects.equals(previousMailInterval, nextMailInterval)
+                            || request.getProgressMailScheduleStartDate() == null) {
+                        request.setProgressMailScheduleStartDate(LocalDate.now(ZoneId.of("Africa/Tunis")));
+                    }
                     if (admin) {
                         request.setPilot(updatedRequest.getPilot());
                     }
@@ -227,6 +244,10 @@ public class EcrRequestController {
                     return ResponseEntity.ok(requestMapper.toDto(saved));
                 })
                 .orElse(ResponseEntity.status(403).build());
+    }
+
+    private boolean validProgressMailInterval(Integer intervalDays) {
+        return intervalDays == null || java.util.Arrays.asList(1, 3, 7, 14, 30).contains(intervalDays);
     }
 
     @PostMapping(value = "/{id}/images/{type}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

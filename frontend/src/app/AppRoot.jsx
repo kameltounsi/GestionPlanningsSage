@@ -1932,6 +1932,7 @@ function requestToEcrForm(request) {
     mixability: request.mixability || "",
     dossierReview: request.dossierReview || "",
     receptionDate: request.receptionDate || "",
+    progressMailIntervalDays: request.progressMailIntervalDays == null ? "" : String(request.progressMailIntervalDays),
     sopDate: request.sopDate || "",
     pilot: request.pilot || "",
     digitChange: Boolean(request.digitChange),
@@ -3566,6 +3567,7 @@ function AppRoot() {
       accessInternalNumber: form.accessInternalNumber ? Number(form.accessInternalNumber) : null,
       currentStage: safeStage(form.currentStage, form.newVersion),
       receptionDate: form.receptionDate || null,
+      progressMailIntervalDays: form.progressMailIntervalDays ? Number(form.progressMailIntervalDays) : null,
       initialActions: (form.initialActions || [])
         .filter((action) => action.title.trim())
         .map(({ clientId, ...action }) => ({

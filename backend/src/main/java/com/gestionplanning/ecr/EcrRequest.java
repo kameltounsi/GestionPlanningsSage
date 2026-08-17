@@ -44,6 +44,8 @@ public class EcrRequest {
     @NotNull
     @Column(nullable = false)
     private LocalDate receptionDate;
+    private Integer progressMailIntervalDays;
+    private LocalDate progressMailScheduleStartDate;
     private LocalDate sopDate;
     @NotBlank
     @Column(nullable = false)
@@ -186,6 +188,22 @@ public class EcrRequest {
 
     public void setReceptionDate(LocalDate receptionDate) {
         this.receptionDate = receptionDate;
+    }
+
+    public Integer getProgressMailIntervalDays() {
+        return progressMailIntervalDays;
+    }
+
+    public void setProgressMailIntervalDays(Integer progressMailIntervalDays) {
+        this.progressMailIntervalDays = progressMailIntervalDays;
+    }
+
+    public LocalDate getProgressMailScheduleStartDate() {
+        return progressMailScheduleStartDate;
+    }
+
+    public void setProgressMailScheduleStartDate(LocalDate progressMailScheduleStartDate) {
+        this.progressMailScheduleStartDate = progressMailScheduleStartDate;
     }
 
     public LocalDate getSopDate() {

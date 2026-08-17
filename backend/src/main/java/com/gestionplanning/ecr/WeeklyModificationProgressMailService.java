@@ -28,6 +28,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.DayOfWeek;
+import java.time.temporal.ChronoUnit;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -57,7 +59,7 @@ public class WeeklyModificationProgressMailService {
         this.enabled = enabled;
     }
 
-    @Scheduled(cron = "${app.weekly-progress-mail.cron:0 0 8 * * MON}", zone = "${app.weekly-progress-mail.zone:Africa/Tunis}")
+    @Scheduled(cron = "${app.weekly-progress-mail.cron:0 0 8 * * *}", zone = "${app.weekly-progress-mail.zone:Africa/Tunis}")
     @Transactional(readOnly = true)
     public void sendWeeklyProgressEmails() {
         if (!enabled) {
@@ -65,7 +67,21 @@ public class WeeklyModificationProgressMailService {
         }
         requestRepository.findByArchivedFalseOrderByReceptionDateDescIdDesc().stream()
                 .filter(this::isActiveModification)
+                .filter(request -> isProgressMailDue(request, LocalDate.now()))
                 .forEach(this::sendProgressEmail);
+    }
+
+    boolean isProgressMailDue(EcrRequest request, LocalDate today) {
+        Integer intervalDays = request.getProgressMailIntervalDays();
+        if (intervalDays == null) {
+            return today.getDayOfWeek() == DayOfWeek.MONDAY;
+        }
+        LocalDate startDate = request.getProgressMailScheduleStartDate();
+        if (startDate == null || today.isBefore(startDate)) {
+            return false;
+        }
+        long elapsedDays = ChronoUnit.DAYS.between(startDate, today);
+        return elapsedDays >= intervalDays && elapsedDays % intervalDays == 0;
     }
 
     private void sendProgressEmail(EcrRequest request) {

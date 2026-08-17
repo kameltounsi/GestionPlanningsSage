@@ -19,6 +19,8 @@ public class EcrRequestDto {
     private String finishedProducts;
     private String modificationProject;
     private LocalDate receptionDate;
+    private Integer progressMailIntervalDays;
+    private LocalDate progressMailScheduleStartDate;
     private LocalDate sopDate;
     private String pilot;
     private String previousPilot;
@@ -99,6 +101,8 @@ public class EcrRequestDto {
         dto.finishedProducts = request.getFinishedProducts();
         dto.modificationProject = request.getModificationProject();
         dto.receptionDate = request.getReceptionDate();
+        dto.progressMailIntervalDays = request.getProgressMailIntervalDays();
+        dto.progressMailScheduleStartDate = request.getProgressMailScheduleStartDate();
         dto.sopDate = request.getSopDate();
         dto.pilot = request.getPilot();
         dto.previousPilot = request.getPreviousPilot();
@@ -169,6 +173,8 @@ public class EcrRequestDto {
         request.setFinishedProducts(finishedProducts);
         request.setModificationProject(modificationProject);
         request.setReceptionDate(receptionDate);
+        request.setProgressMailIntervalDays(progressMailIntervalDays);
+        request.setProgressMailScheduleStartDate(progressMailScheduleStartDate);
         request.setSopDate(sopDate);
         request.setPilot(pilot);
         request.setPreviousPilot(previousPilot);

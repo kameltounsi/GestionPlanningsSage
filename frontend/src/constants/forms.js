@@ -12,6 +12,7 @@ export const emptyEcrForm = {
   mixability: "",
   dossierReview: "",
   receptionDate: "",
+  progressMailIntervalDays: "",
   sopDate: "",
   pilot: "",
   digitChange: false,

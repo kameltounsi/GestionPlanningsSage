@@ -343,6 +343,18 @@ function NewModificationPage({ clientOptions, currentUser = null, ecrForm, exist
             <span>Réception</span>
             <input required type="date" value={ecrForm.receptionDate} onChange={(event) => updateEcrForm("receptionDate", event.target.value)} />
           </label>
+          <label>
+            <span>Fréquence du mail de suivi</span>
+            <select value={ecrForm.progressMailIntervalDays} onChange={(event) => updateEcrForm("progressMailIntervalDays", event.target.value)}>
+              <option value="">Par défaut : chaque lundi à 08:00</option>
+              <option value="1">Chaque jour à 08:00</option>
+              <option value="3">Tous les 3 jours à 08:00</option>
+              <option value="7">Tous les 7 jours à 08:00</option>
+              <option value="14">Tous les 14 jours à 08:00</option>
+              <option value="30">Tous les 30 jours à 08:00</option>
+            </select>
+            <span className="form-hint">Heure de Tunis. Laissez vide pour conserver l'envoi chaque lundi.</span>
+          </label>
           <div className="calculated-field">
             <span>SOP</span>
             <strong>{ecrForm.sopDate || "Calculé après génération des actions"}</strong>
@@ -450,6 +462,7 @@ const ecrFormPropType = PropTypes.shape({
   pilot: PropTypes.string,
   processChange: PropTypes.bool,
   product: PropTypes.string,
+  progressMailIntervalDays: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
   receptionDate: PropTypes.string,
   sopDate: PropTypes.string,
   supplierChange: PropTypes.bool
@@ -714,6 +727,7 @@ function requestToEcrForm(request) {
     mixability: request.mixability || "",
     dossierReview: request.dossierReview || "",
     receptionDate: request.receptionDate || "",
+    progressMailIntervalDays: request.progressMailIntervalDays == null ? "" : String(request.progressMailIntervalDays),
     sopDate: request.sopDate || "",
     pilot: request.pilot || "",
     digitChange: Boolean(request.digitChange),

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.time.LocalDate;
 
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
@@ -24,6 +25,8 @@ class WeeklyModificationProgressMailServiceTest {
         AccountMailService mailService = mock(AccountMailService.class);
 
         EcrRequest active = new EcrRequest();
+        active.setProgressMailIntervalDays(1);
+        active.setProgressMailScheduleStartDate(LocalDate.now().minusDays(1));
         EcrRequest archived = new EcrRequest();
         archived.setArchived(true);
         EcrRequest closedByStatus = new EcrRequest();
@@ -48,5 +51,33 @@ class WeeklyModificationProgressMailServiceTest {
         verify(mailService, never()).sendModificationProgressExcelEmail(
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void customIntervalsAreCalculatedFromReceptionDate() {
+        WeeklyModificationProgressMailService service = service();
+        EcrRequest request = new EcrRequest();
+        request.setProgressMailScheduleStartDate(LocalDate.of(2026, 8, 1));
+        request.setProgressMailIntervalDays(3);
+
+        org.junit.jupiter.api.Assertions.assertFalse(service.isProgressMailDue(request, LocalDate.of(2026, 8, 1)));
+        org.junit.jupiter.api.Assertions.assertTrue(service.isProgressMailDue(request, LocalDate.of(2026, 8, 4)));
+        org.junit.jupiter.api.Assertions.assertTrue(service.isProgressMailDue(request, LocalDate.of(2026, 8, 7)));
+        org.junit.jupiter.api.Assertions.assertFalse(service.isProgressMailDue(request, LocalDate.of(2026, 8, 8)));
+    }
+
+    @Test
+    void nullIntervalKeepsMondaySchedule() {
+        WeeklyModificationProgressMailService service = service();
+        EcrRequest request = new EcrRequest();
+
+        org.junit.jupiter.api.Assertions.assertTrue(service.isProgressMailDue(request, LocalDate.of(2026, 8, 17)));
+        org.junit.jupiter.api.Assertions.assertFalse(service.isProgressMailDue(request, LocalDate.of(2026, 8, 18)));
+    }
+
+    private WeeklyModificationProgressMailService service() {
+        return new WeeklyModificationProgressMailService(
+                mock(EcrRequestRepository.class), mock(EcrActionRepository.class),
+                mock(AccessControlService.class), mock(AccountMailService.class), true);
     }
 }

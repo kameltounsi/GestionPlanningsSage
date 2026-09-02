@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class DefaultUserInitializer implements CommandLineRunner {
     private static final String DEFAULT_ADMIN_USERNAME = "fchelbi";
-    private static final String DEFAULT_ADMIN_EMAIL = "f.chalbi1@sagetunisia.com";
+    private static final String DEFAULT_ADMIN_EMAIL = "f.chalbi@sagetunisia.com";
     private static final String DEFAULT_ADMIN_PHONE = "+21698139382";
     private static final String DEFAULT_ADMIN_INITIAL_SECRET = DEFAULT_ADMIN_USERNAME;
 

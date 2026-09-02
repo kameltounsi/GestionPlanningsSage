@@ -61,19 +61,6 @@ function rolesAllowedForUser(roles, user) {
   );
 }
 
-function entriesWithUniqueProjectRoles(entries) {
-  const usedRoles = new Set();
-  return entries.map((entry) => {
-    const roles = entry.roles.filter((role) => {
-      const key = normalizeRoleToken(role).replaceAll("_", " ");
-      if (!key || usedRoles.has(key)) return false;
-      usedRoles.add(key);
-      return true;
-    });
-    return { ...entry, roles };
-  });
-}
-
 function includeCurrentOption(options, currentValue) {
   if (!currentValue || options.includes(currentValue)) {
     return options;
@@ -192,10 +179,10 @@ function isProjectLeadForProject(user, project) {
 function ProjectTeamSelector({ projectTeam, users = [], onChange }) {
   const [teamQuery, setTeamQuery] = useState("");
   const rawSelectedEntries = useMemo(() => parseProjectTeamEntries(projectTeam), [projectTeam]);
-  const selectedEntries = useMemo(() => entriesWithUniqueProjectRoles(rawSelectedEntries.map((entry) => {
+  const selectedEntries = useMemo(() => rawSelectedEntries.map((entry) => {
     const user = findUserByTeamName(entry.name, users);
     return { ...entry, roles: rolesAllowedForUser(entry.roles, user) };
-  })), [rawSelectedEntries, users]);
+  }), [rawSelectedEntries, users]);
   const serializedRawEntries = useMemo(() => serializeProjectTeamEntries(rawSelectedEntries), [rawSelectedEntries]);
   const serializedSelectedEntries = useMemo(() => serializeProjectTeamEntries(selectedEntries), [selectedEntries]);
   const selectedNames = selectedEntries.map((entry) => entry.name);
@@ -224,13 +211,12 @@ function ProjectTeamSelector({ projectTeam, users = [], onChange }) {
 
   function toggleUser(user, checked) {
     const userName = user.fullName || user.username || user.email;
-    const alreadyUsedRoles = new Set(selectedEntries.flatMap((entry) => entry.roles.map((role) => normalizeRoleToken(role).replaceAll("_", " "))));
     const nextEntries = checked
       ? [
         ...selectedEntries.filter((entry) => entry.name !== userName),
         {
           name: userName,
-          roles: userAssignableRoles(user).filter((role) => !alreadyUsedRoles.has(normalizeRoleToken(role).replaceAll("_", " ")))
+          roles: userAssignableRoles(user)
         }
       ]
       : selectedEntries.filter((entry) => entry.name !== userName);
@@ -266,9 +252,6 @@ function ProjectTeamSelector({ projectTeam, users = [], onChange }) {
             const checked = selectedNames.includes(userName);
             const selectedEntry = selectedEntries.find((entry) => entry.name === userName);
             const roleOptions = userAssignableRoles(user);
-            const rolesUsedByOthers = new Set(selectedEntries
-              .filter((entry) => entry.name !== userName)
-              .flatMap((entry) => entry.roles.map((role) => normalizeRoleToken(role).replaceAll("_", " "))));
             return (
               <div className="project-team-option" key={user.id || userName}>
                 <label>
@@ -290,7 +273,6 @@ function ProjectTeamSelector({ projectTeam, users = [], onChange }) {
                       <label key={`${userName}-${role}`}>
                         <input
                           checked={selectedEntry?.roles.includes(role) || false}
-                          disabled={!selectedEntry?.roles.includes(role) && rolesUsedByOthers.has(normalizeRoleToken(role).replaceAll("_", " "))}
                           type="checkbox"
                           onChange={(event) => toggleUserRole(userName, role, event.target.checked)}
                         />

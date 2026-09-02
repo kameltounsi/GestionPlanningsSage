@@ -47,6 +47,108 @@ import { criticalityClass, readableStatus, statusClass } from "../../utils/statu
 import { getStages, safeStage, stageColorClass, stageLabel } from "../../utils/stages";
 import { DossierReviewDialog } from "./DossierReviewDialog";
 
+function isoWeek(dateValue) {
+  const match = String(dateValue || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (Number.isNaN(date.getTime())) return null;
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - day);
+  const weekYear = date.getUTCFullYear();
+  const firstDay = new Date(Date.UTC(weekYear, 0, 1));
+  return { number: Math.ceil((((date - firstDay) / 86400000) + 1) / 7), year: weekYear };
+}
+
+function actionWeekLabel(startDate, endDate) {
+  const startWeek = isoWeek(startDate);
+  const endWeek = isoWeek(endDate);
+  if (!startWeek && !endWeek) return "-";
+  if (!startWeek || !endWeek) {
+    const week = startWeek || endWeek;
+    return `S${week.number} (${week.year})`;
+  }
+  if (startWeek.number === endWeek.number && startWeek.year === endWeek.year) {
+    return `S${startWeek.number} (${startWeek.year})`;
+  }
+  if (startWeek.year === endWeek.year) {
+    return `S${startWeek.number} à S${endWeek.number} (${startWeek.year})`;
+  }
+  return `S${startWeek.number} (${startWeek.year}) à S${endWeek.number} (${endWeek.year})`;
+}
+
+function parseCalendarDate(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function addCalendarDays(date, days) {
+  const result = new Date(date.getTime());
+  result.setUTCDate(result.getUTCDate() + days);
+  return result;
+}
+
+function calendarActionRange(action) {
+  const start = parseCalendarDate(action?.startDate || action?.deadline || action?.endDate);
+  const end = parseCalendarDate(action?.endDate || action?.deadline || action?.startDate);
+  if (!start && !end) return null;
+  return { start: start || end, end: end || start };
+}
+
+function calendarDateLabel(date) {
+  return new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(date);
+}
+
+function startOfCalendarWeek(date) {
+  const dayStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  return addCalendarDays(dayStart, -((dayStart.getUTCDay() || 7) - 1));
+}
+
+function monthCalendarDays(cursor) {
+  const firstOfMonth = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), 1));
+  const gridStart = startOfCalendarWeek(firstOfMonth);
+  return Array.from({ length: 42 }, (_, index) => addCalendarDays(gridStart, index));
+}
+
+function actionsForCalendarDay(actions, date) {
+  return actions.filter((action) => {
+    const range = calendarActionRange(action);
+    return range && range.start <= date && range.end >= date;
+  });
+}
+
+function calendarSegmentsForWeek(actions, weekDays) {
+  const weekStart = weekDays[0];
+  const weekEnd = weekDays[6];
+  return actions.map((action) => {
+    const range = calendarActionRange(action);
+    if (!range || range.end < weekStart || range.start > weekEnd) return null;
+    const clippedStart = range.start < weekStart ? weekStart : range.start;
+    const clippedEnd = range.end > weekEnd ? weekEnd : range.end;
+    const startColumn = Math.round((clippedStart - weekStart) / 86400000) + 1;
+    const endColumn = Math.round((clippedEnd - weekStart) / 86400000) + 2;
+    return {
+      action,
+      startColumn,
+      endColumn,
+      continuesBefore: range.start < weekStart,
+      continuesAfter: range.end > weekEnd
+    };
+  }).filter(Boolean);
+}
+
+function calendarTitle(cursor, mode) {
+  if (mode === "month") {
+    return new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" }).format(cursor);
+  }
+  if (mode === "day") return calendarDateLabel(cursor);
+  const start = startOfCalendarWeek(cursor);
+  const end = addCalendarDays(start, 6);
+  const week = isoWeek(start.toISOString());
+  return `Semaine ${week.number} — ${calendarDateLabel(start)} au ${calendarDateLabel(end)}`;
+}
+
 export function createModificationsModule(deps) {
   const {
     actionCompletionRate,
@@ -1226,19 +1328,6 @@ function countSelectedProjectLeads(projectTeam, users) {
   return projectLeadTeamMembers(projectTeam, users).length;
 }
 
-function duplicatedProjectTeamRole(projectTeam) {
-  const usedRoles = new Set();
-  for (const entry of parseProjectTeamEntries(projectTeam)) {
-    for (const role of entry.roles) {
-      const key = normalizeRoleToken(role).replaceAll("_", " ");
-      if (!key) continue;
-      if (usedRoles.has(key)) return role;
-      usedRoles.add(key);
-    }
-  }
-  return "";
-}
-
 function isProjectLead(user) {
   return hasApplicationRole(user, "CHEF_DE_PROJET", "Chef de projet");
 }
@@ -1280,6 +1369,11 @@ function ModificationsPage(props) {
   const [previewImage, setPreviewImage] = useState(null);
   const [referenceDialog, setReferenceDialog] = useState(null);
   const [dossierDialogOpen, setDossierDialogOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarMode, setCalendarMode] = useState("week");
+  const [calendarActions, setCalendarActions] = useState([]);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [calendarCursor, setCalendarCursor] = useState(() => new Date());
   const [detailsCollapsed, setDetailsCollapsed] = useState(false);
   const {
     actionForm,
@@ -1295,6 +1389,7 @@ function ModificationsPage(props) {
     errorAlert,
     filteredRequests,
     focusedActionId,
+    setFocusedActionId,
     handleArchiveEcr,
     handleCancelEcr,
     handleCreateAction,
@@ -1371,6 +1466,18 @@ function ModificationsPage(props) {
       return secondDate - firstDate || String(requestDisplayName(first)).localeCompare(String(requestDisplayName(second)), "fr", { sensitivity: "base" });
     });
   }, [requests]);
+  const calendarGridDays = useMemo(() => calendarMode === "month"
+    ? monthCalendarDays(calendarCursor)
+    : calendarMode === "week"
+      ? Array.from({ length: 7 }, (_, index) => addCalendarDays(startOfCalendarWeek(calendarCursor), index))
+      : [new Date(Date.UTC(calendarCursor.getUTCFullYear(), calendarCursor.getUTCMonth(), calendarCursor.getUTCDate()))],
+  [calendarCursor, calendarMode]);
+  const calendarWeekRows = useMemo(() => {
+    if (calendarMode === "day") return [];
+    const rows = [];
+    for (let index = 0; index < calendarGridDays.length; index += 7) rows.push(calendarGridDays.slice(index, index + 7));
+    return rows;
+  }, [calendarGridDays, calendarMode]);
   const requestStatusOptions = [
     ["all", "Toutes"],
     ["active", "Actives"],
@@ -1390,6 +1497,31 @@ function ModificationsPage(props) {
     setDetailsCollapsed(false);
     setListOpen(false);
     setUserSidebarOpen(false);
+  }
+
+  function openDetailedCalendar() {
+    if (!selectedRequest) return;
+    setCalendarOpen(true);
+    setCalendarLoading(true);
+    getActions(selectedRequest.id)
+      .then((requestActions) => {
+        setCalendarActions(requestActions);
+        const firstDatedAction = requestActions.map(calendarActionRange).filter(Boolean).sort((left, right) => left.start - right.start)[0];
+        setCalendarCursor(firstDatedAction?.start || new Date());
+      })
+      .catch((exception) => {
+        setCalendarActions([]);
+        errorAlert(exception?.message || "Chargement du calendrier impossible.");
+      })
+      .finally(() => setCalendarLoading(false));
+  }
+
+  function openCalendarAction(action) {
+    if (!action) return;
+    setCalendarOpen(false);
+    setSelectedStage(safeStage(action.stage || selectedRequest?.currentStage, Boolean(selectedRequest?.newVersion)));
+    setFocusedActionId(null);
+    globalThis.setTimeout(() => setFocusedActionId(action.id), 0);
   }
 
   function exportModificationGanttPdf() {
@@ -1691,6 +1823,10 @@ function ModificationsPage(props) {
                       <CalendarDays size={24} />
                       <span>Gantt</span>
                     </button>
+                    <button className="dossier-review-card" type="button" onClick={openDetailedCalendar} title="Afficher le calendrier detaille de la modification">
+                      <CalendarDays size={24} />
+                      <span>Calendrier</span>
+                    </button>
                   </>
                 )}
                 {(selectedRequest.beforePhotoUrl || selectedRequest.afterPhotoUrl) && (
@@ -1882,6 +2018,100 @@ function ModificationsPage(props) {
           </section>
         </div>
       )}
+      {calendarOpen && selectedRequest && (
+        <div className="dialog-backdrop" role="presentation" onMouseDown={() => setCalendarOpen(false)}>
+          <section className="modification-calendar-dialog" role="dialog" aria-modal="true" aria-labelledby="modification-calendar-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header className="actions-dialog-header">
+              <div>
+                <p className="eyebrow">Planning détaillé</p>
+                <h2 id="modification-calendar-title">Calendrier — {requestDisplayName(selectedRequest)}</h2>
+                <span>{calendarActions.length} action{calendarActions.length > 1 ? "s" : ""}</span>
+              </div>
+              <div className="calendar-dialog-actions">
+                <div className="calendar-mode-switch" aria-label="Granularité du calendrier">
+                  <button className={calendarMode === "day" ? "active" : ""} type="button" onClick={() => setCalendarMode("day")}>Jour</button>
+                  <button className={calendarMode === "week" ? "active" : ""} type="button" onClick={() => setCalendarMode("week")}>Semaine</button>
+                  <button className={calendarMode === "month" ? "active" : ""} type="button" onClick={() => setCalendarMode("month")}>Mois</button>
+                </div>
+                <button className="ghost-icon" type="button" onClick={() => setCalendarOpen(false)} title="Fermer"><X size={18} /></button>
+              </div>
+            </header>
+            <div className="modification-calendar-body">
+              {calendarLoading ? (
+                <p className="calendar-empty">Chargement du calendrier…</p>
+              ) : calendarActions.every((action) => !calendarActionRange(action)) ? (
+                <EmptyState title="Aucune action planifiée" text="Ajoutez une date de début ou de fin aux actions pour alimenter le calendrier." compact />
+              ) : (
+                <>
+                  <div className="calendar-navigation">
+                    <button className="ghost-icon" type="button" onClick={() => setCalendarCursor((date) => calendarMode === "month" ? new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 1, 1)) : addCalendarDays(date, calendarMode === "week" ? -7 : -1))} title="Période précédente"><ChevronLeft size={18} /></button>
+                    <button className="calendar-today-button" type="button" onClick={() => setCalendarCursor(new Date())}>Aujourd’hui</button>
+                    <strong>{calendarTitle(calendarCursor, calendarMode)}</strong>
+                    <button className="ghost-icon" type="button" onClick={() => setCalendarCursor((date) => calendarMode === "month" ? new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1)) : addCalendarDays(date, calendarMode === "week" ? 7 : 1))} title="Période suivante"><ChevronRight size={18} /></button>
+                  </div>
+                  {calendarMode === "month" && (
+                    <div className="calendar-weekdays">
+                      {['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'].map((day) => <strong key={day}>{day}</strong>)}
+                    </div>
+                  )}
+                  {calendarMode === "day" ? (
+                    <div className="real-calendar-grid day">
+                      {calendarGridDays.map((date) => (
+                        <article className="real-calendar-day" key={date.toISOString()}>
+                          <header><strong>{calendarDateLabel(date)}</strong></header>
+                          <div className="real-calendar-events">
+                            {actionsForCalendarDay(calendarActions, date).map((action) => (
+                              <button className={`real-calendar-event ${stageColorClass(action.stage, Boolean(selectedRequest.newVersion))}`} key={action.id || action.title} title={`Ouvrir ${action.title || "l'action"}`} type="button" onClick={() => openCalendarAction(action)}>
+                                <strong>{action.title || "Action sans titre"}</strong>
+                                <span>{action.responsible || "Pilote non défini"}</span>
+                                <small>{stageLabel(action.stage, Boolean(selectedRequest.newVersion))} · {action.startDate || "-"} → {action.endDate || action.deadline || "-"}</small>
+                              </button>
+                            ))}
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className={`calendar-timeline ${calendarMode}`}>
+                      {calendarWeekRows.map((weekDays) => {
+                        const segments = calendarSegmentsForWeek(calendarActions, weekDays);
+                        const rowSpan = Math.max(2, segments.length + 1);
+                        return (
+                          <section className="calendar-timeline-week" style={{ gridTemplateRows: `32px repeat(${Math.max(1, segments.length)}, 27px)` }} key={weekDays[0].toISOString()}>
+                            {weekDays.map((date, dayIndex) => {
+                              const outsideMonth = calendarMode === "month" && date.getUTCMonth() !== calendarCursor.getUTCMonth();
+                              const today = new Date();
+                              const isToday = date.getUTCFullYear() === today.getUTCFullYear() && date.getUTCMonth() === today.getUTCMonth() && date.getUTCDate() === today.getUTCDate();
+                              return (
+                                <div className={`calendar-timeline-day${outsideMonth ? " outside" : ""}${isToday ? " today" : ""}`} style={{ gridColumn: dayIndex + 1, gridRow: `1 / span ${rowSpan}` }} key={date.toISOString()}>
+                                  <strong>{calendarMode === "month" ? date.getUTCDate() : calendarDateLabel(date)}</strong>
+                                </div>
+                              );
+                            })}
+                            {segments.map((segment, lane) => (
+                              <button
+                                className={`calendar-action-bar ${stageColorClass(segment.action.stage, Boolean(selectedRequest.newVersion))}${segment.continuesBefore ? " continues-before" : ""}${segment.continuesAfter ? " continues-after" : ""}`}
+                                key={`${weekDays[0].toISOString()}-${segment.action.id || segment.action.title}`}
+                                style={{ gridColumn: `${segment.startColumn} / ${segment.endColumn}`, gridRow: lane + 2 }}
+                                title={`Ouvrir ${segment.action.title || "l'action"}`}
+                                type="button"
+                                onClick={() => openCalendarAction(segment.action)}
+                              >
+                                <strong>{segment.continuesBefore ? "↞ " : ""}{segment.action.title || "Action sans titre"}{segment.continuesAfter ? " ↠" : ""}</strong>
+                                <span>{segment.action.responsible || "Pilote non défini"}</span>
+                              </button>
+                            ))}
+                          </section>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
       {previewImage && (
         <div className="dialog-backdrop" role="presentation">
           <section
@@ -2002,6 +2232,7 @@ ModificationsPage.propTypes = {
   setQuery: PropTypes.func.isRequired,
   setSelectedId: PropTypes.func.isRequired,
   setSelectedStage: PropTypes.func.isRequired,
+  setFocusedActionId: PropTypes.func.isRequired,
   setShowCreateForm: PropTypes.func.isRequired,
   setRequestTypeFilter: PropTypes.func.isRequired,
   requiresEvidence: PropTypes.func.isRequired,
@@ -2554,6 +2785,7 @@ function ActionList({ actions, canAdmin = false, currentUser, directMatchIds = n
                 <span className="blocking-action-meta"><em>Blocage</em><strong className={blockingActionStatusClass(action, isBlocked)}>{action.dependsOnActionId ? `Par: ${blockingActionLabel(action, actions)}` : "Aucune"}</strong></span>
                 <span><em>Début</em><strong>{action.startDate || "-"}</strong></span>
                 <span><em>Fin</em><strong>{action.endDate || "-"}</strong></span>
+                <span><em>Semaine</em><strong>{actionWeekLabel(action.startDate, action.endDate)}</strong></span>
                 <span><em>Finalisation</em><strong>{formattedDateTime(action.finalizationDate)}</strong></span>
                 <span>
                   <em>Jours</em>

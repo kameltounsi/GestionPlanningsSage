@@ -22,6 +22,7 @@ public class DatabasePerformanceInitializer implements CommandLineRunner {
     @Override
     public void run(String... args) {
         List<String> statements = Arrays.asList(
+                "alter table project_reference alter column project_team type text",
                 "create index if not exists idx_auth_token_expires_at on auth_token (expires_at)",
                 "create index if not exists idx_auth_token_user_id on auth_token (user_id)",
                 "create index if not exists idx_password_reset_code_user_used_created on password_reset_code (user_id, used, created_at desc, id desc)",

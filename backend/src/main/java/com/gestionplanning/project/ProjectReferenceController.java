@@ -121,14 +121,6 @@ public class ProjectReferenceController {
         if (entries.stream().anyMatch(entry -> entry.roles.isEmpty())) {
             return Optional.of("Chaque utilisateur de l'equipe projet doit avoir au moins un role.");
         }
-        Set<String> usedRoles = new HashSet<>();
-        for (ProjectTeamEntry entry : entries) {
-            for (String role : entry.roles) {
-                if (!usedRoles.add(role)) {
-                    return Optional.of("Chaque role doit etre attribue une seule fois par projet.");
-                }
-            }
-        }
         long projectLeadCount = entries.stream()
                 .filter(entry -> entry.roles.stream().anyMatch(role -> role.equals(PROJECT_LEAD_ROLE)))
                 .count();

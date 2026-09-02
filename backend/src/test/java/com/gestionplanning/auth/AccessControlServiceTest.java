@@ -4,6 +4,7 @@ import com.gestionplanning.action.EcrAction;
 import com.gestionplanning.action.EcrActionRepository;
 import com.gestionplanning.ecr.EcrRequest;
 import com.gestionplanning.project.ProjectReferenceRepository;
+import com.gestionplanning.project.ProjectReference;
 import com.gestionplanning.user.AppUser;
 import com.gestionplanning.user.AppUserRepository;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -41,6 +43,22 @@ class AccessControlServiceTest {
         List<EcrRequest> result = service.filterPersonalRequests(user, Arrays.asList(directRequest, genericRoleRequest));
 
         assertEquals(Collections.singletonList(directRequest), result);
+    }
+
+    @Test
+    void projectTeamMemberCanReadEveryActionInTheModification() {
+        AppUser user = user("Alice Worker", "alice@example.com", "Qualite");
+        EcrRequest request = request(3L, "MOD-3", "Project C", "Other Pilot");
+        ProjectReference project = new ProjectReference();
+        project.setName("Project C");
+        project.setProjectTeam("Alice Worker::Qualite; Bob Worker::Production");
+        EcrAction otherUsersAction = action(request, "Bob Worker");
+
+        when(projectRepository.findById("Project C")).thenReturn(Optional.of(project));
+
+        assertTrue(service.canAccessRequest(user, request));
+        assertTrue(service.canSeeAllActions(user, request));
+        assertTrue(service.canViewAction(user, otherUsersAction));
     }
 
     private AppUser user(String fullName, String email, String role) {

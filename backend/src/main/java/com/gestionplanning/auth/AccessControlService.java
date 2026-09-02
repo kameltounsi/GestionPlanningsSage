@@ -65,6 +65,9 @@ public class AccessControlService {
         if (isProjectLeadForRequest(user, request)) {
             return true;
         }
+        if (isProjectTeamMemberForRequest(user, request)) {
+            return true;
+        }
         return isParticipantForRequest(user, request);
     }
 
@@ -77,7 +80,7 @@ public class AccessControlService {
         }
         Set<Long> participantRequestIds = participantRequestIdsFor(user, requests);
         Set<String> projectLeadProjects = projectRepository.findAll().stream()
-                .filter(project -> isProjectLeadForProject(user, project))
+                .filter(project -> isProjectTeamMember(user, project))
                 .map(ProjectReference::getName)
                 .collect(Collectors.toSet());
         return requests.stream()
@@ -97,9 +100,14 @@ public class AccessControlService {
             return Collections.emptyList();
         }
         Set<Long> participantRequestIds = participantRequestIdsFor(user, requests);
+        Set<String> teamProjects = projectRepository.findAll().stream()
+                .filter(project -> isProjectTeamMember(user, project))
+                .map(ProjectReference::getName)
+                .collect(Collectors.toSet());
         return requests.stream()
                 .filter(request -> request != null && (
                         isRequestPilot(user, request)
+                                || teamProjects.contains(request.getModificationProject())
                                 || participantRequestIds.contains(request.getId())
                 ))
                 .collect(Collectors.toList());
@@ -143,7 +151,7 @@ public class AccessControlService {
     }
 
     public boolean canSeeAllActions(AppUser user, EcrRequest request) {
-        return isAdmin(user) || isRequestPilot(user, request);
+        return canAccessRequest(user, request);
     }
 
     public boolean canViewAction(AppUser user, EcrAction action) {
@@ -326,6 +334,20 @@ public class AccessControlService {
         return projectRepository.findById(request.getModificationProject())
                 .map(project -> isProjectLeadForProject(user, project))
                 .orElse(false);
+    }
+
+    public boolean isProjectTeamMemberForRequest(AppUser user, EcrRequest request) {
+        if (user == null || request == null || request.getModificationProject() == null) {
+            return false;
+        }
+        return projectRepository.findById(request.getModificationProject())
+                .map(project -> isProjectTeamMember(user, project))
+                .orElse(false);
+    }
+
+    private boolean isProjectTeamMember(AppUser user, ProjectReference project) {
+        return user != null && project != null && parseTeamEntries(project.getProjectTeam()).stream()
+                .anyMatch(entry -> matchesUser(user, entry.name));
     }
 
     public boolean hasApplicationRole(AppUser user, UserRole role) {

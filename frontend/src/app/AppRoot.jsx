@@ -1813,6 +1813,12 @@ function isProjectLeadForRequest(user, request, projects = []) {
   return isProjectLeadForProject(user, project);
 }
 
+function isProjectTeamMemberForRequest(user, request, projects = []) {
+  const project = projectForRequest(request, projects);
+  return Boolean(user && project && parseProjectTeamEntries(project.projectTeam)
+    .some((entry) => userMatchesAssignment(user, entry.name)));
+}
+
 function canAccessPreferentialsPage(user, projects = []) {
   return isAdminUser(user) || isProjectLeadForAnyProject(user, projects);
 }
@@ -2147,19 +2153,6 @@ function countSelectedProjectLeads(projectTeam, users) {
   return projectLeadTeamMembers(projectTeam, users).length;
 }
 
-function duplicatedProjectTeamRole(projectTeam) {
-  const usedRoles = new Set();
-  for (const entry of parseProjectTeamEntries(projectTeam)) {
-    for (const role of entry.roles) {
-      const key = normalizeRoleToken(role);
-      if (!key) continue;
-      if (usedRoles.has(key)) return role;
-      usedRoles.add(key);
-    }
-  }
-  return "";
-}
-
 function hasApplicationRole(user, code, label) {
   const roles = parseUserRoleTokens(user?.role);
   return roles.includes(normalizeRoleToken(code).replaceAll("_", " ")) || roles.includes(normalizeRoleToken(label));
@@ -2357,7 +2350,9 @@ function activeStageActionsForUser(user, request, actions = [], projects = []) {
 function stageActionsForUser(user, request, actions = [], stage = request?.currentStage, projects = []) {
   if (!request || isAdminUser(user)) return actions;
   const selectedStageKey = stage || request.currentStage;
-  if (isRequestPilot(user, request, projects)) {
+  if (isRequestPilot(user, request, projects)
+    || isProjectTeamMemberForRequest(user, request, projects)
+    || actions.some((action) => isActionParticipantForUser(user, action))) {
     return actions.filter((action) => actionStageForRequest(action, request) === selectedStageKey);
   }
   return actions.filter((action) =>
@@ -2372,12 +2367,15 @@ function hasActiveStageActionForUser(user, request, actions = []) {
 
 function isRequestParticipantForUser(user, request, actions = [], projects = []) {
   if (isAdminUser(user)) return true;
-  return isRequestPilot(user, request, projects) || actions.some((action) => isActionParticipantForUser(user, action));
+  return isRequestPilot(user, request, projects)
+    || isProjectTeamMemberForRequest(user, request, projects)
+    || actions.some((action) => isActionParticipantForUser(user, action));
 }
 
 function canShowRequestForUser(user, request, actionsByRequestId = {}, projects = []) {
   if (isAdminUser(user)) return true;
   if (isRequestPilot(user, request, projects)) return true;
+  if (isProjectTeamMemberForRequest(user, request, projects)) return true;
   if (!user || !request) return false;
   if (!Object.hasOwn(actionsByRequestId, request.id)) return false;
   return isRequestParticipantForUser(user, request, actionsByRequestId[request.id] || [], projects);
@@ -2571,7 +2569,7 @@ function AppRoot() {
     if (selectedRequest.currentStage === "CANCELLED") {
       return selectedStages.filter(([key]) => isStageInCancelledHistory(selectedRequest, key));
     }
-    if (isRequestPilot(currentUser, selectedRequest, projects)) return selectedStages;
+    if (isRequestParticipantForUser(currentUser, selectedRequest, actions, projects)) return selectedStages;
     const approvedStages = new Set(phaseValidations
       .filter((validation) => validation.status === "APPROVED")
       .map((validation) => validation.stage)
@@ -2579,7 +2577,7 @@ function AppRoot() {
     const currentStage = selectedRequest.currentStage;
     const currentIndex = selectedStages.findIndex(([key]) => key === currentStage);
     return selectedStages.filter(([key], index) => key === currentStage || approvedStages.has(key) || currentIndex >= 0 && index <= currentIndex);
-  }, [currentUser, phaseValidations, projects, selectedRequest, selectedStages]);
+  }, [actions, currentUser, phaseValidations, projects, selectedRequest, selectedStages]);
   const waitingForClosedParticipantActions = false;
   const canLoadSelectedStage = !waitingForClosedParticipantActions
     && visibleStages.some(([key]) => key === selectedStage);
@@ -4439,13 +4437,6 @@ function AppRoot() {
       warningAlert("Role projet requis", message);
       return Promise.reject(new Error(message));
     }
-    const duplicatedRole = duplicatedProjectTeamRole(projectForm.projectTeam);
-    if (duplicatedRole) {
-      const message = `Le role ${duplicatedRole} est deja attribue dans cette equipe projet. Chaque role doit etre choisi une seule fois par projet.`;
-      setError(message);
-      warningAlert("Role duplique", message);
-      return Promise.reject(new Error(message));
-    }
     const projectLeadCount = countSelectedProjectLeads(projectForm.projectTeam, users);
     if (projectLeadCount !== 1) {
       const message = "Selectionnez exactement un utilisateur avec le role Chef de projet.";
@@ -5482,6 +5473,7 @@ function AppRoot() {
           filteredAuditLogs={filteredAuditLogs}
           filteredRequests={filteredRequests}
           focusedActionId={focusedActionId}
+          setFocusedActionId={setFocusedActionId}
           finishedProductReferenceForm={finishedProductReferenceForm}
           finishedProductReferences={finishedProductReferences}
           handleAddChatGroupMember={handleAddChatGroupMember}

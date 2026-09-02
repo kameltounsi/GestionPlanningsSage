@@ -12,7 +12,7 @@ public class ProjectReference {
     @Column(nullable = false, length = 160)
     private String name;
 
-    @Column(length = 500)
+    @Column(columnDefinition = "TEXT")
     private String projectTeam;
 
     public String getName() {

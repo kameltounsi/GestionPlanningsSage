@@ -4460,8 +4460,11 @@ function AppRoot() {
         }
         return getEcrRequests(requestLoadOptions(requestArchiveView, currentUser)).then(setRequests);
       })
-      .catch(() => {
-        const message = "Sauvegarde projet impossible. Vérifiez le nom du projet.";
+      .catch((exception) => {
+        const apiMessage = String(exception?.message || "").trim();
+        const message = apiMessage && apiMessage !== "Internal Server Error"
+          ? `Sauvegarde projet impossible : ${apiMessage}`
+          : "Sauvegarde projet impossible. La base de données doit être mise à jour puis le backend redémarré.";
         setError(message);
         errorAlert(message);
         throw new Error(message);

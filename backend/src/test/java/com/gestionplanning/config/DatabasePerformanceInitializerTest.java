@@ -13,6 +13,6 @@ class DatabasePerformanceInitializerTest {
 
         new DatabasePerformanceInitializer(jdbcTemplate).run();
 
-        verify(jdbcTemplate).execute("alter table project_reference alter column project_team type text");
+        verify(jdbcTemplate).execute("alter table project_reference alter column project_team type text using project_team::text");
     }
 }

@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Arrays;
 import java.util.List;
@@ -20,9 +21,12 @@ public class DatabasePerformanceInitializer implements CommandLineRunner {
     }
 
     @Override
+    @Transactional
     public void run(String... args) {
+        LOGGER.info("Ensuring project teams use an unlimited TEXT column");
+        jdbcTemplate.execute("alter table project_reference alter column project_team type text using project_team::text");
+
         List<String> statements = Arrays.asList(
-                "alter table project_reference alter column project_team type text",
                 "create index if not exists idx_auth_token_expires_at on auth_token (expires_at)",
                 "create index if not exists idx_auth_token_user_id on auth_token (user_id)",
                 "create index if not exists idx_password_reset_code_user_used_created on password_reset_code (user_id, used, created_at desc, id desc)",
@@ -39,14 +43,6 @@ public class DatabasePerformanceInitializer implements CommandLineRunner {
                 "create index if not exists idx_ecr_action_deadline_status on ecr_action (deadline, status)"
         );
         LOGGER.info("Ensuring {} database performance indexes", statements.size());
-        statements.forEach(this::execute);
-    }
-
-    private void execute(String statement) {
-        try {
-            jdbcTemplate.execute(statement);
-        } catch (RuntimeException exception) {
-            LOGGER.warn("Database performance statement failed: {}", statement, exception);
-        }
+        statements.forEach(jdbcTemplate::execute);
     }
 }

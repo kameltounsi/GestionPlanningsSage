@@ -150,6 +150,23 @@ public class AccountMailService {
         sendMessage(to, title, text, html, "phase validation");
     }
 
+    public void sendActionDurationChangedEmail(com.gestionplanning.action.ActionDurationAlert alert) {
+        if (!alertMailEnabled || !isMailConfigured()) {
+            throw new MailDeliveryException("Envoi des alertes désactivé ou configuration SMTP incomplète.");
+        }
+        String title = "Action critique : durée modifiée";
+        String text = "La durée d'une action critique a été modifiée par " + value(alert.getChangedBy())
+                + ".\nModification : " + value(alert.getRequestLabel())
+                + "\nAction : " + value(alert.getActionTitle())
+                + "\nAncienne durée : " + alert.getPreviousDays() + " jour(s)"
+                + "\nNouvelle durée : " + alert.getNewDays() + " jour(s)"
+                + "\nVous êtes le validateur de cette action."
+                + TEXT_LINK_LINE + value(applicationUrl);
+        String html = "<!doctype html><html><body><h2>" + escape(title)
+                + "</h2><p>" + escape(text).replace("\n", "<br>") + "</p></body></html>";
+        sendMessage(alert.getRecipientEmail(), title, text, html, "critical action duration change");
+    }
+
     public void sendActionValidationEmail(EcrRequest request, EcrStage stage, EcrAction action, AppUser recipient) {
         if (request == null || request.isArchived() || action == null) {
             return;

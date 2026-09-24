@@ -8,6 +8,9 @@ import com.gestionplanning.audit.AuditLogService;
 import com.gestionplanning.auth.AccessControlService;
 import com.gestionplanning.user.AccountMailService;
 import com.gestionplanning.user.AppUser;
+import com.gestionplanning.user.MailDeliveryException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -23,6 +26,7 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/api/ecr-requests/{requestId}/phase-validations")
 public class PhaseValidationController {
+    private static final Logger LOGGER = LoggerFactory.getLogger(PhaseValidationController.class);
     private static final String MODIFICATION_DETAIL_SEPARATOR = " - Modification: ";
 
     private final EcrRequestRepository requestRepository;
@@ -99,11 +103,7 @@ public class PhaseValidationController {
                         action.setValidationRefusalReason(null);
                     });
                     actionRepository.saveAll(actions);
-                    for (EcrAction action : actions) {
-                        AppUser recipient = accessControlService.validationRecipientFor(action)
-                                .orElseThrow(() -> new IllegalStateException("Aucun destinataire de validation trouve pour l'action: " + action.getTitle()));
-                        accountMailService.sendActionValidationEmail(request, stage, action, recipient);
-                    }
+                    actions.forEach(action -> notifyActionValidation(request, stage, action));
                     return ResponseEntity.ok(validationMapper.toDto(enrichValidation(saved)));
                 })
                 .orElse(ResponseEntity.status(403).<PhaseValidationRequestDto>build());
@@ -137,8 +137,7 @@ public class PhaseValidationController {
                     action.setValidationReviewedBy(null);
                     action.setValidationRefusalReason(null);
                     actionRepository.save(action);
-                    accessControlService.validationRecipientFor(action)
-                            .ifPresent(recipient -> accountMailService.sendActionValidationEmail(validation.getRequest(), validation.getStage(), action, recipient));
+                    notifyActionValidation(validation.getRequest(), validation.getStage(), action);
                     return ResponseEntity.ok(validationMapper.toDto(enrichValidation(validation)));
                 })
                 .orElse(ResponseEntity.status(403).<PhaseValidationRequestDto>build());
@@ -361,6 +360,25 @@ public class PhaseValidationController {
         recipients.values().stream()
                 .filter(user -> user.getEmail() != null && !user.getEmail().trim().isEmpty())
                 .forEach(user -> accountMailService.sendActionRejectedEmail(request, stage, action, user, reason));
+    }
+
+    /**
+     * Email is a best-effort side effect: a missing recipient or an unavailable SMTP
+     * server must never roll back an otherwise valid phase-validation request.
+     */
+    private void notifyActionValidation(EcrRequest request, EcrStage stage, EcrAction action) {
+        Optional<AppUser> recipient = accessControlService.validationRecipientFor(action);
+        if (!recipient.isPresent()) {
+            LOGGER.warn("Action validation email skipped: no recipient for action {} in request {}",
+                    action == null ? null : action.getId(), request == null ? null : request.getId());
+            return;
+        }
+        try {
+            accountMailService.sendActionValidationEmail(request, stage, action, recipient.get());
+        } catch (MailDeliveryException exception) {
+            LOGGER.error("Action validation email failed for action {} in request {}; validation remains saved",
+                    action == null ? null : action.getId(), request == null ? null : request.getId(), exception);
+        }
     }
 
     private String normalizeEmail(String email) {

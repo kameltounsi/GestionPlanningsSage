@@ -1,0 +1,18 @@
+.action-duration-alert-dialog {
+  width: min(620px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  margin: auto;
+  padding: 24px;
+  overflow: auto;
+  border: 2px solid #c2410c;
+  border-radius: 16px;
+  color: #273549;
+  background: #fff;
+  box-shadow: 0 20px 80px #0005;
+}
+.action-duration-alert-dialog::backdrop { background: #17263e80; }
+.action-duration-alert-dialog h2 { margin-top: 0; color: #9a3412; }
+.action-duration-alert-list { display: grid; gap: 16px; }
+.action-duration-alert-list article { border: 1px solid #fed7aa; border-radius: 10px; padding: 16px; background: #fff7ed; }
+.action-duration-alert-list h3 { margin-top: 0; }
+.action-duration-alert-dialog p { line-height: 1.5; overflow-wrap: anywhere; }

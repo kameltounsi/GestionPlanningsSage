@@ -59,6 +59,7 @@ public class EcrActionController {
     private final AuthenticatedUserService authenticatedUserService;
     private final EcrActionMapper actionMapper;
     private final ActionPlanningRulePropagationService propagationService;
+    private final ActionDurationAlertService durationAlertService;
 
     @SuppressWarnings("java:S107")
     public EcrActionController(EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
@@ -72,7 +73,8 @@ public class EcrActionController {
                                PhaseValidationRequestRepository validationRepository,
                                AuthenticatedUserService authenticatedUserService,
                                EcrActionMapper actionMapper,
-                               ActionPlanningRulePropagationService propagationService) {
+                               ActionPlanningRulePropagationService propagationService,
+                               ActionDurationAlertService durationAlertService) {
         this.actionRepository = actionRepository;
         this.evidenceRepository = evidenceRepository;
         this.assetRepository = assetRepository;
@@ -90,6 +92,7 @@ public class EcrActionController {
         this.authenticatedUserService = authenticatedUserService;
         this.actionMapper = actionMapper;
         this.propagationService = propagationService;
+        this.durationAlertService = durationAlertService;
     }
 
     @GetMapping("/actions")
@@ -235,7 +238,7 @@ public class EcrActionController {
                     }
                     if (!accessControlService.isAdmin(user)) {
                         if (!accessControlService.canManageAction(user, action) && canUpdateDuration(user, action)) {
-                            return updateActionDuration(action, updatedAction);
+                            return updateActionDuration(action, updatedAction, user);
                         }
                         return updateActionProgress(action, updatedAction, user);
                     }
@@ -293,6 +296,7 @@ public class EcrActionController {
                     action.setDossierReview(updatedAction.getDossierReview());
                     EcrAction saved = actionRepository.save(action);
                     recalculateAfterActionChange(saved, previousDuration, previousEndDate);
+                    durationAlertService.durationChanged(saved, previousDuration, user);
                     if (completingAction) {
                         recordActionCompleted(user, saved);
                     }
@@ -334,13 +338,14 @@ public class EcrActionController {
         syncValidationAfterProgressChange(action);
         EcrAction saved = actionRepository.save(action);
         recalculateAfterActionChange(saved, previousDuration, previousEndDate);
+        durationAlertService.durationChanged(saved, previousDuration, user);
         if (completingAction) {
             recordActionCompleted(user, saved);
         }
         return ResponseEntity.ok(actionMapper.toDto(enrichAction(saved)));
     }
 
-    private ResponseEntity<EcrActionDto> updateActionDuration(EcrAction action, EcrAction updatedAction) {
+    private ResponseEntity<EcrActionDto> updateActionDuration(EcrAction action, EcrAction updatedAction, AppUser user) {
         if (!canChangeDuration(action)) {
             return ResponseEntity.badRequest().build();
         }
@@ -350,6 +355,7 @@ public class EcrActionController {
         action.setDurationOverridden(true);
         EcrAction saved = actionRepository.save(action);
         planningService.recalculateAfterDurationChange(saved, previousDuration, previousEndDate);
+        durationAlertService.durationChanged(saved, previousDuration, user);
         return ResponseEntity.ok(actionMapper.toDto(enrichAction(saved)));
     }
 

@@ -46,6 +46,7 @@ import { emptyEcrForm } from "../../constants/forms";
 import { criticalityClass, readableStatus, statusClass } from "../../utils/status";
 import { getStages, safeStage, stageColorClass, stageLabel } from "../../utils/stages";
 import { DossierReviewDialog } from "./DossierReviewDialog";
+import { AnnualCalendarDialog } from "./AnnualCalendarDialog";
 
 function isoWeek(dateValue) {
   const match = String(dateValue || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -263,6 +264,7 @@ function EditModificationDialog({ clientOptions, currentUser, ecrForm, existingR
 }
 
 function NewModificationPage({ clientOptions, currentUser = null, ecrForm, existingRequest = null, finishedProductReferences = [], mode = "create", pilots, productOptions, projects, saving, submitIcon: SubmitIcon = Plus, submitLabel = "Créer et ouvrir le suivi", users, onCancel, onSubmit, updateEcrForm }) {
+  const [annualCalendarOpen, setAnnualCalendarOpen] = useState(false);
   const availableStages = getStages(ecrForm.newVersion);
   const selectableProjects = mode === "edit" || isAdminUser(currentUser)
     ? projects
@@ -321,6 +323,9 @@ function NewModificationPage({ clientOptions, currentUser = null, ecrForm, exist
             <p>{mode === "edit" ? "Mettez à jour les informations de la demande, puis enregistrez pour continuer le suivi." : "Renseignez les informations de base, créez la demande, puis continuez directement le suivi des phases et actions sur cette même page."}</p>
           </div>
           <div className="form-intro-actions">
+            <button className="secondary-action" type="button" onClick={() => setAnnualCalendarOpen(true)}>
+              <CalendarDays size={18} aria-hidden="true" /> Calendrier annuel
+            </button>
             <span className="stage-pill teal">{mode === "edit" ? "Édition" : "Création assistée"}</span>
             <button className="ghost-icon" type="button" onClick={onCancel} title="Fermer" aria-label="Fermer">
               <X size={18} />
@@ -539,6 +544,7 @@ function NewModificationPage({ clientOptions, currentUser = null, ecrForm, exist
         {projectPilotOptions.length > 0 && !ecrForm.pilot && <p className="form-hint project-team-warning">Sélectionnez un chef de projet comme pilote.</p>}
         <p className="form-hint">Les actions standard de chaque phase sont générées automatiquement depuis la page Actions.</p>
       </form>
+      {annualCalendarOpen && <AnnualCalendarDialog onClose={() => setAnnualCalendarOpen(false)} />}
     </section>
   );
 }

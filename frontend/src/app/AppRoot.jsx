@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ActionDurationAlerts } from "../features/modifications/ActionDurationAlerts";
 import Swal from "sweetalert2";
 import "sweetalert2/dist/sweetalert2.min.css";
 import html2canvas from "html2canvas";
@@ -3309,6 +3310,7 @@ function AppRoot() {
     let disposed = false;
 
     const handlePlanningUpdated = () => {
+      globalThis.dispatchEvent(new Event("action-duration-alerts-refresh"));
       globalThis.clearTimeout(realtimeRefreshTimer.current);
       realtimeRefreshTimer.current = globalThis.setTimeout(refreshRealtimeData, 250);
     };
@@ -5401,6 +5403,7 @@ function AppRoot() {
 
   return (
     <main className={menuCollapsed ? "app-frame nav-collapsed" : "app-frame"}>
+      {currentUser && <ActionDurationAlerts key={currentUser.id} />}
       <Sidebar
           collapsed={menuCollapsed}
           canAccessPreferentials={canAccessPreferentialsPage(currentUser, projects)}

@@ -1,0 +1,36 @@
+.annual-calendar-dialog {
+  width: min(1240px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 24px;
+  overflow: auto;
+  border: 1px solid #cbdde5;
+  border-radius: 20px;
+  background: #fff;
+  color: #203947;
+  box-shadow: 0 24px 80px #102c4155;
+}
+.annual-calendar-dialog::backdrop { background: #102c4180; }
+.annual-calendar-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.annual-calendar-header h2 { margin: 0 0 6px; }
+.annual-calendar-header p, .annual-calendar-legend { margin: 0; font-size: 13px; color: #506773; }
+.annual-calendar-header button { flex-shrink: 0; }
+.annual-calendar-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+.annual-calendar-month { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
+.annual-calendar-month caption { padding: 9px 4px; border-radius: 8px 8px 0 0; background: #287999; color: white; font-weight: 700; font-size: 15px; text-transform: capitalize; }
+.annual-calendar-month th, .annual-calendar-month td { height: 27px; padding: 2px 0; text-align: center; }
+.annual-calendar-month thead th { font-size: 10px; color: #526977; }
+.annual-calendar-month tbody th { color: #526977; font-size: 10px; border-right: 1px solid #dbe5eb; }
+.annual-calendar-weekend { color: #627986; background: #f4f7fa; }
+.annual-calendar-current-week > * { background: #d9f0f5; }
+.annual-calendar-month td span { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; }
+.annual-calendar-today { border-radius: 50%; background: #166780; color: white; font-weight: 700; outline: 2px solid #166780; outline-offset: 1px; }
+.annual-calendar-legend { margin-top: 18px; }
+@media (max-width: 1000px) { .annual-calendar-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .annual-calendar-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) {
+  .annual-calendar-dialog { padding: 16px; }
+  .annual-calendar-grid { grid-template-columns: 1fr; }
+  .annual-calendar-header { align-items: flex-start; flex-wrap: wrap; }
+}

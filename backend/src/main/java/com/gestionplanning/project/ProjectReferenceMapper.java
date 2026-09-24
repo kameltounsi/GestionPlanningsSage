@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 @Component
 public class ProjectReferenceMapper implements CommandLineRunner {
     private static final String PERMANENT_ADMIN_USERNAME = "fchelbi";
-    private static final String PERMANENT_ADMIN_EMAIL = "f.chalbi1@sagetunisia.com";
+    private static final String PERMANENT_ADMIN_EMAIL = "f.chalbi@sagetunisia.com";
     private static final String PERMANENT_ADMIN_FALLBACK_NAME = "Fethi Chelbi";
     private static final String PERMANENT_ADMIN_PROJECT_ROLE = "Admin";
     private static final String PERMANENT_ENGINEERING_MANAGER_PROJECT_ROLE = "Engineering Manager";

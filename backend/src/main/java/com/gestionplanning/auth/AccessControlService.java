@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 @Service
 public class AccessControlService {
     private static final String DEFAULT_ADMIN_USERNAME = "fchelbi";
-    private static final String DEFAULT_ADMIN_EMAIL = "f.chalbi1@sagetunisia.com";
+    private static final String DEFAULT_ADMIN_EMAIL = "f.chalbi@sagetunisia.com";
 
     private final ProjectReferenceRepository projectRepository;
     private final AppUserRepository userRepository;

@@ -685,6 +685,14 @@ export function getPendingActionDeadlineAlerts() {
   return request("/action-deadline-alerts/pending-sound");
 }
 
+export function getPendingActionDurationAlerts() {
+  return request("/action-duration-alerts");
+}
+
+export function acknowledgeActionDurationAlerts(ids) {
+  return request("/action-duration-alerts/acknowledge", { method: "POST", body: JSON.stringify(ids) });
+}
+
 export function acknowledgeActionDeadlineAlerts(ids) {
   return request("/action-deadline-alerts/ack-sound", {
     method: "POST",

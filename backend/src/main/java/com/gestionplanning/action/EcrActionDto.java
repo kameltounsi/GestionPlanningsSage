@@ -116,7 +116,7 @@ public class EcrActionDto {
         dto.routineSeriesId = action.getRoutineSeriesId();
         dto.routineOccurrenceIndex = action.getRoutineOccurrenceIndex();
         dto.stage = action.getStage();
-        dto.status = action.getStatus();
+        dto.status = displayStatus(action);
         dto.closedDate = action.getClosedDate();
         dto.finalizationDate = action.getFinalizationDate();
         dto.createdAt = action.getCreatedAt();
@@ -149,13 +149,21 @@ public class EcrActionDto {
         dto.startDate = action.getStartDate();
         dto.endDate = action.getEndDate();
         dto.stage = action.getStage();
-        dto.status = action.getStatus();
+        dto.status = displayStatus(action);
         dto.closedDate = action.getClosedDate();
         dto.finalizationDate = action.getFinalizationDate();
         dto.createdAt = action.getCreatedAt();
         dto.validationStatus = action.getValidationStatus();
         dto.late = action.isLate();
         return dto;
+    }
+
+    private static ActionStatus displayStatus(EcrAction action) {
+        if (action.getStatus() == ActionStatus.LATE && !action.isLate()) {
+            return action.getStartDate() != null && !action.getStartDate().isAfter(LocalDate.now())
+                    ? ActionStatus.IN_PROGRESS : ActionStatus.TODO;
+        }
+        return action.getStatus();
     }
 
     public EcrAction toEntity() {

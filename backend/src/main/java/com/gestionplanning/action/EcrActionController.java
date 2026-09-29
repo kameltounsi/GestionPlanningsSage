@@ -101,7 +101,7 @@ public class EcrActionController {
             List<EcrAction> actions = actionRepository.findByDeadlineBeforeAndStatusNotInOrderByDeadlineAsc(LocalDate.now(ZoneId.systemDefault()), Arrays.asList(ActionStatus.DONE, ActionStatus.DONE_LATE));
             planningService.refreshActionStatuses(actions);
             return toDtos(enrichActions(actionRepository.saveAll(actions).stream()
-                    .filter(action -> action.getStatus() != ActionStatus.DONE && action.getStatus() != ActionStatus.DONE_LATE)
+                    .filter(EcrAction::isLate)
                     .collect(Collectors.toList())));
         }
         List<EcrAction> actions = actionRepository.findAll();

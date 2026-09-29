@@ -66,7 +66,7 @@ public class ActionDeadlineAlertService {
     }
 
     private void generateDueAlertFor(EcrAction action, LocalDate today) {
-        if (isDone(action) || action.getEndDate() == null || isArchived(action)) {
+        if (!isEligible(action) || action.getEndDate() == null) {
             return;
         }
         ActionDeadlineAlertType alertType = alertTypeFor(today, action.getEndDate());
@@ -91,7 +91,7 @@ public class ActionDeadlineAlertService {
         List<ActionDeadlineAlert> alerts = alertRepository.findByRecipientEmailAndSoundAcknowledgedAtIsNullOrderByCreatedAtAscIdAsc(normalizeEmail(user.getEmail()));
         List<ActionDeadlineAlert> activeAlerts = new ArrayList<>();
         for (ActionDeadlineAlert alert : alerts) {
-            if (alert.getAction() != null && !isDone(alert.getAction()) && !isArchived(alert.getAction())) {
+            if (isEligible(alert.getAction())) {
                 activeAlerts.add(alert);
             } else {
                 alert.setSoundAcknowledgedAt(now);
@@ -133,7 +133,7 @@ public class ActionDeadlineAlertService {
     }
 
     private void sendMailIfNeeded(ActionDeadlineAlert alert, AppUser recipient) {
-        if (alert.getMailSentAt() != null || isArchived(alert.getAction()) || recipient == null) {
+        if (alert.getMailSentAt() != null || !isEligible(alert.getAction()) || recipient == null) {
             return;
         }
         LocalDateTime now = LocalDateTime.now(ZoneId.systemDefault());
@@ -219,8 +219,9 @@ public class ActionDeadlineAlertService {
         return action.isChecked() || action.getStatus() == ActionStatus.DONE || action.getStatus() == ActionStatus.DONE_LATE;
     }
 
-    private boolean isArchived(EcrAction action) {
-        return action == null || action.getRequest() == null || action.getRequest().isArchived();
+    private boolean isEligible(EcrAction action) {
+        return action != null && action.isInActivePhase() && !isDone(action)
+                && action.getStatus() != ActionStatus.CANCELLED;
     }
 
     private boolean isEscalationAlert(ActionDeadlineAlertType type) {

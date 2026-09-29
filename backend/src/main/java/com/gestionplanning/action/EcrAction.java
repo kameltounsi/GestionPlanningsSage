@@ -566,8 +566,18 @@ public class EcrAction {
         this.dossierReview = dossierReview;
     }
 
+    @JsonIgnore
+    public boolean isInActivePhase() {
+        return request != null && !request.isArchived() && !request.isClosureStatus() && !request.isCancelledStatus()
+                && stage != null && stage != EcrStage.CLOSED && stage != EcrStage.CANCELLED
+                && stage == request.getCurrentStage();
+    }
+
     public boolean isLate() {
-        return deadline != null && deadline.isBefore(LocalDate.now(ZoneId.systemDefault())) && status != ActionStatus.DONE && status != ActionStatus.DONE_LATE;
+        LocalDate dueDate = endDate != null ? endDate : deadline;
+        return isInActivePhase() && !checked && status != ActionStatus.CANCELLED
+                && status != ActionStatus.DONE && status != ActionStatus.DONE_LATE
+                && dueDate != null && dueDate.isBefore(LocalDate.now(ZoneId.systemDefault()));
     }
 
     @PrePersist

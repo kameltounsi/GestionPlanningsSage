@@ -1375,8 +1375,7 @@ function actionTimelineEnd(action, startDate) {
 function actionGanttStatusClass(action) {
   if (action?.status === "CANCELLED") return "cancelled";
   if (isActionDone(action)) return "closed";
-  const end = parseDateOnly(action.endDate) || parseDateOnly(action.deadline);
-  return end && end < new Date() ? "late" : "planned";
+  return action?.late ? "late" : "planned";
 }
 
 function isCriticalActionValue(action) {

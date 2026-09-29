@@ -358,8 +358,7 @@ public class WeeklyModificationProgressMailService {
         if (isDone(action)) {
             return "closed";
         }
-        LocalDate end = firstDate(action.getEndDate(), action.getDeadline());
-        return end != null && end.isBefore(LocalDate.now()) ? "late" : "planned";
+        return action.isLate() ? "late" : "planned";
     }
 
     private String actionGanttStatusLabel(EcrAction action) {

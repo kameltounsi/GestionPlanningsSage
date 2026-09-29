@@ -920,9 +920,8 @@ function dashboardActionDueTime(action) {
   return dashboardActionDueDate(action)?.getTime() || Number.MAX_SAFE_INTEGER;
 }
 
-function isDashboardActionLate(action, today = startOfLocalDay(new Date())) {
-  const dueDate = dashboardActionDueDate(action);
-  return Boolean(action?.late) || Boolean(dueDate && dueDate < today);
+function isDashboardActionLate(action) {
+  return Boolean(action?.late);
 }
 
 function dashboardLateOwners(rows = [], limit = 6) {

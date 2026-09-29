@@ -242,7 +242,8 @@ public class ActionPlanningService {
             return;
         }
         action.setChecked(false);
-        if (action.getEndDate() != null && today.isAfter(action.getEndDate())) {
+        LocalDate dueDate = action.getEndDate() != null ? action.getEndDate() : action.getDeadline();
+        if (action.isInActivePhase() && dueDate != null && today.isAfter(dueDate)) {
             action.setStatus(ActionStatus.LATE);
             return;
         }

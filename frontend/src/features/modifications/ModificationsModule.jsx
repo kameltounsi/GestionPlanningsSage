@@ -12,6 +12,7 @@ import {
   ChevronUp,
   CircleAlert,
   ClipboardList,
+  FileSpreadsheet,
   FileText,
   FolderKanban,
   Gauge,
@@ -170,6 +171,7 @@ export function createModificationsModule(deps) {
     canValidateActionForUser,
     canValidatePhases,
     compareActionDisplayOrder,
+    completePhaseDossierExportExcel,
     fileNameToken,
     firstActionParticipantStage,
     formatFileSize,
@@ -1550,6 +1552,22 @@ function ModificationsPage(props) {
       .finally(() => setSaving(false));
   }
 
+  function exportModificationDossierExcel() {
+    if (!selectedRequest) return;
+    getActions(selectedRequest.id)
+      .then((requestActions) => {
+        downloadBlobFile(
+          `dossier-modification-${fileNameToken(requestDisplayName(selectedRequest))}.xls`,
+          completePhaseDossierExportExcel(selectedRequest, requestActions),
+          "application/vnd.ms-excel;charset=utf-8"
+        );
+        successToast("Dossier de modification Excel généré");
+      })
+      .catch(() => {
+        errorAlert("Extraction du dossier de modification impossible.");
+      });
+  }
+
   function exportProfessionalDossierPdf() {
     if (!selectedRequest) return;
     getActions(selectedRequest.id)
@@ -1800,7 +1818,10 @@ function ModificationsPage(props) {
                 </button>
                 {canExportGantt && (
                   <>
-
+                    <button className="dossier-review-card" type="button" onClick={exportModificationDossierExcel} title="Extraire le dossier de modification Excel">
+                      <FileSpreadsheet size={24} />
+                      <span>Dossier Excel</span>
+                    </button>
                     <button className="dossier-review-card" type="button" onClick={exportProfessionalDossierPdf} title="Generer le dossier ECR PDF professionnel">
                       <FileText size={24} />
                       <span>Dossier PDF</span>

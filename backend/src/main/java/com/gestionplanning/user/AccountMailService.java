@@ -70,7 +70,8 @@ public class AccountMailService {
         this.startTlsEnabled = startTlsEnabled;
         this.startTlsRequired = startTlsRequired;
         this.sslEnabled = sslEnabled;
-        this.applicationUrl = applicationUrl;
+        // Required public address for every outgoing email, regardless of legacy deployment overrides.
+        this.applicationUrl = "http://192.168.1.117:3000";
         this.accountMailEnabled = accountMailEnabled;
         this.alertMailEnabled = alertMailEnabled;
     }
@@ -101,7 +102,7 @@ public class AccountMailService {
             message.setFrom(new InternetAddress(fromAddress));
             message.setSubject("Vos accès Gestion Planning Sage", EMAIL_CHARSET);
             message.setContent(buildContent(user, temporaryPassword));
-            Transport.send(message);
+            deliverMessage(message);
             LOGGER.info("Account creation email sent to {}", user.getEmail());
         } catch (MessagingException | RuntimeException exception) {
             LOGGER.error("Unable to send account creation email to {}", user.getEmail(), exception);
@@ -150,6 +151,43 @@ public class AccountMailService {
         sendMessage(to, title, text, html, "phase validation");
     }
 
+    public void sendActionDeletedEmail(com.gestionplanning.action.ActionDeletionAlert alert) {
+        if (!alertMailEnabled || !isMailConfigured()) {
+            throw new MailDeliveryException("Envoi des alertes désactivé ou configuration SMTP incomplète.");
+        }
+        String title = "Action supprimée — " + value(alert.getRequestLabel());
+        String text = "Une action a été supprimée."
+                + "\nAction : " + value(alert.getActionTitle())
+                + "\nModification : " + value(alert.getRequestLabel())
+                + "\nPhase : " + value(alert.getPhaseLabel())
+                + "\nChef de projet : " + value(alert.getProjectLead())
+                + "\nSupprimée par : " + value(alert.getChangedBy())
+                + TEXT_LINK_LINE + applicationUrl;
+        String html = "<!doctype html><html><body style=\"font-family:Arial,sans-serif;color:#26352c\">"
+                + "<h2>Action supprimée</h2><p>" + escape(text).replace("\n", "<br>") + "</p>"
+                + "<p><a href=\"" + escapeAttribute(applicationUrl) + "\">Accéder à l’application</a></p></body></html>";
+        sendMessage(alert.getRecipientEmail(), title, text, html, "action deletion");
+    }
+
+    public void sendActionStartDateChangedEmail(com.gestionplanning.action.ActionStartDateAlert alert) {
+        if (!alertMailEnabled || !isMailConfigured()) {
+            throw new MailDeliveryException("Envoi des alertes désactivé ou configuration SMTP incomplète.");
+        }
+        java.time.format.DateTimeFormatter format = java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy");
+        String title = "Action : date de début modifiée";
+        String text = "La date de début d'une action a été modifiée par " + value(alert.getChangedBy())
+                + ".\nModification : " + value(alert.getRequestLabel())
+                + "\nAction : " + value(alert.getActionTitle())
+                + "\nAncienne date de début : " + (alert.getPreviousDate() == null ? "Non définie" : alert.getPreviousDate().format(format))
+                + "\nNouvelle date de début : " + (alert.getNewDate() == null ? "Non définie" : alert.getNewDate().format(format))
+                + "\nVous êtes le validateur de cette action."
+                + TEXT_LINK_LINE + applicationUrl;
+        String html = "<!doctype html><html><body style=\"font-family:Arial,sans-serif;color:#26352c\"><h2>" + escape(title)
+                + "</h2><p>" + escape(text).replace("\n", "<br>") + "</p>"
+                + "<p><a href=\"" + escapeAttribute(applicationUrl) + "\">Accéder à l’application</a></p></body></html>";
+        sendMessage(alert.getRecipientEmail(), title, text, html, "action start date change");
+    }
+
     public void sendActionDurationChangedEmail(com.gestionplanning.action.ActionDurationAlert alert) {
         if (!alertMailEnabled || !isMailConfigured()) {
             throw new MailDeliveryException("Envoi des alertes désactivé ou configuration SMTP incomplète.");
@@ -163,7 +201,8 @@ public class AccountMailService {
                 + "\nVous êtes le validateur de cette action."
                 + TEXT_LINK_LINE + value(applicationUrl);
         String html = "<!doctype html><html><body><h2>" + escape(title)
-                + "</h2><p>" + escape(text).replace("\n", "<br>") + "</p></body></html>";
+                + "</h2><p>" + escape(text).replace("\n", "<br>") + "</p>"
+                + "<p><a href=\"" + escapeAttribute(applicationUrl) + "\">Accéder à l’application</a></p></body></html>";
         sendMessage(alert.getRecipientEmail(), title, text, html, "critical action duration change");
     }
 
@@ -433,7 +472,8 @@ public class AccountMailService {
         String text = "Bonjour " + value(user.getFullName()) + ","
                 + "\n\nVotre code de récupération Gestion Planning Sage est: " + value(code)
                 + "\nCe code expire dans 10 minutes."
-                + "\n\nSi vous n'avez pas demandé cette récupération, ignorez cet email.";
+                + "\n\nSi vous n'avez pas demandé cette récupération, ignorez cet email."
+                + TEXT_LINK_LINE + applicationUrl;
         String html = "<!doctype html><html><body style=\"margin:0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;\">"
                 + "<div style=\"max-width:640px;margin:0 auto;padding:28px 18px;\">"
                 + "<div style=\"background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 14px 36px rgba(15,23,42,.10);\">"
@@ -443,6 +483,7 @@ public class AccountMailService {
                 + "<p>Bonjour <strong>" + escape(value(user.getFullName())) + "</strong>, utilisez le code ci-dessous pour vérifier votre identité.</p>"
                 + "<div style=\"font-size:32px;letter-spacing:.35em;font-weight:800;text-align:center;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:18px 20px;margin:22px 0;color:#111827;\">" + escape(value(code)) + "</div>"
                 + "<p>Ce code expire dans <strong>10 minutes</strong>. Si vous n'avez pas demandé cette récupération, ignorez cet email.</p>"
+                + "<p><a href=\"" + escapeAttribute(applicationUrl) + "\">Accéder à l’application</a></p>"
                 + "</div></div></div></body></html>";
         sendMessage(user.getEmail(), title, text, html, "password reset");
     }
@@ -508,7 +549,7 @@ public class AccountMailService {
             message.setFrom(new InternetAddress(fromAddress));
             message.setSubject(subject, EMAIL_CHARSET);
             message.setContent(buildContent(plainText, html));
-            Transport.send(message);
+            deliverMessage(message);
             LOGGER.info("{} email sent to {}{}", logContext, to, isBlank(cc) ? "" : " cc " + cc);
         } catch (MessagingException | RuntimeException exception) {
             LOGGER.error("Unable to send {} email to {}", logContext, to, exception);
@@ -537,12 +578,16 @@ public class AccountMailService {
             mixed.addBodyPart(attachmentPart);
 
             message.setContent(mixed);
-            Transport.send(message);
+            deliverMessage(message);
             LOGGER.info("{} email sent to {} with attachment {}", logContext, to, filename);
         } catch (MessagingException | RuntimeException exception) {
             LOGGER.error("Unable to send {} email to {}", logContext, to, exception);
             throw new MailDeliveryException("Echec d'envoi email: " + rootMessage(exception), exception);
         }
+    }
+
+    void deliverMessage(MimeMessage message) throws MessagingException {
+        Transport.send(message);
     }
 
     private String attachmentContentType(String filename) {

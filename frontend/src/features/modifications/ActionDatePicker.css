@@ -1,0 +1,39 @@
+.action-date-trigger { display:flex; align-items:center; gap:8px; width:100%; min-height:38px; border:1px solid #cadbce; border-radius:8px; background:#fff; padding:8px 10px; color:#285b39; cursor:pointer; text-align:left; }
+.action-meta .action-date-trigger span { display:inline; background:none; border:0; padding:0; min-height:0; font-size:12px; color:inherit; }
+.action-date-trigger .action-date-edit-label { margin-left:auto; font-weight:700; }
+.action-date-trigger svg { flex-shrink:0; }
+.action-date-dialog { width:min(720px, calc(100vw - 28px)); max-height:calc(100dvh - 32px); overflow:auto; padding:24px; border:1px solid #dce4dc; border-radius:18px; box-shadow:0 24px 80px #18372840; color:#26352c; background:#fff; }
+.action-date-dialog::backdrop { background:#13251d80; backdrop-filter:blur(3px); }
+.action-date-dialog-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+.action-date-dialog-header p { margin:0 0 7px; font-size:10px; letter-spacing:.12em; font-weight:750; color:#617666; }
+.action-date-dialog h2 { margin:0; font-size:22px; }
+.action-date-close { display:grid; place-items:center; border:0; background:#f0f4f0; border-radius:8px; min-width:34px; height:34px; cursor:pointer; }
+.action-date-title { font-size:14px; margin:12px 0 22px; color:#627266; overflow-wrap:anywhere; }
+.action-date-layout { display:grid; grid-template-columns:minmax(0, 1.2fr) minmax(0, 1fr); gap:22px; }
+.action-date-calendar { min-width:0; }
+.action-date-month { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; text-transform:capitalize; }
+.action-date-month button { display:grid; place-items:center; width:34px; height:34px; background:white; border:1px solid #dfe7df; border-radius:8px; cursor:pointer; }
+.action-date-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:4px; }
+.action-date-grid small { text-align:center; font-size:11px; color:#718076; padding:5px 0; }
+.action-date-grid button { aspect-ratio:1; padding:0; min-width:0; border:1px solid transparent; border-radius:8px; background:white; color:#34483b; cursor:pointer; font-size:13px; }
+.action-date-grid .weekend { background:#f4f6f3; }
+.action-date-grid .outside { color:#a9b4ac; }
+.action-date-grid .today { border-color:#588361; }
+.action-date-grid button:hover { background:#e9f1e9; }
+.action-date-grid .selected { background:#315f3d; color:white; font-weight:750; }
+.action-date-shortcuts { display:flex; gap:8px; margin-top:15px; }
+.action-date-shortcuts button { padding:6px 10px; border:1px solid #dce6dc; border-radius:7px; background:white; color:#42644b; font-size:12px; cursor:pointer; }
+.action-date-preview { padding:16px; border-radius:12px; background:#f5f8f3; }
+.action-date-preview label { display:grid; gap:7px; font-size:12px; font-weight:700; }
+.action-date-preview input { min-width:0; width:100%; border:1px solid #cbd9cb; border-radius:8px; background:white; padding:9px; font-size:14px; }
+.action-date-preview dl { display:grid; gap:12px; margin:18px 0; }
+.action-date-preview dt { color:#758276; font-size:11px; }
+.action-date-preview dd { margin:3px 0 0; font-size:14px; font-weight:700; }
+.action-date-preview .new-end { padding-top:12px; border-top:1px solid #dce6d9; color:#285c36; }
+.action-date-preview p { color:#5c6c5f; font-size:12px; line-height:1.6; margin:10px 0 0; }
+.action-date-preview .action-date-note { font-size:11px; }
+.action-date-footer { position:sticky; bottom:-24px; z-index:1; display:flex; justify-content:flex-end; gap:10px; border-top:1px solid #e5ebe3; padding:18px 0 24px; margin-top:22px; margin-bottom:-24px; background:#fff; }
+.action-date-error { color:#a32323; font-size:13px; }
+.action-date-dialog button:focus-visible,.action-date-trigger:focus-visible { outline:3px solid #8bb392; outline-offset:2px; }
+.action-date-dialog button:disabled { opacity:.5; cursor:not-allowed; }
+@media(max-width:600px) { .action-date-dialog { padding:18px; } .action-date-layout { grid-template-columns:minmax(0,1fr); gap:18px; } .action-date-dialog h2 { font-size:20px; } .action-date-grid button { max-height:40px; aspect-ratio:auto; height:38px; } .action-date-footer { bottom:-18px; padding-bottom:18px; margin-bottom:-18px; } .action-date-footer > button { flex:1; } }

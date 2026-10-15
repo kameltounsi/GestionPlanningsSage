@@ -48,12 +48,14 @@ public class ActionPlanningRuleController {
     }
 
     @PostMapping
+    @Transactional
     public ResponseEntity<ActionPlanningRuleDto> create(@Valid @RequestBody ActionPlanningRuleDto ruleDto) {
         ActionPlanningRule rule = normalize(ruleMapper.toEntity(ruleDto));
         if (!hasValidDependencyGraph(rule, null)) {
             return ResponseEntity.unprocessableEntity().build();
         }
         ActionPlanningRule savedRule = ruleRepository.save(rule);
+        propagationService.addRuleToExistingRequests(savedRule);
         return ResponseEntity.created(URI.create("/api/action-planning-rules/" + savedRule.getId())).body(ruleMapper.toDto(savedRule));
     }
 

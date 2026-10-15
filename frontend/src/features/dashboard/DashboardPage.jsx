@@ -1,3 +1,6 @@
+import { ExcelExportButton } from "../../components/common/ExcelExportButton";
+import { requestsSheet, dossierSheet, actionRowsSheet } from "../../utils/businessExports";
+import { downloadExcel } from "../../utils/excelExport";
 import React, {useEffect, useMemo, useState} from "react";
 import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, ClipboardList, FileText, FolderKanban, Gauge, Plus, X, XCircle } from "lucide-react";
 import { getDashboardActions } from "../../api";
@@ -7,7 +10,6 @@ import {getStages, stageColorClass, stageLabel} from "../../utils/stages";
 import { userRoleLabel } from "../../utils/users";
 import {
   loadDossierAssetsForRequests,
-  projectDossierReviewsExportExcel,
   projectDossierReviewsExportHtml,
   projectDossierReviewsExportText
 } from "../modifications/dossierReviewExports";
@@ -511,11 +513,12 @@ export function DashboardPage({
       }
       return;
     } else if (format === "excel") {
-      downloadBlobFile(
-        `${fileBaseName}.xls`,
-        projectDossierReviewsExportExcel(dossierExportLabel, dossierRequestsWithAssets),
-        "application/vnd.ms-excel;charset=utf-8"
-      );
+      try {
+        await downloadExcel({ title: `Revues de dossier - ${dossierExportLabel}`, sheets: [dossierSheet(dossierRequestsWithAssets, users)], scope: `Projet : ${dossierExportLabel}. Modifications accessibles dans le périmètre sélectionné.` });
+      } catch (error) {
+        errorAlert(error.message || "Impossible de générer le fichier Excel.");
+        return;
+      }
     } else {
       downloadTextFile(
         `${fileBaseName}.txt`,
@@ -527,7 +530,15 @@ export function DashboardPage({
 
   return (
     <section className="page-content">
+
       <PageHeader
+        actions={<ExcelExportButton title="Tableau de bord" sheets={[
+        { name: "Synthèse", rows: [
+          ["Nombre de modifications", dashboardRequests.length], ["Modifications actives", activeRequests.length],
+          ["Actions en retard", lateActionRows.length], ["Modifications clôturées", closedRequests.length], ["Modifications annulées", cancelledRequests.length]
+        ], columns: [{ label: "Indicateur", width: 45, value: (r) => r[0] }, { label: "Nombre", width: 20, value: (r) => r[1] }] },
+        requestsSheet(dashboardRequests, users), actionRowsSheet(dashboardActionRows, users)
+      ]} scope="Données actuellement chargées dans le périmètre du tableau de bord, toutes les pages." />}
         eyebrow={adminView ? "Vue globale" : "Votre périmètre"}
         title={adminView ? "Dashboard direction ECR" : "Dashboard personnel ECR"}
         subtitle={adminView ? "Pilotage de toutes les modifications, priorités et charges projet." : "Synthèse des modifications où vous intervenez comme membre, pilote, responsable ou validateur."}

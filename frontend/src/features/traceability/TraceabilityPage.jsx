@@ -1,8 +1,11 @@
+import { getAuditLogs } from "../../api";
 import React, { useEffect, useState } from "react";
 import { ClipboardList, Search } from "lucide-react";
 import { EmptyState } from "../../components/common/EmptyState";
 import { PageHeader } from "../../components/common/PageHeader";
 import { userRoleLabel } from "../../utils/users";
+import { ExcelExportButton } from "../../components/common/ExcelExportButton";
+import { excelDateTime } from "../../utils/businessExports";
 
 const TRACEABILITY_PAGE_SIZE = 30;
 
@@ -173,6 +176,18 @@ function userFriendlyStoredAuditDetail(detail) {
   return allowedPrefixes.some((prefix) => value.startsWith(prefix)) ? value : "";
 }
 
+function auditSheet(items) {
+  return { name: "Historique des changements", rows: items, columns: [
+            { label: "Date et heure", width: 23, format: "dd/mm/yyyy hh:mm", value: (log) => excelDateTime(log.occurredAt) },
+            { label: "Personne", width: 30, value: (log) => log.actorName },
+            { label: "Rôle de la personne", width: 30, value: (log) => userFriendlyRole(log.actorRole) },
+            { label: "Opération", width: 38, value: (log) => auditActionLabel(log.actionType) },
+            { label: "Élément concerné", width: 28, value: (log) => auditTargetSummary(log) },
+            { label: "Description du changement", width: 70, value: (log) => auditFriendlyDetail(log) },
+            { label: "Résultat", width: 22, value: (log) => auditResultLabel(log) }
+          ] };
+}
+
 export function TraceabilityPage({ actionFilter, actionOptions, logs, query, onRefresh, setActionFilter, setQuery }) {
   const { currentPage, pageCount, pagedItems: pagedLogs, setCurrentPage } = usePaginatedItems(logs, TRACEABILITY_PAGE_SIZE);
 
@@ -182,8 +197,12 @@ export function TraceabilityPage({ actionFilter, actionOptions, logs, query, onR
 
   return (
     <section className="page-content traceability-content">
-      <PageHeader eyebrow="Suivi" title="Tracabilite" subtitle="Historique des changements importants effectues dans l'application." />
-      <div className="modifications-toolbar">
+      <PageHeader eyebrow="Suivi" title="Tracabilite" subtitle="Historique des changements importants effectues dans l'application." actions={<>
+        <ExcelExportButton title="Traçabilité" scope={`Recherche : ${query || "Toutes"} ; type : ${actionFilter ? auditActionLabel(actionFilter) : "Tous"}. Toutes les pages parmi les 300 derniers changements chargés.`}
+          sheets={[auditSheet(logs)]} />
+        <ExcelExportButton title="Historique complet" label="Excel historique complet" scope="Historique complet accessible, sans filtre et sans limite aux 300 derniers changements." loadSheets={async () => [auditSheet(await getAuditLogs(true))]} />
+      </>} />
+      <div className="modifications-toolbar traceability-toolbar">
         <label className="search">
           <Search size={16} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher une personne, un changement, un element..." />
@@ -202,6 +221,7 @@ export function TraceabilityPage({ actionFilter, actionOptions, logs, query, onR
           Actualiser
         </button>
         <span className="toolbar-count">{logs.length} changement{logs.length > 1 ? "s" : ""}</span>
+
       </div>
 
       <section className="panel traceability-panel">

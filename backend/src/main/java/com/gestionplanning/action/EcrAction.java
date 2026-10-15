@@ -87,6 +87,7 @@ public class EcrAction {
     private LocalDate date2;
     private LocalDate date3;
     private LocalDate startDate;
+    private Long startOffsetDays;
     private LocalDate endDate;
     private Integer workDurationDays;
     @Column(nullable = false, columnDefinition = "boolean default false")
@@ -388,6 +389,14 @@ public class EcrAction {
 
     public void setDate3(LocalDate date3) {
         this.date3 = date3;
+    }
+
+    public long getStartOffsetDays() {
+        return startOffsetDays == null ? 0L : startOffsetDays;
+    }
+
+    public void setStartOffsetDays(long startOffsetDays) {
+        this.startOffsetDays = startOffsetDays;
     }
 
     public LocalDate getStartDate() {

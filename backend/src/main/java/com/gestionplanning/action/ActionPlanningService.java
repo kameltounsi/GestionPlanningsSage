@@ -89,7 +89,7 @@ public class ActionPlanningService {
     private void recalculateCancelledAction(EcrRequest request, Map<String, ActionPlanningRule> rules, LocalDate actionStart, EcrAction action) {
         resolveOpenActionAssignees(request, action);
         action.setWorkDurationDays(durationFor(action, rules.get(actionKey(action))));
-        shiftActionTo(action, actionStart);
+        shiftActionTo(action, actionStart.plusDays(action.getStartOffsetDays()));
     }
 
     private LocalDate recalculateStage(EcrRequest request, List<EcrAction> actions, Map<String, ActionPlanningRule> rules,
@@ -143,7 +143,7 @@ public class ActionPlanningService {
         }
         resolveOpenActionAssignees(request, action);
         action.setWorkDurationDays(durationFor(action, rules.get(actionKey(action))));
-        shiftActionTo(action, actionStart);
+        shiftActionTo(action, actionStart.plusDays(action.getStartOffsetDays()));
         if (actionId != null) {
             plannedActionIds.add(actionId);
         }
@@ -182,6 +182,7 @@ public class ActionPlanningService {
     }
 
     public void recalculateAfterDurationChange(EcrAction changedAction, Integer previousDuration, LocalDate previousEndDate) {
+        if (isDone(changedAction)) return;
         if (changedAction == null || changedAction.getRequest() == null || changedAction.getRequest().getId() == null) {
             return;
         }
@@ -210,7 +211,7 @@ public class ActionPlanningService {
         if (deltaDays != 0) {
             List<EcrAction> actions = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(changedAction.getRequest().getId());
             for (EcrAction action : actions) {
-                if (!Objects.equals(action.getId(), changedAction.getId())
+                if (!action.isRoutineAction() && !Objects.equals(action.getId(), changedAction.getId())
                         && action.getStartDate() != null
                         && action.getStartDate().isAfter(effectivePreviousEndDate)) {
                     shiftActionBy(action, deltaDays);
@@ -219,6 +220,18 @@ public class ActionPlanningService {
             actionRepository.saveAll(actions);
         }
         recalculateRequest(changedAction.getRequest());
+    }
+
+    public void applyManualStartDate(EcrAction action, LocalDate startDate) {
+        if (isDone(action)) return;
+        if (startDate == null || Objects.equals(startDate, action.getStartDate())) {
+            return;
+        }
+        if (!action.isRoutineAction() && action.getStartDate() != null) {
+            long delta = java.time.temporal.ChronoUnit.DAYS.between(action.getStartDate(), startDate);
+            action.setStartOffsetDays(action.getStartOffsetDays() + delta);
+        }
+        shiftActionTo(action, startDate);
     }
 
     public void refreshActionStatuses(List<EcrAction> actions) {
@@ -261,6 +274,7 @@ public class ActionPlanningService {
     }
 
     private void shiftActionTo(EcrAction action, LocalDate start) {
+        if (isDone(action)) return;
         int duration = durationOrDefault(action.getWorkDurationDays());
         action.setStartDate(start);
         action.setEndDate(start.plusDays(duration));
@@ -268,6 +282,7 @@ public class ActionPlanningService {
     }
 
     private void shiftActionBy(EcrAction action, long deltaDays) {
+        if (isDone(action)) return;
         if (action.getStartDate() != null) {
             action.setStartDate(action.getStartDate().plusDays(deltaDays));
         }

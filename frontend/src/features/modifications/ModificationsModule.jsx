@@ -1,3 +1,4 @@
+import { ActionDatePicker } from "./ActionDatePicker";
 import React, { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import {
@@ -11,7 +12,6 @@ import {
   ChevronUp,
   CircleAlert,
   ClipboardList,
-  FileSpreadsheet,
   FileText,
   FolderKanban,
   Gauge,
@@ -170,7 +170,6 @@ export function createModificationsModule(deps) {
     canValidateActionForUser,
     canValidatePhases,
     compareActionDisplayOrder,
-    completePhaseDossierExportExcel,
     fileNameToken,
     firstActionParticipantStage,
     formatFileSize,
@@ -1551,22 +1550,6 @@ function ModificationsPage(props) {
       .finally(() => setSaving(false));
   }
 
-  function exportModificationDossierExcel() {
-    if (!selectedRequest) return;
-    getActions(selectedRequest.id)
-      .then((requestActions) => {
-        downloadBlobFile(
-          `dossier-modification-${fileNameToken(requestDisplayName(selectedRequest))}.xls`,
-          completePhaseDossierExportExcel(selectedRequest, requestActions),
-          "application/vnd.ms-excel;charset=utf-8"
-        );
-        successToast("Dossier de modification Excel généré");
-      })
-      .catch(() => {
-        errorAlert("Extraction du dossier de modification impossible.");
-      });
-  }
-
   function exportProfessionalDossierPdf() {
     if (!selectedRequest) return;
     getActions(selectedRequest.id)
@@ -1817,10 +1800,7 @@ function ModificationsPage(props) {
                 </button>
                 {canExportGantt && (
                   <>
-                    <button className="dossier-review-card" type="button" onClick={exportModificationDossierExcel} title="Extraire le dossier de modification Excel">
-                      <FileSpreadsheet size={24} />
-                      <span>Dossier Excel</span>
-                    </button>
+
                     <button className="dossier-review-card" type="button" onClick={exportProfessionalDossierPdf} title="Generer le dossier ECR PDF professionnel">
                       <FileText size={24} />
                       <span>Dossier PDF</span>
@@ -2789,7 +2769,9 @@ function ActionList({ actions, canAdmin = false, currentUser, directMatchIds = n
                 <span><em>Validateur</em><strong>{validatorDisplay}</strong></span>
                 <span><em>Criticité</em><strong className={`criticality ${criticalityClass(action.criticality)}`}>{action.criticality || "3-faible"}</strong></span>
                 <span className="blocking-action-meta"><em>Blocage</em><strong className={blockingActionStatusClass(action, isBlocked)}>{action.dependsOnActionId ? `Par: ${blockingActionLabel(action, actions)}` : "Aucune"}</strong></span>
-                <span><em>Début</em><strong>{action.startDate || "-"}</strong></span>
+                <div className="action-start-date-meta"><em>Date de début</em>{canEditDuration ? (
+                  <ActionDatePicker action={action} saving={saving} onSave={handleUpdateActionDuration} />
+                ) : <strong>{action.startDate || "-"}</strong>}</div>
                 <span><em>Fin</em><strong>{action.endDate || "-"}</strong></span>
                 <span><em>Semaine</em><strong>{actionWeekLabel(action.startDate, action.endDate)}</strong></span>
                 <span><em>Finalisation</em><strong>{formattedDateTime(action.finalizationDate)}</strong></span>
@@ -2825,6 +2807,7 @@ function ActionList({ actions, canAdmin = false, currentUser, directMatchIds = n
                   )}
                 </span>
                 <span><em>Asset</em><strong>{requiresEvidence(action) ? "Obligatoire" : "Optionnel"}</strong></span>
+                <span className="action-status-meta"><em>Statut</em><small className={`status ${statusClass(action.status)}`}>{readableStatus(action.status)}</small></span>
                 <span className="evidence-meta">
                   <em>Element preuve</em>
                   <strong className="asset-link-list">
@@ -2888,7 +2871,6 @@ function ActionList({ actions, canAdmin = false, currentUser, directMatchIds = n
                     </span>
                   )}
                 </span>
-                <span><em>Status</em><small className={`status ${statusClass(action.status)}`}>{readableStatus(action.status)}</small></span>
                 {canDeleteAction && (
                   <span className="action-row-actions">
                     <em>Action</em>

@@ -46,6 +46,54 @@ class ActionPlanningServiceTest {
         assertEquals(LocalDate.of(2026, 7, 6), nextPhaseRoot.getStartDate());
     }
 
+    @Test
+    void manualStartPersistsAndPropagatesThroughDependenciesAndPhases() throws Exception {
+        EcrActionRepository repository = mock(EcrActionRepository.class);
+        ActionPlanningRuleRepository rules = mock(ActionPlanningRuleRepository.class);
+        ActionPlanningService service = new ActionPlanningService(repository, rules,
+                mock(ActionAssigneeResolver.class), mock(EcrRequestRepository.class));
+        EcrRequest request = new EcrRequest();
+        setId(request, 10L);
+        request.setReceptionDate(LocalDate.of(2026, 7, 1));
+        EcrAction root = action(1L, request, EcrStage.FEASIBILITY_VALIDATION, 2, null);
+        EcrAction child = action(2L, request, EcrStage.FEASIBILITY_VALIDATION, 1, 1L);
+        EcrAction next = action(3L, request, EcrStage.PROJECT_MANAGEMENT, 1, null);
+        EcrAction routine = action(4L, request, EcrStage.PROJECT_MANAGEMENT, 2, null);
+        routine.setRoutineAction(true);
+        routine.setStartDate(LocalDate.of(2026, 7, 20));
+        when(repository.findByRequest_IdOrderByDeadlineAscIdAsc(10L))
+                .thenReturn(Arrays.asList(root, child, next, routine));
+        when(rules.findAll()).thenReturn(Collections.emptyList());
+        service.recalculateRequest(request);
+        service.applyManualStartDate(root, LocalDate.of(2026, 7, 5));
+        service.recalculateRequest(request);
+        service.recalculateRequest(request);
+        assertEquals(LocalDate.of(2026, 7, 5), root.getStartDate());
+        assertEquals(LocalDate.of(2026, 7, 7), root.getEndDate());
+        assertEquals(root.getEndDate(), root.getDeadline());
+        assertEquals(LocalDate.of(2026, 7, 8), child.getStartDate());
+        assertEquals(LocalDate.of(2026, 7, 10), next.getStartDate());
+        assertEquals(next.getEndDate(), request.getSopDate());
+        service.applyManualStartDate(routine, LocalDate.of(2026, 7, 12));
+        service.recalculateRequest(request);
+        assertEquals(LocalDate.of(2026, 7, 14), routine.getEndDate());
+        assertEquals(LocalDate.of(2026, 7, 5), root.getStartDate());
+        service.applyManualStartDate(root, LocalDate.of(2026, 7, 2));
+        service.recalculateAfterDurationChange(root, 2, LocalDate.of(2026, 7, 7));
+        assertEquals(LocalDate.of(2026, 7, 5), child.getStartDate());
+        assertEquals(LocalDate.of(2026, 7, 7), next.getStartDate());
+        assertEquals(LocalDate.of(2026, 7, 12), routine.getStartDate());
+        child.setStatus(ActionStatus.DONE);
+        LocalDate completedStart = child.getStartDate();
+        LocalDate completedEnd = child.getEndDate();
+        service.applyManualStartDate(root, LocalDate.of(2026, 7, 10));
+        service.recalculateRequest(request);
+        assertEquals(completedStart, child.getStartDate());
+        assertEquals(completedEnd, child.getEndDate());
+        service.applyManualStartDate(child, LocalDate.of(2026, 8, 1));
+        assertEquals(completedStart, child.getStartDate());
+    }
+
     private EcrAction action(Long id, EcrRequest request, EcrStage stage, int duration, Long dependencyId) throws Exception {
         EcrAction action = new EcrAction();
         setId(action, id);

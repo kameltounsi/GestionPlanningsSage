@@ -2247,8 +2247,9 @@ function canDeleteActionForUser(user, action, request, phaseValidations = [], pr
 }
 
 function canEditActionDurationForUser(user, action, request, phaseValidations = [], projects = []) {
-  if (!isRequestPilot(user, request, projects)) return false;
-  if (request?.currentStage === "CLOSED") return false;
+  if (!action || !request || isActionDone(action)) return false;
+  if (!isAdminUser(user) && !isRequestPilot(user, request, projects) && !isProjectLeadForRequest(user, request, projects)) return false;
+  if (request.currentStage === "CLOSED" || request.closureStatus) return false;
   if (request?.currentStage === "CANCELLED" && action?.stage !== "CANCELLED") return false;
   return true;
 }
@@ -4092,27 +4093,29 @@ function AppRoot() {
       });
   }
 
-  function handleUpdateActionDuration(action, durationValue) {
+  function handleUpdateActionDuration(action, durationValue, startDate = action.startDate) {
     if (!selectedRequest || !action?.id) return;
     if (isTerminalRequest(selectedRequest)) {
       warningAlert("Modification terminée", "Cette modification est terminée ou clôturée. Les actions sont en lecture seule.");
       return;
     }
     const duration = Math.max(0, Number(durationValue) || 0);
-    if (duration === (Number(action.workDurationDays) || 0)) return;
+    if (duration === (Number(action.workDurationDays) || 0) && startDate === action.startDate) return;
     setSaving(true);
     setError("");
-    updateAction(action.id, { ...action, workDurationDays: duration })
+    return updateAction(action.id, { ...action, workDurationDays: duration, startDate })
       .then(() => refreshSelectedData(selectedRequest.id, selectedStage))
       .then(() => {
-        successToast("Durée mise à jour");
+        successToast("Dates et dur\u00e9e mises \u00e0 jour");
+        return true;
       })
       .catch((error) => {
         const message = error.message?.includes("403")
-          ? "Seul le pilote de la modification peut modifier la duree des actions."
-          : "Impossible de mettre a jour la duree de l'action.";
+          ? "La modification des dates est réservée à l’administrateur, au chef du projet concerné ou au pilote, pour une action non terminée."
+          : "Impossible de mettre \u00e0 jour les dates et la dur\u00e9e de l'action.";
         setError(message);
         errorAlert(message);
+        return false;
       })
       .finally(() => setSaving(false));
   }

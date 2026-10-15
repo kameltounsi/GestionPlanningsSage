@@ -60,6 +60,8 @@ public class EcrActionController {
     private final EcrActionMapper actionMapper;
     private final ActionPlanningRulePropagationService propagationService;
     private final ActionDurationAlertService durationAlertService;
+    private final ActionStartDateAlertService startDateAlertService;
+    private final ActionDeletionAlertService deletionAlertService;
 
     @SuppressWarnings("java:S107")
     public EcrActionController(EcrActionRepository actionRepository, EcrActionEvidenceRepository evidenceRepository,
@@ -74,7 +76,8 @@ public class EcrActionController {
                                AuthenticatedUserService authenticatedUserService,
                                EcrActionMapper actionMapper,
                                ActionPlanningRulePropagationService propagationService,
-                               ActionDurationAlertService durationAlertService) {
+                               ActionDurationAlertService durationAlertService, ActionStartDateAlertService startDateAlertService,
+                               ActionDeletionAlertService deletionAlertService) {
         this.actionRepository = actionRepository;
         this.evidenceRepository = evidenceRepository;
         this.assetRepository = assetRepository;
@@ -93,6 +96,8 @@ public class EcrActionController {
         this.actionMapper = actionMapper;
         this.propagationService = propagationService;
         this.durationAlertService = durationAlertService;
+        this.startDateAlertService = startDateAlertService;
+        this.deletionAlertService = deletionAlertService;
     }
 
     @GetMapping("/actions")
@@ -231,6 +236,12 @@ public class EcrActionController {
                 .filter(action -> accessControlService.canManageAction(user, action) || canUpdateDuration(user, action))
                 .map(action -> {
                     boolean completingAction = isCompletingAction(action, updatedAction);
+                    if (isDone(action) && (!Objects.equals(action.getStartDate(), updatedAction.getStartDate())
+                            || !Objects.equals(action.getEndDate(), updatedAction.getEndDate())
+                            || !Objects.equals(action.getDeadline(), updatedAction.getDeadline())
+                            || !Objects.equals(action.getWorkDurationDays(), updatedAction.getWorkDurationDays()))) {
+                        return ResponseEntity.status(409).<EcrActionDto>build();
+                    }
                     Integer previousDuration = action.getWorkDurationDays();
                     LocalDate previousEndDate = action.getEndDate();
                     if (completingAction && (!canMarkActionDone(user, action) || !canCompleteActionInStage(action))) {
@@ -245,9 +256,7 @@ public class EcrActionController {
                     if (isReopeningAction(action, updatedAction) && !isActionInCurrentPhase(action)) {
                         return ResponseEntity.badRequest().<EcrActionDto>build();
                     }
-                    if (!isActionStartBeforeNextPhase(action.getRequest(), updatedAction, action.getId())) {
-                        return ResponseEntity.status(422).<EcrActionDto>build();
-                    }
+                    java.util.Map<Long, LocalDate> previousStartDates = startDateAlertService.snapshot(action.getRequest());
                     action.setTitle(updatedAction.getTitle());
                     action.setDescription(updatedAction.getDescription());
                     action.setTopicRisk(updatedAction.getTopicRisk());
@@ -271,8 +280,7 @@ public class EcrActionController {
                     action.setDate1(updatedAction.getDate1());
                     action.setDate2(updatedAction.getDate2());
                     action.setDate3(updatedAction.getDate3());
-                    action.setStartDate(updatedAction.getStartDate());
-                    action.setEndDate(updatedAction.getEndDate());
+                    planningService.applyManualStartDate(action, updatedAction.getStartDate());
                     action.setWorkDurationDays(updatedAction.getWorkDurationDays());
                     action.setDurationOverridden(action.isDurationOverridden() || !Objects.equals(defaultDuration(previousDuration), defaultDuration(updatedAction.getWorkDurationDays())));
                     EcrStage updatedStage = updatedAction.getStage() == null ? action.getStage() : updatedAction.getStage();
@@ -297,6 +305,7 @@ public class EcrActionController {
                     EcrAction saved = actionRepository.save(action);
                     recalculateAfterActionChange(saved, previousDuration, previousEndDate);
                     durationAlertService.durationChanged(saved, previousDuration, user);
+                    startDateAlertService.notifyChanges(saved.getRequest(), previousStartDates, user);
                     if (completingAction) {
                         recordActionCompleted(user, saved);
                     }
@@ -324,10 +333,12 @@ public class EcrActionController {
         if (isDone(updatedAction) && !isDependencyCompleted(action)) {
             return ResponseEntity.badRequest().build();
         }
+        java.util.Map<Long, LocalDate> previousStartDates = startDateAlertService.snapshot(action.getRequest());
         action.setChecked(updatedAction.isChecked());
         action.setStatus(updatedAction.getStatus());
         action.setComment(updatedAction.getComment());
         if (canUpdateDuration(user, action)) {
+            planningService.applyManualStartDate(action, updatedAction.getStartDate());
             action.setWorkDurationDays(defaultDuration(updatedAction.getWorkDurationDays()));
             action.setDurationOverridden(action.isDurationOverridden() || !Objects.equals(defaultDuration(previousDuration), defaultDuration(updatedAction.getWorkDurationDays())));
         }
@@ -339,6 +350,7 @@ public class EcrActionController {
         EcrAction saved = actionRepository.save(action);
         recalculateAfterActionChange(saved, previousDuration, previousEndDate);
         durationAlertService.durationChanged(saved, previousDuration, user);
+        startDateAlertService.notifyChanges(saved.getRequest(), previousStartDates, user);
         if (completingAction) {
             recordActionCompleted(user, saved);
         }
@@ -351,11 +363,14 @@ public class EcrActionController {
         }
         Integer previousDuration = action.getWorkDurationDays();
         LocalDate previousEndDate = action.getEndDate();
+        java.util.Map<Long, LocalDate> previousStartDates = startDateAlertService.snapshot(action.getRequest());
+        planningService.applyManualStartDate(action, updatedAction.getStartDate());
         action.setWorkDurationDays(defaultDuration(updatedAction.getWorkDurationDays()));
         action.setDurationOverridden(true);
         EcrAction saved = actionRepository.save(action);
         planningService.recalculateAfterDurationChange(saved, previousDuration, previousEndDate);
         durationAlertService.durationChanged(saved, previousDuration, user);
+        startDateAlertService.notifyChanges(saved.getRequest(), previousStartDates, user);
         return ResponseEntity.ok(actionMapper.toDto(enrichAction(saved)));
     }
 
@@ -665,6 +680,7 @@ public class EcrActionController {
                 return ResponseEntity.status(403).<Void>build();
             }
             Long requestId = action.getRequestId();
+            deletionAlertService.actionDeleted(action, user);
             templateService.suppressActionFor(action.getRequest(), action);
             if (action.getRequest() != null) {
                 requestRepository.save(action.getRequest());
@@ -833,12 +849,15 @@ public class EcrActionController {
     }
 
     private boolean canUpdateDuration(AppUser user, EcrAction action) {
-        return accessControlService.isRequestPilot(user, action == null ? null : action.getRequest())
+        return (accessControlService.isAdmin(user)
+                || accessControlService.isRequestPilot(user, action == null ? null : action.getRequest())
+                || accessControlService.isProjectLeadForRequest(user, action == null ? null : action.getRequest()))
                 && canChangeDuration(action);
     }
 
     private boolean canChangeDuration(EcrAction action) {
         return action != null
+                && !isDone(action)
                 && action.getRequest() != null
                 && action.getRequest().getCurrentStage() != EcrStage.CLOSED
                 && !action.getRequest().isClosureStatus()

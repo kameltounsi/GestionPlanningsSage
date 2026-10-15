@@ -1,3 +1,5 @@
+import { ExcelExportButton } from "../../components/common/ExcelExportButton";
+import { rulesSheet } from "../../utils/businessExports";
 import React, { useEffect, useMemo, useState } from "react";
 import { FileText, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { actionPlanningRuleProofDocumentDownloadUrl, actionPlanningRuleProofDocumentUrl } from "../../api";
@@ -66,12 +68,15 @@ export function PlanningRulesAdmin({ actionRoleOptions = [], form, rules, saving
 
   return (
     <section className="panel planning-admin">
-      <div className="section-title">
+      <div className="section-title export-section-header">
         <div>
           <h2>Actions standard par phase</h2>
+          <p className="export-scope-hint">Export complet : {rules.length} actions, toutes les phases.</p>
           <span>L'admin définit les actions, criticités, preuves et liaisons qui seront générées dans chaque nouvelle ECR.</span>
         </div>
-        <span>{filteredRules.length} action{filteredRules.length > 1 ? "s" : ""}</span>
+        <div className="export-actions">
+        <ExcelExportButton title="Actions standard" sheets={[rulesSheet(rules)]} label="Exporter toutes les actions" scope="Toutes les actions standard, toutes les phases, pour les modifications et les nouveaux projets." />
+        </div>
       </div>
       <label className="project-type-toggle admin-project-toggle">
         <input

@@ -1,3 +1,5 @@
+import { ExcelExportButton } from "../../components/common/ExcelExportButton";
+import { referenceSheet, projectsSheet, finishedProductsSheet } from "../../utils/businessExports";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, Pencil, Plus, Save, Search, Trash2, Upload, X } from "lucide-react";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -649,12 +651,13 @@ function FinishedProductPreferentialPanel({ clients = [], editing, form, product
 
   return (
     <section className="panel preferential-panel">
-      <div className="section-title">
+      <div className="section-title export-section-header">
         <div>
           <h2>Produits finis</h2>
           <span>{references.length} element{references.length > 1 ? "s" : ""}</span>
         </div>
-        <div className="row-actions">
+        <div className="row-actions export-actions">
+          <ExcelExportButton title="Produits finis" label="Excel des résultats filtrés" sheets={[finishedProductsSheet(filteredReferences)]} />
           <button className="secondary-action compact-action" disabled={saving || references.length === 0} type="button" onClick={openExportDialog}>
             <Download size={16} />
             Exporter Excel
@@ -1056,15 +1059,18 @@ function PreferentialPanel({ count, editing, emptyText, emptyTitle, form, refere
 
   return (
     <section className="panel preferential-panel">
-      <div className="section-title">
+      <div className="section-title export-section-header">
         <div>
           <h2>{title}</h2>
           <span>{count} element{count > 1 ? "s" : ""}</span>
         </div>
+        <div className="row-actions export-actions">
+          <ExcelExportButton title={title} sheets={[referenceSheet(title, filteredReferences)]} scope={`Recherche : ${searchTerm || "Toutes"}. Toutes les pages de resultats.`} />
         <button className="primary-action compact-action" disabled={saving} type="button" onClick={openCreateDialog}>
           <Plus size={15} />
           Ajouter
         </button>
+        </div>
       </div>
       <label className="preferential-search">
         Rechercher
@@ -1192,17 +1198,20 @@ function ProjectPreferentialPanel({ canAdmin, editingProject, projectForm, proje
 
   return (
     <section className="panel project-preferential-panel">
-      <div className="section-title">
+      <div className="section-title export-section-header">
         <div>
           <h2>Projets</h2>
           <span>{projects.length} projet{projects.length > 1 ? "s" : ""}</span>
         </div>
+        <div className="row-actions export-actions">
+          <ExcelExportButton title="Projets" sheets={[projectsSheet(filteredProjects, users)]} scope={`Recherche : ${searchTerm || "Toutes"}. Projets accessibles, toutes les pages.`} />
         {canAdmin && (
           <button className="primary-action compact-action" disabled={saving} type="button" onClick={openCreateDialog}>
             <Plus size={15} />
             Ajouter
           </button>
         )}
+        </div>
       </div>
       <label className="preferential-search">
         Rechercher

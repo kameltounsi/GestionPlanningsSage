@@ -6,4 +6,5 @@ import java.util.List;
 
 public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
     List<AuditLog> findTop300ByOrderByOccurredAtDescIdDesc();
+    List<AuditLog> findAllByOrderByOccurredAtDescIdDesc();
 }

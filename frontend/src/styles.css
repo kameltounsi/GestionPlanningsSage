@@ -4349,7 +4349,8 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   color: var(--muted);
 }
 
-.project-filter select {
+.project-filter select,
+.users-role-filter input {
   background: transparent;
   border: 0;
   box-shadow: none;
@@ -4361,7 +4362,8 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   width: 100%;
 }
 
-.project-filter select:focus {
+.project-filter select:focus,
+.users-role-filter input:focus {
   box-shadow: none;
 }
 
@@ -6006,6 +6008,32 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   grid-column: auto;
   grid-template-columns: repeat(5, minmax(78px, 1fr));
   min-width: 0;
+  align-items: start;
+}
+
+.action-meta > span,
+.actions-dialog .action-meta > span {
+  align-content: start;
+  justify-content: stretch;
+  gap: 5px;
+}
+
+.action-meta > .action-status-meta {
+  grid-column: span 2;
+}
+
+.action-meta .status,
+.actions-dialog .action-meta .status,
+.action-meta .criticality,
+.actions-dialog .action-meta .criticality {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  width: fit-content;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+  line-height: 1.4;
 }
 
 .action-meta span {
@@ -7157,6 +7185,27 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   margin-top: 12px;
 }
 
+.excel-export-control {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.excel-export-error {
+  color: #b91c1c;
+  font-size: 13px;
+  max-width: 440px;
+}
+
+.module-export-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+  justify-content: flex-end;
+}
+
 @media (max-width: 760px) {
   .users-toolbar {
     grid-template-columns: 1fr;
@@ -7709,6 +7758,7 @@ body:has(.dialog-backdrop) .modifications-toolbar {
     grid-column: 2;
   }
 
+  .action-meta,
   .actions-dialog .action-meta {
     grid-column: 2;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7800,4 +7850,177 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 .nav-collapsed .nav-user-avatar {
   width: 40px;
   height: 40px;
+}
+
+/* Export controls share the list command area, independently of table row actions. */
+.page-heading,
+.export-section-header {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 24px;
+  min-width: 0;
+}
+
+.page-heading > .page-header,
+.export-section-header > div:first-child:not(.export-actions) {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.export-actions,
+.row-actions.export-actions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.export-actions > .excel-export-control {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.excel-export-button,
+.export-actions > button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.excel-export-button {
+  border-color: #c4d9cd;
+  background: #f5faf7;
+  color: #21633e;
+  text-align: center;
+}
+
+.excel-export-button:not(:disabled):hover {
+  background: #e8f3ec;
+  border-color: #80ad92;
+}
+
+.excel-export-button:focus-visible {
+  outline: 3px solid #75ad8d;
+  outline-offset: 3px;
+}
+
+.excel-export-button:disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+.excel-export-button svg {
+  flex-shrink: 0;
+}
+
+.export-actions .excel-export-error {
+  color: #b91c1c;
+  overflow-wrap: anywhere;
+}
+
+.export-scope-hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 5px 0;
+}
+
+.modifications-toolbar.traceability-toolbar {
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 220px) auto auto;
+}
+
+@media (max-width: 1000px) {
+  .modifications-toolbar.traceability-toolbar {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .page-heading,
+  .export-section-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .page-heading > .page-header,
+  .export-section-header > div:first-child:not(.export-actions) {
+    flex: initial;
+  }
+
+  .export-actions,
+  .row-actions.export-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .export-actions > .excel-export-control,
+  .export-actions > button,
+  .row-actions.export-actions > button {
+    flex: 1 1 180px;
+  }
+
+  .export-actions .excel-export-button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .modifications-toolbar.traceability-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.action-meta .action-start-date-meta {
+  display: grid;
+  align-content: start;
+  grid-column: span 2;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px;
+  background: #f8fafc;
+  border: 1px solid #edf1f5;
+  border-radius: 6px;
+}
+
+.action-start-date-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.action-start-date-control .action-start-date-input {
+  flex: 1 1 140px;
+  min-width: 0;
+  width: 140px;
+  max-width: 100%;
+  min-height: 34px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--ink);
+  background: white;
+}
+
+.action-start-date-control .action-start-date-save {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.action-start-date-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

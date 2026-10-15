@@ -7,7 +7,6 @@ import {
   uploadEcrDocument
 } from "../../api";
 import {
-  dossierReviewExportExcel,
   dossierReviewExportText,
   dossierReviewMetaLine,
   dossierReviewPdfHtml,
@@ -74,16 +73,6 @@ export function DossierReviewDialog({
   function exportTxt() {
     if (!canExport) return;
     downloadTextFile(`${fileBaseName}.txt`, dossierReviewExportText(requestWithAssets, value));
-  }
-
-  function exportExcel() {
-    if (!canExport) return;
-    downloadBlobFile(
-      `${fileBaseName}.xls`,
-      dossierReviewExportExcel(requestWithAssets, value),
-      "application/vnd.ms-excel;charset=utf-8"
-    );
-    successToast("Revue dossier Excel generee");
   }
 
   async function exportPdf() {
@@ -198,10 +187,7 @@ export function DossierReviewDialog({
                     <FileText size={16} />
                     Export TXT
                   </button>
-                  <button className="secondary-action" type="button" onClick={exportExcel}>
-                    <FileText size={16} />
-                    Export Excel
-                  </button>
+
                   <button className="secondary-action" type="button" onClick={exportPdf}>
                     <FileText size={16} />
                     Export PDF

@@ -786,8 +786,8 @@ export function uploadUserPhoto(userId, file) {
   return multipartRequest(`/users/${userId}/photo`, formData);
 }
 
-export function getAuditLogs() {
-  return request("/audit");
+export function getAuditLogs(complete = false) {
+  return request(complete ? "/audit?complete=true" : "/audit");
 }
 
 export function getDashboardActions() {

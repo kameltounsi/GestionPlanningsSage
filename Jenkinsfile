@@ -4,7 +4,7 @@ pipeline {
     environment {
         COMPOSE_PROJECT_NAME = 'gestionplanning'
         VM_HOST = 'localhost'
-        FRONTEND_URL = 'http://localhost:3000'
+        FRONTEND_URL = 'http://192.168.1.117:3000'
         BACKEND_URL = 'http://localhost:3001/api'
 
         POSTGRES_DB = 'plannings'

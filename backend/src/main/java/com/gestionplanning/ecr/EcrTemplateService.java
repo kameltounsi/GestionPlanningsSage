@@ -97,6 +97,28 @@ public class EcrTemplateService {
         }
     }
 
+    public void addNewRuleFor(EcrRequest request, ActionPlanningRule rule, java.util.function.Predicate<EcrStage> eligibleStage) {
+        if (!appliesToRequest(rule, request) || !eligibleStage.test(rule.getStage())
+                || suppressedActionKeys(request).contains(ruleKey(rule))) return;
+        List<EcrAction> existing = actionRepository.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId());
+        List<EcrAction> additions = new ArrayList<>();
+        if (rule.isRoutineAction()) {
+            if (existing.stream().anyMatch(action -> Objects.equals(action.getRoutineSeriesId(), routineSeriesId(rule)))) return;
+            additions.addAll(routineActionsFromRule(request, rule, existing).stream()
+                    .filter(action -> eligibleStage.test(action.getStage())).collect(Collectors.toList()));
+        } else {
+            if (existing.stream().anyMatch(action -> actionKey(action).equals(ruleKey(rule)))) return;
+            EcrAction added = fromRule(request, rule);
+            Map<String, EcrAction> byKey = existing.stream().collect(Collectors.toMap(this::actionKey, Function.identity(), (first, second) -> first));
+            added.setDependsOnActionId(dependencyActionId(added, rule, byKey));
+            additions.add(added);
+        }
+        if (!additions.isEmpty()) {
+            actionRepository.saveAll(additions);
+            planningService.recalculateRequest(request);
+        }
+    }
+
     public void ensureMissingActionsFor(EcrRequest request) {
         if (request == null || request.getId() == null || request.getCurrentStage() == EcrStage.CLOSED || request.getCurrentStage() == EcrStage.CANCELLED) {
             return;

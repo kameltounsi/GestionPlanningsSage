@@ -461,25 +461,35 @@ public class FinishedProductReferenceController {
              ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("Produits finis");
             String[] headers = {
-                    "client",
-                    "project",
-                    "partNumber",
-                    "designation",
-                    "customerPn",
-                    "product",
-                    "coiffeIndex",
-                    "drawingIndex",
-                    "reducedCode",
-                    "salePrice",
-                    "productionIntegrationDate",
-                    "comments"
+                    "Client",
+                    "Projet",
+                    "Référence interne",
+                    "Désignation",
+                    "Référence client",
+                    "Produit",
+                    "Indice coiffe",
+                    "Indice dessin",
+                    "Code réduit",
+                    "Prix vente",
+                    "Date intégration production",
+                    "Commentaires"
             };
             Row headerRow = sheet.createRow(0);
+            CellStyle readableHeader = workbook.createCellStyle();
+            Font readableHeaderFont = workbook.createFont();
+            readableHeaderFont.setBold(true);
+            readableHeaderFont.setColor(IndexedColors.WHITE.getIndex());
+            readableHeader.setFont(readableHeaderFont);
+            readableHeader.setFillForegroundColor(IndexedColors.DARK_GREEN.getIndex());
+            readableHeader.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            readableHeader.setWrapText(true);
+            headerRow.setHeightInPoints(32);
             for (int column = 0; column < headers.length; column++) {
                 headerRow.createCell(column).setCellValue(headers[column]);
+                headerRow.getCell(column).setCellStyle(readableHeader);
             }
             org.apache.poi.ss.usermodel.CellStyle dateStyle = workbook.createCellStyle();
-            dateStyle.setDataFormat(workbook.getCreationHelper().createDataFormat().getFormat("yyyy-mm-dd"));
+            dateStyle.setDataFormat(workbook.getCreationHelper().createDataFormat().getFormat("dd/mm/yyyy"));
             org.apache.poi.ss.usermodel.CellStyle amountStyle = workbook.createCellStyle();
             amountStyle.setDataFormat(workbook.getCreationHelper().createDataFormat().getFormat("#,##0.000"));
 
@@ -509,7 +519,30 @@ public class FinishedProductReferenceController {
             }
             for (int column = 0; column < headers.length; column++) {
                 sheet.autoSizeColumn(column);
+                sheet.setColumnWidth(column, Math.min(60 * 256, Math.max(20 * 256, sheet.getColumnWidth(column) + 512)));
             }
+            CellStyle bodyStyle = workbook.createCellStyle();
+            bodyStyle.setWrapText(true);
+            bodyStyle.setVerticalAlignment(VerticalAlignment.TOP);
+            dateStyle.setWrapText(true);
+            amountStyle.setWrapText(true);
+            DataFormatter display = new DataFormatter(Locale.FRANCE);
+            for (int index = 1; index <= references.size(); index++) {
+                Row row = sheet.getRow(index);
+                int lineCount = 1;
+                for (Cell cell : row) {
+                    if (cell.getCellStyle().getIndex() == 0) cell.setCellStyle(bodyStyle);
+                    int width = Math.max(1, sheet.getColumnWidth(cell.getColumnIndex()) / 256 - 2);
+                    int lines = 0;
+                    for (String line : display.formatCellValue(cell).split("\\R", -1)) {
+                        lines += Math.max(1, (line.length() + width - 1) / width);
+                    }
+                    lineCount = Math.max(lineCount, lines);
+                }
+                row.setHeightInPoints(Math.min(409, Math.max(28, lineCount * 15 + 8)));
+            }
+            sheet.createFreezePane(0, 1);
+            sheet.setAutoFilter(new CellRangeAddress(0, references.size(), 0, headers.length - 1));
             workbook.write(outputStream);
             return outputStream.toByteArray();
         }
@@ -518,7 +551,7 @@ public class FinishedProductReferenceController {
     private byte[] exportMatrixWorkbook(List<FinishedProductReference> references, List<EcrRequest> requests) throws IOException {
         try (org.apache.poi.ss.usermodel.Workbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
              ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
-            Sheet sheet = workbook.createSheet("CHANGE MATRIX");
+            Sheet sheet = workbook.createSheet("Historique des produits");
             MatrixStyles styles = matrixStyles(workbook);
             setupMatrixSheet(sheet);
             writeMatrixTitle(sheet, styles, references);
@@ -544,7 +577,7 @@ public class FinishedProductReferenceController {
         Row titleRow = sheet.createRow(0);
         titleRow.setHeightInPoints(24);
         merge(sheet, 0, 1, 0, 5);
-        cell(titleRow, 1, "CHANGE MANAGEMENT MATRIX", styles.title);
+        cell(titleRow, 1, "SUIVI DES MODIFICATIONS DES PRODUITS", styles.title);
         Row subtitleRow = sheet.createRow(1);
         subtitleRow.setHeightInPoints(22);
         merge(sheet, 1, 1, 1, 5);
@@ -560,9 +593,10 @@ public class FinishedProductReferenceController {
                                          List<EcrRequest> requests, int rowIndex) {
         Row sectionRow = sheet.createRow(rowIndex++);
         merge(sheet, rowIndex - 1, 1, rowIndex - 1, 9);
-        cell(sectionRow, 1, "Progressive register changes", styles.section);
+        cell(sectionRow, 1, "Historique des modifications des produits", styles.section);
         Row headerRow = sheet.createRow(rowIndex++);
-        String[] headers = {"Version", "Change description", "Modification number", "Pilot", "Status", "Reception date", "DR drawing", "DR digit", "SOP date"};
+        headerRow.setHeightInPoints(48);
+        String[] headers = {"Version du produit", "Description du changement", "Référence de modification", "Pilote", "Phase", "Date de réception", "Indice du plan", "Indice de coiffe", "Début de production prévu"};
         for (int column = 0; column < headers.length; column++) {
             cell(headerRow, column + 1, headers[column], styles.header);
         }
@@ -570,7 +604,7 @@ public class FinishedProductReferenceController {
             List<EcrRequest> productRequests = matchingRequests(reference, requests);
             Row productRow = sheet.createRow(rowIndex++);
             cell(productRow, 1, productVersion(reference), styles.product);
-            cell(productRow, 2, "INITIAL RELEASE", styles.body);
+            cell(productRow, 2, "Version initiale", styles.body);
             cell(productRow, 6, reference.getProductionIntegrationDate() == null ? null : java.sql.Date.valueOf(reference.getProductionIntegrationDate()), styles.date);
             cell(productRow, 7, reference.getDrawingIndex(), styles.bodyCenter);
             cell(productRow, 8, reference.getCoiffeIndex(), styles.bodyCenter);
@@ -586,7 +620,7 @@ public class FinishedProductReferenceController {
                 cell(row, 2, changeDescription(request), styles.body);
                 cell(row, 3, request.getModificationNumber(), styles.bodyCenter);
                 cell(row, 4, request.getPilot(), styles.body);
-                cell(row, 5, request.getCurrentStage() == null ? null : request.getCurrentStage().name(), styles.bodyCenter);
+                cell(row, 5, exportPhaseLabel(request), styles.bodyCenter);
                 cell(row, 6, request.getReceptionDate() == null ? null : java.sql.Date.valueOf(request.getReceptionDate()), styles.date);
                 cell(row, 7, reference.getDrawingIndex(), styles.bodyCenter);
                 cell(row, 8, digitLabel(request, reference), styles.bodyCenter);
@@ -600,9 +634,10 @@ public class FinishedProductReferenceController {
     private void writeProductRegister(Sheet sheet, MatrixStyles styles, List<FinishedProductReference> references, int rowIndex) {
         Row sectionRow = sheet.createRow(rowIndex++);
         merge(sheet, rowIndex - 1, 1, rowIndex - 1, 9);
-        cell(sectionRow, 1, "Registro codici fodere", styles.section);
+        cell(sectionRow, 1, "Référentiel des produits finis", styles.section);
         Row headerRow = sheet.createRow(rowIndex++);
-        String[] headers = {"Allestimento", "DESCRIZIONE", "Cover PN", "IND,C", "Customer PN", "Projet", "Code reduit", "DR\nDISEGNI", "DR\nDIME"};
+        headerRow.setHeightInPoints(48);
+        String[] headers = {"Produit", "Désignation", "Référence interne", "Indice de coiffe", "Référence client", "Projet", "Code réduit", "Indice du plan", "Indice de coiffe"};
         for (int column = 0; column < headers.length; column++) {
             cell(headerRow, column + 1, headers[column], styles.header);
         }
@@ -620,6 +655,23 @@ public class FinishedProductReferenceController {
             cell(row, 8, reference.getDrawingIndex(), styles.bodyCenter);
             cell(row, 9, reference.getCoiffeIndex(), styles.bodyCenter);
             previousProduct = product;
+        }
+    }
+
+    private String exportPhaseLabel(EcrRequest request) {
+        if (request.getCurrentStage() == null) return "Non renseignée";
+        switch (request.getCurrentStage()) {
+            case FEASIBILITY_VALIDATION: return request.isNewVersion() ? "Calendrier du projet" : "Validation de la faisabilité";
+            case PROJECT_MANAGEMENT: return request.isNewVersion() ? "Gestion du projet" : "Validation interne";
+            case PRODUCT_DEVELOPMENT: return request.isNewVersion() ? "Développement du produit" : "Validation interne du produit";
+            case PROCESS_DEVELOPMENT: return "Développement du processus";
+            case CUSTOMER_VALIDATION: return "Validation du client";
+            case PPAP_SOP_PREPARATION: return "Préparation de la production";
+            case LAUNCH: return "Lancement";
+            case CLOSURE_STATUS: return "Préparation de la clôture";
+            case CLOSED: return "Clôturée";
+            case CANCELLED: return "Annulée";
+            default: return "Non renseignée";
         }
     }
 

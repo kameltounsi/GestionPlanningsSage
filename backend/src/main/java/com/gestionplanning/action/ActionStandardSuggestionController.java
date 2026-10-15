@@ -27,6 +27,7 @@ public class ActionStandardSuggestionController {
     private final AuthenticatedUserService authenticatedUserService;
     private final ActionStandardSuggestionMapper suggestionMapper;
     private final ActionPlanningRuleMapper ruleMapper;
+    private final ActionPlanningRulePropagationService propagationService;
 
     public ActionStandardSuggestionController(ActionStandardSuggestionRepository suggestionRepository,
                                               ActionPlanningRuleRepository ruleRepository,
@@ -35,7 +36,7 @@ public class ActionStandardSuggestionController {
                                               AccessControlService accessControlService,
                                               AuthenticatedUserService authenticatedUserService,
                                               ActionStandardSuggestionMapper suggestionMapper,
-                                              ActionPlanningRuleMapper ruleMapper) {
+                                              ActionPlanningRuleMapper ruleMapper, ActionPlanningRulePropagationService propagationService) {
         this.suggestionRepository = suggestionRepository;
         this.ruleRepository = ruleRepository;
         this.requestRepository = requestRepository;
@@ -44,6 +45,7 @@ public class ActionStandardSuggestionController {
         this.authenticatedUserService = authenticatedUserService;
         this.suggestionMapper = suggestionMapper;
         this.ruleMapper = ruleMapper;
+        this.propagationService = propagationService;
     }
 
     @GetMapping
@@ -58,6 +60,7 @@ public class ActionStandardSuggestionController {
     }
 
     @PostMapping("/{id}/add-to-defaults")
+    @org.springframework.transaction.annotation.Transactional
     public ResponseEntity<ActionPlanningRuleDto> addToDefaults(@PathVariable Long id,
                                                                @RequestAttribute("authenticatedUserId") Long userId) {
         AppUser user = authenticatedUserService.require(userId);
@@ -92,6 +95,7 @@ public class ActionStandardSuggestionController {
                     rule.setDependencyAnchor(suggestion.getDependencyAnchor() == null || suggestion.getDependencyAnchor().trim().isEmpty() ? "OUTPUT" : suggestion.getDependencyAnchor());
                     rule.setDurationDays(suggestion.getDurationDays() == null ? 1 : suggestion.getDurationDays());
                     ActionPlanningRule savedRule = ruleRepository.save(rule);
+                    propagationService.addRuleToExistingRequests(savedRule);
                     suggestion.setStatus(ActionStandardSuggestionStatus.ADDED_TO_DEFAULTS);
                     suggestion.setReviewedBy(displayName(user));
                     suggestion.setReviewedAt(LocalDateTime.now(ZoneId.systemDefault()));

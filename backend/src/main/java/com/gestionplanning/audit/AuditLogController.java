@@ -23,11 +23,13 @@ public class AuditLogController {
     }
 
     @GetMapping
-    public ResponseEntity<List<AuditLogDto>> list(@RequestAttribute("authenticatedUserId") Long userId) {
+    public ResponseEntity<List<AuditLogDto>> list(@RequestAttribute("authenticatedUserId") Long userId,
+                                                @RequestParam(defaultValue = "false") boolean complete) {
         if (!accessControlService.isAdmin(authenticatedUserService.require(userId))) {
             return ResponseEntity.status(403).build();
         }
-        return ResponseEntity.ok(repository.findTop300ByOrderByOccurredAtDescIdDesc().stream()
+        return ResponseEntity.ok((complete ? repository.findAllByOrderByOccurredAtDescIdDesc()
+                : repository.findTop300ByOrderByOccurredAtDescIdDesc()).stream()
                 .map(AuditLogDto::from)
                 .collect(Collectors.toList()));
     }

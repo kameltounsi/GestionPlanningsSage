@@ -5,6 +5,8 @@ import { EmptyState } from "../../components/common/EmptyState";
 import { PageHeader } from "../../components/common/PageHeader";
 import { safeImageUrl } from "../../utils/assets";
 import { stageLabel } from "../../utils/stages";
+import { ExcelExportButton } from "../../components/common/ExcelExportButton";
+import { finishedProductsSheet, requestsSheet } from "../../utils/businessExports";
 
 const chatEmojiPalette = [
   "\u{1F600}", "\u{1F601}", "\u{1F602}", "\u{1F60A}", "\u{1F60D}", "\u{1F60E}", "\u{1F609}", "\u{1F642}", "\u{1F914}", "\u{1F62E}",
@@ -515,6 +517,7 @@ export function MessagingPage({
                 <UserAvatar user={selectedUser} />
                 <div>
                   <h2>{chatUserName(selectedUser)}</h2>
+
                   {isChatGroup(selectedUser) ? (
                     <span className="chat-group-header-meta">
                       {selectedUser.projectName ? `Projet ${selectedUser.projectName}` : "Groupe"}
@@ -986,7 +989,12 @@ export function AskAiFinishedProductPage({ compact = false, finishedProducts = [
           subtitle="Saisissez le PN d'un produit fini pour retrouver sa fiche complete et toutes les modifications ou il est inclus."
         />
       )}
+      <div className="module-export-toolbar">
+        {hasSearched && matchedProduct && <ExcelExportButton title={`Fiche produit - ${matchedProduct.partNumber}`}
+          sheets={[finishedProductsSheet([matchedProduct]), requestsSheet(matchingRequests)]} scope="Produit recherché et ses modifications accessibles." />}
+      </div>
       <section className="ask-ai-search-panel panel">
+
         <div className="ask-ai-orb" aria-hidden="true"><Bot size={30} /></div>
         <form className="ask-ai-search-form" onSubmit={handleSearch}>
           <label>

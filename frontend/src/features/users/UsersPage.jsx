@@ -1,3 +1,5 @@
+import { ExcelExportButton } from "../../components/common/ExcelExportButton";
+import { usersSheet } from "../../utils/businessExports";
 import React, { useEffect, useMemo, useState } from "react";
 import { Camera, ChevronLeft, ChevronRight, Pencil, Plus, Save, Search, Trash2, UserCircle, X } from "lucide-react";
 import { EmptyState } from "../../components/common/EmptyState";
@@ -41,7 +43,7 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
         user.jobTitle,
         user.matricule,
         user.phone,
-        userRoleLabel(user.role)
+        ...parseUserRoles(user.role).flatMap((role) => [roleOptionKey(role), roleOptionKey(userRoleLabel(role))])
       ].filter(Boolean).some((value) => normalizeUserSearch(value).includes(normalizedQuery));
       return matchesRole && matchesSearch;
     });
@@ -92,10 +94,11 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
       {!canAdmin && <EmptyState title="Accès admin requis" text="Connectez-vous avec fchelbi pour administrer les utilisateurs." />}
       <div className="users-layout">
         <section className="panel">
-          <div className="section-title">
+          <div className="section-title export-section-header">
             <h2>Liste des utilisateurs</h2>
-            <div className="row-actions">
+            <div className="row-actions export-actions">
               <span>{filteredUsers.length}/{users.length} comptes</span>
+              <ExcelExportButton title="Utilisateurs" sheets={[usersSheet(filteredUsers, users)]} scope={`Recherche : ${query || "Toutes"} ; filtre de role : ${roleFilter || "Tous"}. Toutes les pages de resultats.`} />
               <button className="primary-action compact-action" disabled={!canAdmin} type="button" onClick={openCreateDialog}>
                 <Plus size={16} />
                 Ajouter un utilisateur
@@ -109,17 +112,24 @@ export function UsersPage({ actionRoleOptions = [], currentUser, editingUser, sa
                 aria-label="Rechercher un utilisateur"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Rechercher nom, email, username"
+                placeholder="Rechercher nom, email, username ou rôle"
               />
             </div>
             <label className="project-filter users-role-filter">
               <UserCircle size={16} />
-              <select aria-label="Filtrer par rôle" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
-                <option value="">Tous les rôles</option>
+              <input
+                aria-label="Rechercher par rôle"
+                placeholder="Rôle : ex. qualité production"
+                type="search"
+                list="users-role-suggestions"
+                value={roleFilter}
+                onChange={(event) => setRoleFilter(event.target.value)}
+              />
+              <datalist id="users-role-suggestions">
                 {roleFilterOptions.map(({ value, label }) => (
-                  <option key={value} value={value}>{label}</option>
+                  <option key={value} value={label} />
                 ))}
-              </select>
+              </datalist>
             </label>
           </div>
           <div className="user-table">
@@ -420,7 +430,7 @@ function normalizeUserSearch(value) {
 }
 
 function roleOptionKey(value) {
-  return normalizeUserSearch(value).replaceAll("_", " ");
+  return normalizeUserSearch(value).replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function dedupeRoleOptions(options = []) {
@@ -436,9 +446,11 @@ function dedupeRoleOptions(options = []) {
 function userMatchesRoleFilter(user, roleFilter) {
   const filter = roleOptionKey(roleFilter);
   if (!filter) return true;
-  return [
-    ...parseUserRoles(user?.role),
-    userRoleLabel(user?.role),
-    user?.jobTitle
-  ].filter(Boolean).some((value) => roleOptionKey(value) === filter);
+  const words = filter.split(" ");
+  return parseUserRoles(user?.role).some((role) =>
+    [role, userRoleLabel(role)].some((value) => {
+      const normalizedRole = roleOptionKey(value);
+      return words.every((word) => normalizedRole.includes(word));
+    })
+  );
 }

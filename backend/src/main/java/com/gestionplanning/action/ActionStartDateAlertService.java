@@ -46,7 +46,7 @@ public class ActionStartDateAlertService {
     public void notifyChanges(EcrRequest request, Map<Long, LocalDate> previous, AppUser actor) {
         if (request == null || request.isArchived() || previous.isEmpty()) return;
         for (EcrAction action : actions.findByRequest_IdOrderByDeadlineAscIdAsc(request.getId())) {
-            if (!unfinished(action) || !previous.containsKey(action.getId())
+            if (!ActionCriticality.isCritical(action) || !unfinished(action) || !previous.containsKey(action.getId())
                     || Objects.equals(previous.get(action.getId()), action.getStartDate())) continue;
             access.validationRecipientFor(action).filter(user -> user.getEmail() != null && !user.getEmail().trim().isEmpty())
                     .ifPresent(recipient -> {

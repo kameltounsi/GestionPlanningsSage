@@ -73,9 +73,10 @@ class ActionDurationAlertServiceTest {
         verifyNoInteractions(repository, events, mail);
     }
 
-    @Test
-    void nonCriticalActionDoesNotNotify() {
-        action.setCriticality("2 - Non critique");
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"faible", "moyenne", "2-moyenne", "3-faible", "2 - Non critique"})
+    void nonCriticalActionDoesNotNotify(String criticality) {
+        action.setCriticality(criticality);
         service.durationChanged(action, 3, lead);
         verifyNoInteractions(repository, events, mail);
     }

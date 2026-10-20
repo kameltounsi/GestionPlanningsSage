@@ -78,6 +78,22 @@ class ActionStartDateAlertServiceTest {
 
     private EcrAction action(long id) {
         EcrAction action = new EcrAction(); org.springframework.test.util.ReflectionTestUtils.setField(action, "id", id); action.setTitle("Action " + id);
+        action.setCriticality("1-critique");
         action.setStartDate(LocalDate.of(2026, 10, 15)); return action;
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"faible", "moyenne", "2-moyenne", "3-faible", ""})
+    void nonCriticalDateChangeDoesNotCreateOrSendMail(String criticality) {
+        EcrRequest request = new EcrRequest();
+        org.springframework.test.util.ReflectionTestUtils.setField(request, "id", 1L);
+        EcrAction action = action(1L);
+        action.setCriticality(criticality);
+        when(actions.findByRequest_IdOrderByDeadlineAscIdAsc(1L)).thenReturn(Collections.singletonList(action));
+        Map<Long, LocalDate> before = service.snapshot(request);
+        action.setStartDate(LocalDate.of(2026, 10, 22));
+        service.notifyChanges(request, before, new AppUser());
+        assertEquals(LocalDate.of(2026, 10, 22), action.getStartDate());
+        verifyNoInteractions(alerts, events, mail, access);
     }
 }

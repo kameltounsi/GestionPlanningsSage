@@ -13,7 +13,6 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionalEventListener;
 import java.time.LocalDateTime;
-import java.text.Normalizer;
 import java.util.List;
 import java.util.Locale;
 import java.util.Collections;
@@ -39,7 +38,7 @@ public class ActionDurationAlertService {
     @Transactional
     public void durationChanged(EcrAction action, Integer previousDays, AppUser actor) {
         if (action == null || action.getRequest() == null || actor == null
-                || days(previousDays) == days(action.getWorkDurationDays()) || !isCritical(action)
+                || days(previousDays) == days(action.getWorkDurationDays()) || !ActionCriticality.isCritical(action)
                 || !(access.isRequestPilot(actor, action.getRequest()) || access.isProjectLeadForRequest(actor, action.getRequest()))) return;
         access.validationRecipientFor(action).filter(user -> !email(user).isEmpty()).ifPresent(recipient -> {
             ActionDurationAlert alert = new ActionDurationAlert();
@@ -99,11 +98,6 @@ public class ActionDurationAlertService {
 
     private int days(Integer value) { return value == null ? 1 : Math.max(0, value); }
     private String email(AppUser user) { return user == null || user.getEmail() == null ? "" : user.getEmail().trim().toLowerCase(Locale.ROOT); }
-    private boolean isCritical(EcrAction action) {
-        String value = action.getCriticality() == null ? "" : Normalizer.normalize(action.getCriticality(), Normalizer.Form.NFD)
-                .replaceAll("\\p{M}+", "").trim().toLowerCase(Locale.ROOT);
-        return value.startsWith("1") || value.equals("critique") || value.equals("critical");
-    }
 
     public static class Created {
         private final Long id;

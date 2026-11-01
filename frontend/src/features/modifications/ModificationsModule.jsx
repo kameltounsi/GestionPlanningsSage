@@ -197,7 +197,6 @@ export function createModificationsModule(deps) {
     modificationGanttPdfHtml,
     normalizeRoleToken,
     parseDateOnly,
-    professionalDossierPdfHtml,
     requestDisplayName,
     stageActionsForUser,
     stagesForRequest,
@@ -1605,7 +1604,7 @@ function ModificationsPage(props) {
         await downloadHtmlAsPdf(
           `diagramme-gantt-${fileNameToken(requestDisplayName(selectedRequest))}.pdf`,
           modificationGanttPdfHtml(selectedRequest, requestActions, stagesForRequest(selectedRequest), progressSummary),
-          { orientation: "landscape", width: "1280px", backgroundColor: "#f7f9f1", scale: 1 }
+          { orientation: "landscape", width: "1280px", backgroundColor: "#f7f9f1", scale: 1, fitPage: true, marginMm: 5 }
         );
         successToast("Diagramme de Gantt PDF telecharge");
       })
@@ -1631,21 +1630,6 @@ function ModificationsPage(props) {
       });
   }
 
-  function exportProfessionalDossierPdf() {
-    if (!selectedRequest) return;
-    getActions(selectedRequest.id)
-      .then(async (requestActions) => {
-        await downloadHtmlAsPdf(
-          `dossier-ecr-${fileNameToken(requestDisplayName(selectedRequest))}.pdf`,
-          professionalDossierPdfHtml(selectedRequest, requestActions, phaseValidations),
-          { orientation: "portrait", width: "820px", backgroundColor: "#eef2e8" }
-        );
-        successToast("Dossier ECR PDF genere");
-      })
-      .catch(() => {
-        errorAlert("Generation du dossier ECR PDF impossible.");
-      });
-  }
 
   return (
     <section className="page-content modifications-content">
@@ -1876,10 +1860,6 @@ function ModificationsPage(props) {
                     <div><Gauge size={16} /><span>Ancien pilote</span><strong>{selectedRequest.previousPilot}</strong></div>
                   )}
                 </div>
-                <button className="dossier-review-card" type="button" onClick={() => setDossierDialogOpen(true)} title="Ouvrir la revue dossier">
-                  <FileText size={24} />
-                  <span>Revue dossier</span>
-                </button>
                 {modificationTimelines(selectedRequest).length > 0 && (
                   <section className="modification-timelines-grid" aria-label="Timelines de la modification">
                     {modificationTimelines(selectedRequest).map((timeline) => (
@@ -1891,26 +1871,30 @@ function ModificationsPage(props) {
                     ))}
                   </section>
                 )}
-                {canExportGantt && (
-                  <>
+                <div className="modification-extraction-actions">
+                  {canExportGantt && (
                     <button className="dossier-review-card" type="button" onClick={exportModificationDossierExcel} title="Extraire le dossier de modification Excel">
                       <FileSpreadsheet size={24} />
                       <span>Dossier Excel</span>
                     </button>
-                    <button className="dossier-review-card" type="button" onClick={exportProfessionalDossierPdf} title="Generer le dossier ECR PDF professionnel">
-                      <FileText size={24} />
-                      <span>Dossier PDF</span>
-                    </button>
-                    <button className="dossier-review-card" type="button" onClick={exportModificationGanttPdf} title="Telecharger le diagramme de Gantt imprimable">
-                      <CalendarDays size={24} />
-                      <span>Gantt</span>
-                    </button>
-                    <button className="dossier-review-card" type="button" onClick={openDetailedCalendar} title="Afficher le calendrier detaille de la modification">
-                      <CalendarDays size={24} />
-                      <span>Calendrier</span>
-                    </button>
-                  </>
-                )}
+                  )}
+                  <button className="dossier-review-card" type="button" onClick={() => setDossierDialogOpen(true)} title="Ouvrir la revue dossier">
+                    <FileText size={24} />
+                    <span>Revue dossier</span>
+                  </button>
+                  {canExportGantt && (
+                    <>
+                      <button className="dossier-review-card" type="button" onClick={exportModificationGanttPdf} title="Télécharger le diagramme de Gantt A4 paysage">
+                        <CalendarDays size={24} />
+                        <span>Gantt</span>
+                      </button>
+                      <button className="dossier-review-card" type="button" onClick={openDetailedCalendar} title="Afficher le calendrier détaillé de la modification">
+                        <CalendarDays size={24} />
+                        <span>Calendrier</span>
+                      </button>
+                    </>
+                  )}
+                </div>
                 {(selectedRequest.beforePhotoUrl || selectedRequest.afterPhotoUrl) && (
                   <div className="request-image-grid">
                     {selectedRequest.beforePhotoUrl && (

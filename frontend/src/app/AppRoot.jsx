@@ -1,3 +1,4 @@
+import { timelineExcelRows, timelineGanttHeader } from "../utils/timelineExports";
 import { modificationTimelines } from "../utils/timelines";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActionDurationAlerts } from "../features/modifications/ActionDurationAlerts";
@@ -1161,140 +1162,13 @@ function completePhaseDossierExportExcel(request, actions = []) {
     <tr><td class="meta-label" colspan="2">Raison</td><td class="meta-value" colspan="10">${escapeExcelHtml(request.modificationReason || "-")}</td></tr>
     <tr><td class="meta-label" colspan="2">Detail</td><td class="meta-value" colspan="10">${escapeExcelHtml(request.modificationDetail || "-")}</td></tr>
     <tr><td colspan="12"></td></tr>
+    ${timelineExcelRows(request)}
     ${phaseSections || `<tr><td colspan="12" class="center">Aucune action renseignee pour cette modification.</td></tr>`}
     <tr><td colspan="12"></td></tr>
     <tr><td class="footer-title" colspan="12">Synthese SAGE ECR - ${escapeExcelHtml(requestDisplayName(request))}</td></tr>
     <tr><td colspan="2">Revue dossier</td><td colspan="10">${escapeExcelHtml(request.dossierReview || "-")}</td></tr>
     <tr><td colspan="12"></td></tr>
   </table></body></html>`;
-}
-
-function professionalDossierPdfHtml(request, actions = [], phaseValidations = []) {
-  const sortedActions = [...actions].sort((first, second) =>
-    (String(first.stage || "").localeCompare(String(second.stage || ""), "fr", { sensitivity: "base" }))
-      || (Number(first.id) || 0) - (Number(second.id) || 0)
-  );
-  const doneActions = sortedActions.filter(isActionDone).length;
-  const lateActionsCount = sortedActions.filter((action) => actionGanttStatusClass(action) === "late").length;
-  const proofCount = sortedActions.filter((action) => actionProofLabel(action)).length;
-  const completionRate = modificationCompletionRate(request, sortedActions);
-  const generatedAt = new Date().toLocaleString("fr-FR");
-  const infoRows = [
-    ["Numero modification", request.modificationNumber || requestDisplayName(request)],
-    ["Client", request.client],
-    ["Projet", request.modificationProject],
-    ["Produit", request.product],
-    ["Produits finis", request.finishedProducts],
-    ["Pilote", request.pilot],
-    ["Statut", requestStatusLabel(request)],
-    ["Phase actuelle", stageLabel(request.currentStage, Boolean(request.newVersion))],
-    ["Reception", formatDateOnly(request.receptionDate)],
-    ["SOP", formatDateOnly(request.sopDate)],
-    ["Cloture", formatDateOnly(request.closureDate)],
-    ["Annulation", formatDateOnly(request.cancelledDate)],
-    ["Type", modificationTypesLabel(request)],
-    ["Mixabilite", mixabilityLabel(request.mixability)]
-  ];
-  const actionRows = sortedActions.map((action, index) => `<tr>
-    <td>${index + 1}</td>
-    <td><strong>${escapeHtml(action.title || "-")}</strong><span>${escapeHtml(action.comment || action.dossierReview || "")}</span></td>
-    <td>${escapeHtml(stageLabel(action.stage, Boolean(request.newVersion)))}</td>
-    <td>${escapeHtml(action.responsible || "-")}</td>
-    <td>${escapeHtml(action.validatorDisplayName || action.validator || "-")}</td>
-    <td>${escapeHtml(actionGanttStatusLabel(action))}</td>
-    <td>${escapeHtml(formatDateOnly(action.deadline || action.endDate))}</td>
-    <td>${escapeHtml(actionProofLabel(action) || "-")}</td>
-  </tr>`).join("");
-  const validationRows = phaseValidations.map((validation) => `<tr>
-    <td>${escapeHtml(stageLabel(validation.stage, Boolean(request.newVersion)))}</td>
-    <td>${escapeHtml(validation.status || "-")}</td>
-    <td>${escapeHtml(validation.requestedBy || validation.validatorName || "-")}</td>
-    <td>${escapeHtml(formatDateOnly(validation.requestedAt || validation.updatedAt || validation.createdAt))}</td>
-    <td>${escapeHtml(validation.rejectionReason || validation.comment || "-")}</td>
-  </tr>`).join("");
-  const infoHtml = infoRows.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "-")}</strong></div>`).join("");
-  const signatureDepartments = ["Pilote", "Engineering", "Qualite", "Logistique", "Finance", "Production"];
-  const signatureHtml = signatureDepartments.map((department) => `<div class="signature-box"><strong>${escapeHtml(department)}</strong><span>Nom / Date</span><i>Signature</i></div>`).join("");
-
-  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Dossier ECR - ${escapeHtml(requestDisplayName(request))}</title><style>
-    @page{size:A4 portrait;margin:12mm}
-    *{box-sizing:border-box}
-    html,body,.pdf-export-page,.cover,.metric,.info-grid div,.signature-box,th{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    body{margin:0;background:#eef2e8;color:#172008;font-family:Arial,sans-serif}
-    .pdf-export-page{background:#fff;min-height:1120px;padding:30px;width:794px}
-    .cover{display:grid;align-content:space-between;background:linear-gradient(135deg,#f7f9f1 0%,#ffffff 55%,#e7f0dc 100%);border:1px solid #cdd9bd}
-    .brand{display:flex;align-items:center;gap:16px;border-bottom:4px solid #5f7f13;padding-bottom:18px}
-    .brand img{height:58px;width:132px;object-fit:contain;background:#fff;border:1px solid #bfd0a3;border-radius:4px;padding:6px}
-    .brand h1{font-family:Georgia,serif;font-size:36px;line-height:1.05;margin:0;text-transform:uppercase}
-    .brand span{color:#5f7f13;font-weight:800;text-transform:uppercase}
-    .cover-main{display:grid;gap:20px}
-    .cover-title h2{font-size:28px;margin:0 0 8px}
-    .cover-title p{color:#4b5563;font-size:14px;line-height:1.5;margin:0}
-    .metrics{display:grid;gap:10px;grid-template-columns:repeat(4,1fr)}
-    .metric{background:#172008;color:#fff;border-radius:6px;padding:12px}
-    .metric span{display:block;color:#dce8ce;font-size:10px;font-weight:800;text-transform:uppercase}
-    .metric strong{display:block;font-size:24px;margin-top:6px}
-    .info-grid{display:grid;gap:8px;grid-template-columns:repeat(2,1fr)}
-    .info-grid div{border:1px solid #d9e3c8;border-radius:6px;padding:10px;background:#fbfcf8}
-    .info-grid span{display:block;color:#60704e;font-size:10px;font-weight:800;text-transform:uppercase}
-    .info-grid strong{display:block;font-size:13px;margin-top:4px}
-    h3{border-bottom:2px solid #5f7f13;font-size:18px;margin:0 0 12px;padding-bottom:8px}
-    .section{display:grid;gap:14px}
-    .text-block{border:1px solid #d9e3c8;border-radius:6px;padding:12px;min-height:80px}
-    .text-block span{color:#60704e;display:block;font-size:10px;font-weight:800;text-transform:uppercase}
-    .text-block p{font-size:13px;line-height:1.5;margin:6px 0 0;white-space:pre-wrap}
-    table{border-collapse:collapse;width:100%;table-layout:fixed}
-    th,td{border:1px solid #cbd5bd;font-size:10px;line-height:1.3;padding:6px;vertical-align:top;word-break:break-word}
-    th{background:#5f7f13;color:#fff;text-align:left}
-    td span{color:#60704e;display:block;font-size:9px;margin-top:3px}
-    .signature-grid{display:grid;gap:10px;grid-template-columns:repeat(3,1fr)}
-    .signature-box{border:1px solid #172008;border-radius:4px;min-height:96px;padding:10px}
-    .signature-box span,.signature-box i{display:block;color:#60704e;font-size:11px;margin-top:14px}
-    .footer{align-items:center;border-top:1px solid #d9e3c8;color:#60704e;display:flex;font-size:10px;justify-content:space-between;margin-top:auto;padding-top:10px}
-  </style></head><body>
-    <main class="pdf-export-page cover">
-      <div class="brand"><img src="/sage_logo1.png" alt="SAGE Automotive Interiors"><div><span>Dossier ECR professionnel</span><h1>Dossier de modification</h1></div></div>
-      <section class="cover-main">
-        <div class="cover-title">
-          <h2>${escapeHtml(requestDisplayName(request))}</h2>
-          <p>${escapeHtml([request.client, request.modificationProject, request.product].filter(Boolean).join(" | ") || "Synthese dossier ECR")}</p>
-        </div>
-        <div class="metrics">
-          <div class="metric"><span>Avancement</span><strong>${completionRate}%</strong></div>
-          <div class="metric"><span>Actions</span><strong>${sortedActions.length}</strong></div>
-          <div class="metric"><span>Done</span><strong>${doneActions}</strong></div>
-          <div class="metric"><span>Retard</span><strong>${lateActionsCount}</strong></div>
-        </div>
-        <div class="info-grid">${infoHtml}</div>
-      </section>
-      <div class="footer"><span>Genere le ${escapeHtml(generatedAt)}</span><span>${escapeHtml(requestStatusLabel(request))}</span></div>
-    </main>
-    <main class="pdf-export-page section">
-      <h3>Synthese modification</h3>
-      <div class="text-block"><span>Raison de modification</span><p>${escapeHtml(request.modificationReason || "-")}</p></div>
-      <div class="text-block"><span>Detail de modification</span><p>${escapeHtml(request.modificationDetail || "-")}</p></div>
-      <div class="text-block"><span>Revue dossier</span><p>${escapeHtml(request.dossierReview || "-")}</p></div>
-      <h3>Validations de phases</h3>
-      <table><thead><tr><th>Phase</th><th>Statut</th><th>Responsable</th><th>Date</th><th>Commentaire</th></tr></thead><tbody>${validationRows || `<tr><td colspan="5">Aucune validation renseignee.</td></tr>`}</tbody></table>
-      <div class="footer"><span>${escapeHtml(requestDisplayName(request))}</span><span>Synthese</span></div>
-    </main>
-    <main class="pdf-export-page section">
-      <h3>Plan d'actions et preuves</h3>
-      <table><thead><tr><th>N</th><th>Action</th><th>Phase</th><th>Resp.</th><th>Valid.</th><th>Statut</th><th>Echeance</th><th>Preuve</th></tr></thead><tbody>${actionRows || `<tr><td colspan="8">Aucune action renseignee.</td></tr>`}</tbody></table>
-      <div class="metrics">
-        <div class="metric"><span>Preuves</span><strong>${proofCount}</strong></div>
-        <div class="metric"><span>Actions done</span><strong>${doneActions}</strong></div>
-        <div class="metric"><span>Actions retard</span><strong>${lateActionsCount}</strong></div>
-        <div class="metric"><span>Total</span><strong>${sortedActions.length}</strong></div>
-      </div>
-      <div class="footer"><span>${escapeHtml(requestDisplayName(request))}</span><span>Actions</span></div>
-    </main>
-    <main class="pdf-export-page section">
-      <h3>Signatures</h3>
-      <div class="signature-grid">${signatureHtml}</div>
-      <div class="footer"><span>${escapeHtml(requestDisplayName(request))}</span><span>Signatures</span></div>
-    </main>
-  </body></html>`;
 }
 
 function parseDateOnly(value) {
@@ -1485,7 +1359,7 @@ async function downloadHtmlAsPdf(fileName, html, options = {}) {
         image.onerror = resolve;
       })));
       const pages = Array.from(host.querySelectorAll(".pdf-export-page"));
-      if (pages.length > 1) {
+      if (pages.length > 1 || (options.fitPage && pages.length)) {
         await saveHtmlPagesAsPdf(fileName, pages, { ...options, orientation });
         return;
       }
@@ -1497,7 +1371,7 @@ async function downloadHtmlAsPdf(fileName, html, options = {}) {
     const pdf = new jsPDF({ orientation, unit: "pt", format: "a4" });
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 18;
+    const margin = Number.isFinite(options.marginMm) ? Math.max(0, options.marginMm) * 72 / 25.4 : (options.fitPage ? 0 : 18);
     const imageWidth = pageWidth - margin * 2;
     const pageImageHeight = pageHeight - margin * 2;
     const pageCanvasHeight = Math.max(1, Math.floor((pageImageHeight * canvas.width) / imageWidth));
@@ -1538,15 +1412,19 @@ async function saveHtmlPagesAsPdf(fileName, pages, options = {}) {
   const pdf = new jsPDF({ orientation, unit: "pt", format: "a4" });
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  const margin = 18;
+  const margin = Number.isFinite(options.marginMm) ? Math.max(0, options.marginMm) * 72 / 25.4 : (options.fitPage ? 0 : 18);
   for (let index = 0; index < pages.length; index += 1) {
     const canvas = await html2canvas(pages[index], {
       backgroundColor: options.backgroundColor || "#f7f9f1",
       scale,
-      useCORS: true
+      useCORS: true,
+      ...(options.fitPage ? {
+        width: Math.max(pages[index].offsetWidth, pages[index].scrollWidth),
+        height: Math.max(pages[index].offsetHeight, pages[index].scrollHeight)
+      } : {})
     });
     const imageWidth = pageWidth - margin * 2;
-    const imageHeight = Math.min(pageHeight - margin * 2, (canvas.height * imageWidth) / canvas.width);
+    const imageHeight = options.fitPage ? pageHeight - margin * 2 : Math.min(pageHeight - margin * 2, (canvas.height * imageWidth) / canvas.width);
     if (index > 0) {
       pdf.addPage("a4", orientation);
     }
@@ -1686,7 +1564,7 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = [], pr
   if (stagePages.length === 0) {
     stagePages.push([]);
   }
-  const tickColumns = `repeat(${Math.max(1, ticks.length)}, 1fr)`;
+  const tickColumns = `repeat(${Math.max(1, ticks.length)}, minmax(0, 1fr))`;
   const tickHtml = ticks.map((tick) => `<span class="tick">${escapeHtml(tick.label)}</span>`).join("");
   const tableHeadHtml = `<div class="gantt-row gantt-head"><div class="left">Activites</div><div class="left">Deb</div><div class="left">Fin</div><div class="timeline">${tickHtml}</div></div>`;
   const legendHtml = `<div class="legend"><span><i style="${ganttColorBarStyle("#8a9275")}"></i>Planifié / à faire</span><span><i style="${ganttColorBarStyle("#25D366")}"></i>Done</span><span><i style="${ganttColorBarStyle("#b42318")}"></i>En retard</span><span><i style="${ganttColorBarStyle("#6b7280")}"></i>Annulée</span><span><i class="critical-legend" style="${ganttColorBarStyle("#8a9275")}"></i>Critique: orange + statut</span></div>`;
@@ -1694,6 +1572,7 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = [], pr
     <header>
       <div class="brand-block"><img class="gantt-logo" src="/sage_logo1.png" alt="SAGE Automotive Interiors" /><div><h1>DIAGRAMME <span>DE GANTT</span></h1><div class="meta">${escapeHtml(requestDisplayName(request))} | Projet: ${escapeHtml(request.modificationProject || "-")} | Client: ${escapeHtml(request.client || "-")} | Produit: ${escapeHtml(request.product || "-")} | Pilote: ${escapeHtml(request.pilot || "-")}<br>Extraction: ${escapeHtml(new Date().toLocaleString("fr-FR"))} | Periode: ${escapeHtml(formatDateOnly(timelineStart))} - ${escapeHtml(formatDateOnly(timelineEnd))} | Avancement global actuel: ${completionRate}%</div></div></div>
       <div class="summary"><span>Actions globales: ${globalActionCount}</span><span>Actions affichees: ${actionRows.length}</span><span>Done global: ${doneCount}</span><span>En retard: ${lateCount}</span><span>Critiques: ${criticalCount}</span><span>Phase: ${escapeHtml(stageLabel(request.currentStage, Boolean(request.newVersion)))}</span><span class="progress-summary"><span class="progress-line"><b class="progress-label">Avancement global actuel: ${completionRate}%</b><i class="progress-track"><i class="progress-fill"></i></i></span></span></div>
+      ${timelineGanttHeader(request)}
     </header>
     <section class="gantt-table">
       ${tableHeadHtml}
@@ -1705,26 +1584,34 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = [], pr
     </footer>
   </main>`).join("");
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Gantt - ${escapeHtml(requestDisplayName(request))}</title><style>
-    @page{size:A4 landscape;margin:10mm}
+    @page{size:A4 landscape;margin:5mm}
     *{box-sizing:border-box}
     html,body,.gantt-table,.timeline,.left,.bar,.phase-bar,.legend i{-webkit-print-color-adjust:exact;print-color-adjust:exact}
     body{font-family:Arial,sans-serif;color:#172008;margin:0;background:#ffffff}
-    .gantt-export-page{background:#f7f9f1;display:flex;flex-direction:column;min-height:860px;padding:14px;width:1280px}
-    header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:10px;background:#fff;padding:0 0 8px;border-bottom:3px solid #5f7f13}
-    .brand-block{display:flex;align-items:flex-start;gap:14px}
+    .gantt-header-timelines{flex:0 0 100%;min-width:0;border-top:1px solid #d9e3c8;padding-top:8px}
+    .gantt-timelines-label{display:block;font-size:11px;text-transform:uppercase;color:#40510c;margin-bottom:6px}
+    .gantt-timelines-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+    .gantt-timeline-item{background:#f7f9f1;border:1px solid #d9e3c8;padding:6px 8px;overflow-wrap:anywhere;font-size:11px;line-height:1.4}
+    .gantt-timeline-item strong{display:block;color:#40510c;margin-bottom:3px}
+    .gantt-timeline-item span{display:block;white-space:pre-wrap}
+    .gantt-export-page{background:#f7f9f1;display:flex;flex-direction:column;min-height:891.99px;padding:0;width:1280px}
+    header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:10px;background:#fff;padding:0 0 8px;border-bottom:3px solid #5f7f13}
+    .brand-block{display:flex;align-items:flex-start;gap:14px;flex:1 1 780px;min-width:0}
+    .brand-block>div{min-width:0;overflow-wrap:anywhere}
     .gantt-logo{display:block;height:54px;width:126px;object-fit:contain;border:1px solid #bfd0a3;border-radius:4px;padding:5px;background:#fff}
     h1{font-family:Georgia,serif;font-size:28px;margin:0 0 4px;text-transform:uppercase}
     h1 span{color:#5f7f13}
     .meta{font-size:11px;color:#586148;line-height:1.45}
-    .summary{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+    .summary{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;flex:0 1 420px;min-width:0}
     .summary>span{border:1px solid #bfd0a3;padding:5px 8px;font-size:11px;background:#f7f9f1}
     .summary .progress-summary{flex-basis:100%;background:#fff}
     .progress-line{display:flex;align-items:center;gap:8px}
     .progress-label{font-weight:700;color:#172008;white-space:nowrap}
     .progress-track{flex:1;min-width:150px;height:8px;border:1px solid #bfd0a3;background:#eef4e2}
     .progress-fill{display:block;height:100%;background:#5f7f13;width:${completionRate}%}
-    .gantt-table{background:#fff;border:1px solid #5f7f13}
-    .gantt-row{display:grid;grid-template-columns:260px 84px 84px minmax(760px,1fr);min-height:43px;break-inside:avoid}
+    .gantt-table{background:#fff;border:1px solid #5f7f13;width:100%;min-width:0}
+    .gantt-row{display:grid;grid-template-columns:260px 84px 84px minmax(0,1fr);min-height:43px;break-inside:avoid;width:100%;min-width:0}
+    .gantt-row>div{min-width:0}
     .gantt-head{min-height:34px;background:#5f7f13;color:#fff;font-weight:700}
     .left{border-right:1px solid #d9e3c8;border-bottom:1px solid #d9e3c8;padding:6px 8px;background:#fff}
     .gantt-head .left{background:#5f7f13;border-right:1px solid #cddaaf;border-bottom:0;font-size:12px}
@@ -1734,7 +1621,7 @@ function modificationGanttPdfHtml(request, actions = [], selectedStages = [], pr
     .date{text-align:center;font-size:11px;white-space:nowrap}
     .timeline{position:relative;border-bottom:1px solid #d9e3c8;background-color:#f7f9f1;background-image:linear-gradient(to right,#d9e3c8 1px,transparent 1px);background-size:${gridStep}% 100%}
     .gantt-head .timeline{display:grid;grid-template-columns:${tickColumns};background:#5f7f13;border-bottom:0}
-    .tick{border-left:1px solid #cddaaf;padding:7px 4px;text-align:center;font-size:10px;white-space:nowrap}
+    .tick{border-left:1px solid #cddaaf;padding:7px 2px;text-align:center;font-size:10px;min-width:0;white-space:normal;overflow-wrap:anywhere}
     .phase-row .left{background:#edf3df;font-weight:700}
     .phase-row .timeline{background:#f1f6e8}
     .phase-bar{position:absolute;top:14px;height:0;border-top:12px solid #5f7f13;background:#5f7f13;border-radius:2px;opacity:.95}
@@ -2453,7 +2340,6 @@ const {
   modificationGanttPdfHtml,
   normalizeRoleToken,
   parseDateOnly,
-  professionalDossierPdfHtml,
   requestDisplayName,
   stageActionsForUser,
   stagesForRequest,

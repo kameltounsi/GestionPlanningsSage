@@ -26,6 +26,10 @@ public class EcrRequestDto {
     private String previousPilot;
     private String modificationReason;
     private String modificationDetail;
+    private List<TimelineSelection> timelines;
+    private String timelineName;
+    private String timelineComment;
+
     private String beforePhoto;
     private String beforePhotoContentType;
     private Long beforePhotoFileSize;
@@ -108,6 +112,9 @@ public class EcrRequestDto {
         dto.previousPilot = request.getPreviousPilot();
         dto.modificationReason = request.getModificationReason();
         dto.modificationDetail = request.getModificationDetail();
+        dto.timelines = new ArrayList<>(request.getTimelines());
+        dto.timelineName = request.getTimelineName();
+        dto.timelineComment = request.getTimelineComment();
         dto.beforePhoto = request.getBeforePhoto();
         dto.beforePhotoContentType = request.getBeforePhotoContentType();
         dto.beforePhotoFileSize = request.getBeforePhotoFileSize();
@@ -180,6 +187,9 @@ public class EcrRequestDto {
         request.setPreviousPilot(previousPilot);
         request.setModificationReason(modificationReason);
         request.setModificationDetail(modificationDetail);
+        request.setTimelineName(timelineName);
+        request.setTimelineComment(timelineComment);
+        request.setTimelines(timelines);
         request.setBeforePhoto(beforePhoto);
         request.setBeforePhotoContentType(beforePhotoContentType);
         request.setBeforePhotoFileSize(beforePhotoFileSize);

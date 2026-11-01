@@ -793,3 +793,27 @@ export function getAuditLogs(complete = false) {
 export function getDashboardActions() {
   return request("/dashboard/actions");
 }
+
+export function getTimelineReferences() {
+  return request("/preferentials/timelines");
+}
+
+export function createTimelineReference(payload) {
+  return request("/preferentials/timelines", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateTimelineReference(id, payload) {
+  return request(`/preferentials/timelines/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteTimelineReference(id) {
+  return request(`/preferentials/timelines/${id}`, {
+    method: "DELETE"
+  });
+}

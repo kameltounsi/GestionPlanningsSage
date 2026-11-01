@@ -1,3 +1,4 @@
+import { modificationTimelines } from "../utils/timelines";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActionDurationAlerts } from "../features/modifications/ActionDurationAlerts";
 import Swal from "sweetalert2";
@@ -1935,6 +1936,9 @@ function requestToEcrForm(request) {
     modificationProject: request.modificationProject || "",
     modificationReason: request.modificationReason || "",
     modificationDetail: request.modificationDetail || "",
+    timelines: modificationTimelines(request),
+    timelineName: request.timelineName || "",
+    timelineComment: request.timelineComment || "",
     mixability: request.mixability || "",
     dossierReview: request.dossierReview || "",
     receptionDate: request.receptionDate || "",

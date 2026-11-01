@@ -612,7 +612,7 @@ export function DashboardPage({
       </div>
       <section className="dashboard-ops-grid">
         <DashboardActionWatchCard
-          title="Actions deja en retard"
+          title="Actions déjà en retard"
           subtitle={`${lateActionRows.length} action${lateActionRows.length > 1 ? "s" : ""} a traiter`}
           items={lateActionRows}
           mode="late"
@@ -1003,15 +1003,15 @@ function DashboardActionWatchCard({ title, subtitle, items = [], mode = "late", 
           <span>{subtitle}</span>
         </div>
         {paginated && items.length > pageSize && (
-          <div className="dashboard-pager" aria-label={`Pagination ${title}`}>
-            <button type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0} aria-label="Page precedente">
-              <ChevronLeft size={16} />
+          <nav className="dashboard-pager" aria-label={`Pagination ${title}`}>
+            <button type="button" onClick={() => setPage((current) => Math.max(0, current - 1))} disabled={page === 0} aria-label="Page précédente" title="Page précédente">
+              <ChevronLeft size={20} strokeWidth={2.5} aria-hidden="true" />
             </button>
-            <span>{page + 1} / {pageCount}</span>
-            <button type="button" onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))} disabled={page >= pageCount - 1} aria-label="Page suivante">
-              <ChevronRight size={16} />
+            <span role="status" aria-live="polite" aria-atomic="true" aria-label={`Page ${page + 1} sur ${pageCount}`}>{page + 1} / {pageCount}</span>
+            <button type="button" onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))} disabled={page >= pageCount - 1} aria-label="Page suivante" title="Page suivante">
+              <ChevronRight size={20} strokeWidth={2.5} aria-hidden="true" />
             </button>
-          </div>
+          </nav>
         )}
       </div>
       <div className="dashboard-action-watch-list">

@@ -94,7 +94,7 @@ textarea {
 
 .app-frame {
   display: grid;
-  grid-template-columns: 272px minmax(0, 1fr);
+  grid-template-columns: 224px minmax(0, 1fr);
   min-height: 100vh;
   transition: grid-template-columns 0.18s ease;
   width: 100%;
@@ -113,7 +113,7 @@ textarea {
   min-width: 0;
   min-height: 100vh;
   overflow: hidden;
-  padding: 16px 14px;
+  padding: 16px 10px;
   position: sticky;
   top: 0;
   width: 100%;
@@ -124,7 +124,7 @@ textarea {
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
   color: #ffffff;
   display: flex;
-  gap: 10px;
+  gap: 8px;
   margin-bottom: 14px;
   min-width: 0;
   padding: 4px 2px 14px;
@@ -140,11 +140,11 @@ textarea {
   height: 42px;
   object-fit: contain;
   padding: 6px;
-  width: 74px;
+  width: 60px;
 }
 
 .brand h1 {
-  font-size: 17px;
+  font-size: 15px;
   line-height: 1.15;
   margin: 0;
 }
@@ -214,7 +214,7 @@ textarea {
   display: flex;
   gap: 10px;
   min-height: 44px;
-  padding: 10px 12px;
+  padding: 10px;
   text-align: left;
   text-decoration: none;
   transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
@@ -224,6 +224,10 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.menu-item > svg {
+  flex-shrink: 0;
 }
 
 .menu-item:hover {
@@ -1515,18 +1519,176 @@ textarea {
   align-content: start;
 }
 
+.dashboard-action-watch > .section-title {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .dashboard-pager {
   align-items: center;
   display: flex;
-  gap: 8px;
+  flex-wrap: nowrap;
+  gap: 6px;
+  max-width: 100%;
+  margin-left: auto;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
 }
 
-.dashboard-pager span {
+.modification-timeline-summary {
+  background: var(--accent-soft);
+  border: 1px solid var(--line-strong);
+  border-left: 4px solid var(--accent);
+  border-radius: 10px;
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  overflow-wrap: anywhere;
+}
+
+.modification-timeline-summary p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.modification-timeline-picker {
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.modification-timeline-option {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-wrap: anywhere;
+}
+
+.modification-timeline-list {
+  display: grid;
+  gap: 10px;
+  max-height: min(420px, 50vh);
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 4px;
+  scrollbar-gutter: stable;
+}
+
+.modification-timeline-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.modification-timeline-option.selected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.modification-timeline-option > label {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  min-height: 24px;
+}
+
+.modification-timeline-option > .modification-timeline-comment {
+  align-items: stretch;
+  cursor: default;
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.modification-timeline-option input[type="checkbox"] {
+  accent-color: var(--accent);
+  flex: 0 0 18px;
+  height: 18px;
+  width: 18px;
+}
+
+.modification-timeline-option p {
+  margin: 8px 0 0 28px;
+  white-space: pre-wrap;
+}
+
+.dashboard-pager button {
+  align-items: center;
+  background: linear-gradient(145deg, var(--accent), var(--accent-dark));
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 4px;
+  justify-content: center;
+  min-height: 40px;
+  width: 40px;
+  padding: 8px;
+  white-space: nowrap;
+  box-shadow: 0 3px 8px rgba(64, 81, 12, 0.18);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.dashboard-pager button:hover:not(:disabled) {
+  background: var(--accent-dark);
+  transform: translateY(-2px);
+  box-shadow: 0 5px 12px rgba(64, 81, 12, 0.26);
+}
+
+.dashboard-pager button:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.dashboard-pager button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dashboard-pager button:disabled {
+  background: var(--surface-soft);
   color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.6;
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+.dashboard-pager svg {
+  flex-shrink: 0;
+}
+
+.dashboard-pager > span {
+  color: var(--accent-dark);
   font-size: 12px;
   font-weight: 850;
-  min-width: 44px;
+  min-width: 56px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-pager button {
+    transition: none;
+  }
+
+  .dashboard-pager button:hover:not(:disabled),
+  .dashboard-pager button:active:not(:disabled) {
+    transform: none;
+  }
 }
 
 .dashboard-modification-progress-list {
@@ -5371,6 +5533,38 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   overflow: hidden;
 }
 
+.modification-timelines-grid {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.modification-timelines-grid .modification-timeline-summary {
+  align-content: start;
+  margin-top: 0;
+  min-width: 0;
+}
+
+.details-header .modification-timeline-summary p {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+@media (max-width: 1100px) {
+  .modification-timelines-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .modification-timelines-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .meta-grid {
   display: grid;
   gap: 6px;
@@ -5475,6 +5669,7 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   border-radius: 10px;
   box-shadow: 0 28px 70px rgba(15, 23, 42, .25);
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 14px;
   max-height: min(82vh, 720px);
   overflow: hidden;
@@ -5483,11 +5678,22 @@ body:has(.dialog-backdrop) .modifications-toolbar {
 }
 
 .reference-dialog-list {
+  align-content: start;
   display: grid;
   gap: 8px;
   margin: 0;
+  max-height: min(252px, 50vh);
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: 0 4px 0 32px;
+  scrollbar-gutter: stable;
+}
+
+.reference-dialog-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 .reference-dialog-list li {
@@ -5497,6 +5703,8 @@ body:has(.dialog-backdrop) .modifications-toolbar {
   color: var(--ink);
   font-size: 14px;
   font-weight: 760;
+  line-height: 22px;
+  min-height: 44px;
   overflow-wrap: anywhere;
   padding: 10px 12px;
 }

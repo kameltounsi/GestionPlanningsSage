@@ -55,6 +55,14 @@ public class EcrRequest {
     private String modificationReason;
     @Column(length = 5000)
     private String modificationDetail;
+    @javax.persistence.ElementCollection(fetch = javax.persistence.FetchType.EAGER)
+    @javax.persistence.CollectionTable(name = "ecr_request_timelines", joinColumns = @javax.persistence.JoinColumn(name = "request_id"))
+    @javax.persistence.OrderColumn(name = "timeline_order")
+    private java.util.List<TimelineSelection> timelines = new java.util.ArrayList<>();
+    private String timelineName;
+    @Column(length = 5000)
+    private String timelineComment;
+
     private String beforePhoto;
     private String beforePhotoContentType;
     private Long beforePhotoFileSize;
@@ -709,5 +717,22 @@ public class EcrRequest {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+    public String getTimelineName() { return timelineName; }
+    public void setTimelineName(String timelineName) { this.timelineName = timelineName; }
+    public String getTimelineComment() { return timelineComment; }
+    public void setTimelineComment(String timelineComment) { this.timelineComment = timelineComment; }
+    public java.util.List<TimelineSelection> getTimelines() {
+        if (timelines.isEmpty() && timelineName != null && !timelineName.trim().isEmpty()) {
+            return java.util.Collections.singletonList(new TimelineSelection(timelineName, timelineComment));
+        }
+        return timelines;
+    }
+    public void setTimelines(java.util.List<TimelineSelection> values) {
+        if (values == null) return;
+        timelines.clear();
+        timelines.addAll(values);
+        timelineName = null;
+        timelineComment = null;
     }
 }

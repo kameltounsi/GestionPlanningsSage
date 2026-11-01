@@ -210,6 +210,9 @@ public class EcrRequestController {
                     }
                     request.setModificationReason(updatedRequest.getModificationReason());
                     request.setModificationDetail(updatedRequest.getModificationDetail());
+                    request.setTimelineName(updatedRequest.getTimelineName());
+                    request.setTimelineComment(updatedRequest.getTimelineComment());
+                    request.setTimelines(new java.util.ArrayList<>(updatedRequest.getTimelines()));
                     request.setMixability(updatedRequest.getMixability());
                     request.setDossierReview(updatedRequest.getDossierReview());
                     request.setTechnicalFile(updatedRequest.getTechnicalFile());

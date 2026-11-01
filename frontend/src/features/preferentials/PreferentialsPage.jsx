@@ -1,4 +1,6 @@
 import { ExcelExportButton } from "../../components/common/ExcelExportButton";
+import Swal from "sweetalert2";
+import { getTimelineReferences, createTimelineReference, updateTimelineReference, deleteTimelineReference } from "../../api";
 import { referenceSheet, projectsSheet, finishedProductsSheet } from "../../utils/businessExports";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, Pencil, Plus, Save, Search, Trash2, Upload, X } from "lucide-react";
@@ -393,6 +395,62 @@ export function PreferentialsPage({
   setRoleForm
 }) {
   const [activePreferential, setActivePreferential] = useState("projects");
+  const [timelines, setTimelines] = useState([]);
+  const [timelineLoading, setTimelineLoading] = useState(true);
+  const [timelineError, setTimelineError] = useState("");
+  const [timelineSaving, setTimelineSaving] = useState(false);
+  const [timelineForm, setTimelineForm] = useState({ name: "" });
+  const [editingTimeline, setEditingTimeline] = useState(null);
+  useEffect(() => {
+    let active = true;
+    getTimelineReferences()
+      .then((items) => { if (active) setTimelines(items); })
+      .catch(() => { if (active) setTimelineError("Chargement des timelines impossible. Rechargez la page pour réessayer."); })
+      .finally(() => { if (active) setTimelineLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  function cancelTimelineEdit() {
+    setEditingTimeline(null);
+    setTimelineForm({ name: "" });
+  }
+
+  async function saveTimeline(event) {
+    event.preventDefault();
+    const name = timelineForm.name.trim();
+    if (!name || timelineSaving) throw new Error("Nom requis.");
+    setTimelineSaving(true);
+    setTimelineError("");
+    try {
+      const saved = editingTimeline
+        ? await updateTimelineReference(editingTimeline, { name })
+        : await createTimelineReference({ name });
+      setTimelines((items) => [...items.filter((item) => item.id !== saved.id), saved]
+        .sort((a, b) => a.name.localeCompare(b.name, "fr")));
+      cancelTimelineEdit();
+    } catch (error) {
+      await Swal.fire({ icon: "error", title: "Enregistrement impossible", text: error.message });
+      throw error;
+    } finally {
+      setTimelineSaving(false);
+    }
+  }
+
+  async function removeTimeline(id) {
+    if (timelineSaving) return;
+    const result = await Swal.fire({ icon: "warning", title: "Supprimer cette timeline ?", text: "Cette suppression est définitive.", showCancelButton: true, confirmButtonText: "Supprimer", cancelButtonText: "Annuler" });
+    if (!result.isConfirmed) return;
+    setTimelineSaving(true);
+    try {
+      await deleteTimelineReference(id);
+      setTimelines((items) => items.filter((item) => item.id !== id));
+      if (editingTimeline === id) cancelTimelineEdit();
+    } catch (error) {
+      await Swal.fire({ icon: "error", title: "Suppression impossible", text: error.message });
+    } finally {
+      setTimelineSaving(false);
+    }
+  }
   const canAdmin = hasApplicationRole(currentUser, "ADMIN", "Admin") || normalizeRoleToken(currentUser?.username) === "fchelbi";
   const managedProjectNames = new Set(projects
     .filter((project) => canAdmin || isProjectLeadForProject(currentUser, project))
@@ -406,7 +464,10 @@ export function PreferentialsPage({
       { key: "products", label: "Produits", count: products.length }
     ] : []),
     { key: "finished-products", label: "Produits finis", count: visibleFinishedProducts.length },
-    ...(canAdmin ? [{ key: "roles", label: "Roles d'action", count: roles.length }] : [])
+    ...(canAdmin ? [
+      { key: "roles", label: "Roles d'action", count: roles.length },
+      { key: "timelines", label: "Timeline", count: timelines.length }
+    ] : [])
   ];
 
   useEffect(() => {
@@ -417,7 +478,7 @@ export function PreferentialsPage({
 
   return (
     <section className="page-content">
-      <PageHeader eyebrow="Référentiel" title="Préférentiels" subtitle="Gérez les projets, clients, produits et rôles d'action utilisés dans les modifications." />
+      <PageHeader eyebrow="Référentiel" title="Préférentiels" subtitle="Gérez les projets, clients, produits, rôles d'action et timelines." />
       <div className="preferentials-layout">
         <aside className="panel preferential-entity-list" aria-label="Entites du referentiel">
           {preferentialEntities.map((entity) => (
@@ -433,6 +494,28 @@ export function PreferentialsPage({
           ))}
         </aside>
         <div className="preferential-entity-content">
+          {activePreferential === "timelines" && canAdmin && (
+            <>
+              {timelineError && <p role="alert">{timelineError}</p>}
+              {timelineLoading ? <p role="status">Chargement des timelines…</p> : (
+                <PreferentialPanel
+                  count={timelines.length}
+                  editing={editingTimeline}
+                  emptyText="Ajoutez les entrées de votre référentiel Timeline."
+                  emptyTitle="Aucune timeline"
+                  form={timelineForm}
+                  saving={timelineSaving || Boolean(timelineError)}
+                  title="Timeline"
+                  references={timelines}
+                  setForm={setTimelineForm}
+                  onCancelEdit={cancelTimelineEdit}
+                  onDelete={removeTimeline}
+                  onEdit={(item) => { setEditingTimeline(item.id); setTimelineForm({ name: item.name }); }}
+                  onSubmit={saveTimeline}
+                />
+              )}
+            </>
+          )}
           {activePreferential === "projects" && (
       <ProjectPreferentialPanel
         editingProject={editingProject}

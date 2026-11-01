@@ -1,3 +1,4 @@
+import { modificationTimelines } from "../../utils/timelines";
 import { ActionDatePicker } from "./ActionDatePicker";
 import React, { useEffect, useMemo, useState } from "react";
 import PropTypes from "prop-types";
@@ -37,6 +38,7 @@ import {
   ecrRequestFileDownloadUrl,
   getActions,
   getEcrRequestProgress,
+  getTimelineReferences,
   uploadActionEvidence,
   uploadActionPlanningRuleProofDocument,
   uploadActionProofDocument
@@ -266,6 +268,22 @@ function EditModificationDialog({ clientOptions, currentUser, ecrForm, existingR
 
 function NewModificationPage({ clientOptions, currentUser = null, ecrForm, existingRequest = null, finishedProductReferences = [], mode = "create", pilots, productOptions, projects, saving, submitIcon: SubmitIcon = Plus, submitLabel = "Créer et ouvrir le suivi", users, onCancel, onSubmit, updateEcrForm }) {
   const [annualCalendarOpen, setAnnualCalendarOpen] = useState(false);
+  const [timelines, setTimelines] = useState([]);
+  const [timelineLoading, setTimelineLoading] = useState(true);
+  const [timelineError, setTimelineError] = useState("");
+  const [timelineSearch, setTimelineSearch] = useState("");
+  const selectedTimelines = modificationTimelines(ecrForm);
+  const timelineOptions = [...timelines, ...selectedTimelines.filter((selected) => !timelines.some((item) => item.name === selected.name))];
+  const normalizeTimelineSearch = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim();
+  const filteredTimelines = timelineOptions.filter((item) => normalizeTimelineSearch(item.name).includes(normalizeTimelineSearch(timelineSearch)));
+  useEffect(() => {
+    let active = true;
+    getTimelineReferences()
+      .then((items) => { if (active) setTimelines(items); })
+      .catch(() => { if (active) setTimelineError("Chargement des timelines impossible. Votre sélection actuelle est conservée."); })
+      .finally(() => { if (active) setTimelineLoading(false); });
+    return () => { active = false; };
+  }, []);
   const availableStages = getStages(ecrForm.newVersion);
   const selectableProjects = mode === "edit" || isAdminUser(currentUser)
     ? projects
@@ -519,6 +537,48 @@ function NewModificationPage({ clientOptions, currentUser = null, ecrForm, exist
           </label>
         </fieldset>
         )}
+        <fieldset className="modification-timeline-picker" disabled={saving || timelineLoading || Boolean(timelineError)}>
+          <legend>Timelines</legend>
+          <p className="form-hint">Choisissez une ou plusieurs timelines, puis saisissez un commentaire propre à cette modification pour chacune.</p>
+          <label>
+            Rechercher une timeline
+            <div className="input-with-icon">
+              <Search size={16} aria-hidden="true" />
+              <input type="search" value={timelineSearch} onChange={(event) => setTimelineSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} placeholder="Rechercher par nom…" />
+            </div>
+          </label>
+          <p className="form-hint" role="status">{filteredTimelines.length} résultat{filteredTimelines.length > 1 ? "s" : ""} · {selectedTimelines.length} sélectionnée{selectedTimelines.length > 1 ? "s" : ""}</p>
+          {timelineLoading && <p role="status">Chargement des timelines…</p>}
+          {timelineError && <p role="alert">{timelineError}</p>}
+          {!timelineLoading && !timelineError && timelines.length === 0 && <p>Aucune timeline disponible dans Préférentiels.</p>}
+          {!timelineLoading && !timelineError && timelineOptions.length > 0 && filteredTimelines.length === 0 && <p>Aucune timeline ne correspond à votre recherche.</p>}
+          <div className="modification-timeline-list" role="region" aria-label="Liste des timelines" tabIndex={0}>
+          {filteredTimelines.map((item) => {
+            const selectedItems = modificationTimelines(ecrForm);
+            const selected = selectedItems.find((entry) => entry.name === item.name);
+            return (
+              <div className={`modification-timeline-option${selected ? " selected" : ""}`} key={item.name}>
+                <label>
+                  <input type="checkbox" checked={Boolean(selected)} onChange={(event) => {
+                    updateEcrForm("timelines", event.target.checked
+                      ? [...selectedItems, { name: item.name, comment: "" }]
+                      : selectedItems.filter((entry) => entry.name !== item.name));
+                  }} />
+                  <strong>{item.name}</strong>
+                </label>
+                {selected && (
+                  <label className="modification-timeline-comment">
+                    Commentaire pour cette modification
+                    <textarea maxLength={5000} value={selected.comment || ""} placeholder="Décrivez cette timeline pour la modification concernée…" onChange={(event) => {
+                      updateEcrForm("timelines", selectedItems.map((entry) => entry.name === item.name ? { ...entry, comment: event.target.value } : entry));
+                    }} />
+                  </label>
+                )}
+              </div>
+            );
+          })}
+          </div>
+        </fieldset>
         <label>
           <span>Raison de modification</span>
           <textarea value={ecrForm.modificationReason} onChange={(event) => updateEcrForm("modificationReason", event.target.value)} />
@@ -833,6 +893,9 @@ function requestToEcrForm(request) {
     modificationProject: request.modificationProject || "",
     modificationReason: request.modificationReason || "",
     modificationDetail: request.modificationDetail || "",
+    timelines: modificationTimelines(request),
+    timelineName: request.timelineName || "",
+    timelineComment: request.timelineComment || "",
     mixability: request.mixability || "",
     dossierReview: request.dossierReview || "",
     receptionDate: request.receptionDate || "",
@@ -1753,6 +1816,7 @@ function ModificationsPage(props) {
                   <h2>{requestDisplayName(selectedRequest)}</h2>
                   <p>{selectedRequest.modificationReason || "Aucune description renseignée pour le moment."}</p>
                   {selectedRequest.modificationDetail && <p>{selectedRequest.modificationDetail}</p>}
+
                 </div>
                 <div className="meta-grid">
                   <div><ClipboardList size={16} /><span>Projet</span><strong>{selectedRequest.modificationProject || "À définir"}</strong></div>
@@ -1816,6 +1880,17 @@ function ModificationsPage(props) {
                   <FileText size={24} />
                   <span>Revue dossier</span>
                 </button>
+                {modificationTimelines(selectedRequest).length > 0 && (
+                  <section className="modification-timelines-grid" aria-label="Timelines de la modification">
+                    {modificationTimelines(selectedRequest).map((timeline) => (
+                      <div className="modification-timeline-summary" key={timeline.name}>
+                        <span className="eyebrow">Timeline</span>
+                        <strong>{timeline.name}</strong>
+                        <p>{timeline.comment || "Aucun commentaire associé."}</p>
+                      </div>
+                    ))}
+                  </section>
+                )}
                 {canExportGantt && (
                   <>
                     <button className="dossier-review-card" type="button" onClick={exportModificationDossierExcel} title="Extraire le dossier de modification Excel">
@@ -2161,7 +2236,7 @@ function ModificationsPage(props) {
                 <X size={18} />
               </button>
             </header>
-            <ol className="reference-dialog-list">
+            <ol className="reference-dialog-list" tabIndex={0} aria-label={`Liste complète : ${referenceDialog.title}`}>
               {referenceDialog.items.map((item) => <li key={item}>{item}</li>)}
             </ol>
           </section>

@@ -4,6 +4,10 @@ import javax.validation.constraints.NotBlank;
 
 public class ReferenceDto {
     private Long id;
+    private String comment;
+
+    public String getComment() { return comment; }
+    public void setComment(String comment) { this.comment = comment; }
 
     @NotBlank
     private String name;
